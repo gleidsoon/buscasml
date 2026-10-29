@@ -19,7 +19,6 @@ import {
   Loader2,
   LogOut,
   Search,
-  Sparkles,
   Star,
   Store,
   Truck,
@@ -139,7 +138,7 @@ type AgeFilter = 'todos' | '30' | '60' | '90' | '180';
 type LogisticFilter = 'todos' | 'full' | 'frete';
 type SortKey = 'relevancia' | 'menor_preco' | 'maior_preco' | 'mais_vendidos' | 'mais_recentes';
 type ViewMode = 'grid' | 'table';
-type ModuleTab = 'busca' | 'calculadora';
+type TabKey = 'busca' | 'calculadora';
 
 type FilterState = { age: AgeFilter; logistic: LogisticFilter; sort: SortKey; view: ViewMode };
 
@@ -173,6 +172,10 @@ const FIXED_FEE_VALUE = 6.25;
 /** Tipos que pagam a taxa fixa abaixo de R$ 79. Conforme a especificação, somente Premium. */
 const FIXED_FEE_TYPES: ListingKind[] = ['premium'];
 const COMMISSION_RATE: Record<ListingKind, number> = { classico: 0.12, premium: 0.17 };
+const LISTING_LABEL: Record<ListingKind, string> = {
+  classico: 'Clássico (12%)',
+  premium: 'Premium (17%)',
+};
 
 const AGE_OPTIONS: { value: AgeFilter; label: string }[] = [
   { value: 'todos', label: 'Todos' },
@@ -222,8 +225,6 @@ const INPUT_CLASS =
   'w-full rounded-xl border border-white/10 bg-[#070b14] px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-[#3b82f6]';
 const BTN_PRIMARY =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60';
-const BTN_GREEN =
-  'inline-flex items-center justify-center gap-2 rounded-xl bg-[#10b981] px-5 py-3 text-sm font-semibold text-[#070b14] transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60';
 const BTN_SM_BLUE =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-[#3b82f6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50';
 const BTN_SM_YELLOW =
@@ -237,6 +238,7 @@ const PILL_TONES = {
   yellow: 'border-[#facc15]/30 bg-[#facc15]/10 text-[#facc15]',
   blue: 'border-[#3b82f6]/30 bg-[#3b82f6]/10 text-blue-300',
 };
+type PillTone = keyof typeof PILL_TONES;
 
 /* =============================================================================
  * FORMATAÇÃO E ENTRADA NUMÉRICA
@@ -245,11 +247,11 @@ const PILL_TONES = {
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const integer = new Intl.NumberFormat('pt-BR');
 
-function formatBRL(value: number | null | undefined, fallback = HIDDEN): string {
+function formatBRL(value: number | null | undefined, fallback: string = HIDDEN): string {
   return typeof value === 'number' && Number.isFinite(value) ? brl.format(value) : fallback;
 }
 
-function formatInt(value: number | null | undefined, fallback = HIDDEN): string {
+function formatInt(value: number | null | undefined, fallback: string = HIDDEN): string {
   return typeof value === 'number' && Number.isFinite(value) ? integer.format(value) : fallback;
 }
 
@@ -275,19 +277,22 @@ function formatRating(value: number | null): string {
   return value === null ? HIDDEN : value.toFixed(1).replace('.', ',');
 }
 
-function formatPercent(value: number | null, fallback = HIDDEN): string {
-  return value === null || !Number.isFinite(value) ? fallback : `${value.toFixed(1).replace('.', ',')}%`;
+function formatPercent(value: number | null): string {
+  return value === null || !Number.isFinite(value) ? HIDDEN : `${value.toFixed(1).replace('.', ',')}%`;
 }
 
 function formatInputNumber(value: number): string {
   return value.toFixed(2).replace('.', ',');
 }
 
-/** Aceita "1.599,90", "1599,9" e "1599.90". Campo vazio vira zero. */
+/** Aceita "1.599,90", "1599,9", "1.599" e "1599.90". Campo vazio vira zero. */
 function parseInputNumber(raw: string): number {
   const t = raw.trim();
   if (t === '') return 0;
-  const normalized = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t;
+  let normalized: string;
+  if (t.includes(',')) normalized = t.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) normalized = t.replace(/\./g, '');
+  else normalized = t;
   const n = Number(normalized);
   return Number.isFinite(n) ? n : 0;
 }
@@ -372,7 +377,7 @@ function computeMargin(input: MarginInput): MarginResult {
 }
 
 /* =============================================================================
- * FILTROS E ORDENAÇÃO DA LISTAGEM
+ * FILTROS, ORDENAÇÃO E RECEITA ESTIMADA
  * ============================================================================= */
 
 /** Ordena com valores ausentes sempre no fim, em qualquer direção. */
@@ -405,6 +410,19 @@ function applyFilters(
   return sorted;
 }
 
+type Revenue = { dailyUnits: number | null; est30: number | null; gross: number | null };
+
+/** Receita derivada apenas de dados reais: média de vendas desde a criação e preço atual. */
+function revenueOf(d: Dossier): Revenue {
+  const sold = d.soldValue;
+  const price = d.price;
+  const days = d.daysOnAir;
+  const dailyUnits = sold !== null && days !== null && days > 0 ? sold / days : null;
+  const est30 = dailyUnits !== null && price !== null ? dailyUnits * 30 * price : null;
+  const gross = sold !== null && price !== null ? sold * price : null;
+  return { dailyUnits, est30, gross };
+}
+
 /* =============================================================================
  * SESSÃO OAUTH (localStorage)
  * ============================================================================= */
@@ -426,7 +444,7 @@ function writeSession(session: StoredSession): void {
   try {
     window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
-    // Armazenamento bloqueado ou cheio: a sessão continua válida só nesta aba.
+    // Armazenamento bloqueado ou cheio: a sessão vale só nesta aba.
   }
 }
 
@@ -455,22 +473,13 @@ function buildAuthorizeUrl(redirectUri: string): string {
  * CLIENTE DA API (/api/ml)
  * ============================================================================= */
 
-class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
-}
-
 async function readEnvelope<T>(res: Response): Promise<T> {
   const body: unknown = await res.json().catch(() => null);
   const env = body as { ok?: unknown; error?: unknown } | null;
   if (!res.ok || !env || env.ok !== true) {
     const message =
       typeof env?.error === 'string' ? env.error : `Falha na requisição (HTTP ${res.status}).`;
-    throw new ApiError(res.status || 500, message);
+    throw new Error(message);
   }
   return body as T;
 }
@@ -524,6 +533,10 @@ function requestRefresh(refreshToken: string): Promise<OAuthTokens> {
   return requestTokenAction({ action: 'refresh', refreshToken });
 }
 
+/* =============================================================================
+ * ÁREA DE TRANSFERÊNCIA (colagem de print com Ctrl+V)
+ * ============================================================================= */
+
 function imageFromDataTransfer(data: DataTransfer | null | undefined): File | null {
   if (!data) return null;
   for (const item of Array.from(data.items)) {
@@ -536,7 +549,7 @@ function imageFromDataTransfer(data: DataTransfer | null | undefined): File | nu
 }
 
 /* =============================================================================
- * COMPONENTES DE INTERFACE: primitivos
+ * PRIMITIVOS DE INTERFACE
  * ============================================================================= */
 
 function Banner({
@@ -584,6 +597,14 @@ function Modal({
   children: ReactNode;
   wide?: boolean;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -614,7 +635,7 @@ function Modal({
   );
 }
 
-function Pill({ children, tone = 'slate' }: { children: ReactNode; tone?: keyof typeof PILL_TONES }) {
+function Pill({ children, tone = 'slate' }: { children: ReactNode; tone?: PillTone }) {
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${PILL_TONES[tone]}`}
@@ -723,9 +744,7 @@ function ChipGroup<T extends string>({
           onClick={() => onChange(o.value)}
           aria-pressed={o.value === value}
           className={`rounded-full px-3 py-1 text-xs transition ${
-            o.value === value
-              ? 'bg-[#3b82f6] text-white'
-              : 'bg-[#070b14] text-slate-300 hover:bg-white/10'
+            o.value === value ? 'bg-[#3b82f6] text-white' : 'bg-[#070b14] text-slate-300 hover:bg-white/10'
           }`}
         >
           {o.label}
@@ -778,11 +797,7 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
   return (
     <div className="rounded-2xl border border-white/5 bg-[#111827] p-3">
       <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-white">
-        <SafeImage
-          src={images[current]}
-          alt={title}
-          className="max-h-full max-w-full object-contain p-6"
-        />
+        <SafeImage src={images[current]} alt={title} className="max-h-full max-w-full object-contain p-6" />
         {total > 1 && (
           <>
             <button
@@ -836,7 +851,7 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
 
 function LoadingBlock({ label }: { label: string }) {
   return (
-    <div className="flex items-center justify-center gap-3 rounded-2xl border border-white/5 bg-[#111827] p-10 text-sm text-slate-300">
+    <div className="flex items-center justify-center gap-3 rounded-2xl border border-white/5 bg-[#111827] p-6 text-sm text-slate-300">
       <Loader2 size={20} className="animate-spin text-[#3b82f6]" />
       {label}
     </div>
@@ -884,6 +899,24 @@ function Onboarding() {
   );
 }
 
+function ExamplesRow({ onPick }: { onPick: (text: string) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-slate-500">Testar:</span>
+      {EXAMPLES.map((ex) => (
+        <button
+          key={ex}
+          type="button"
+          onClick={() => onPick(ex)}
+          className="rounded-full border border-white/10 bg-[#111827] px-3 py-1 text-xs text-slate-300 transition hover:bg-white/10"
+        >
+          {ex}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* =============================================================================
  * LISTAGEM DE PRODUTOS (cards, tabela e filtros)
  * ============================================================================= */
@@ -894,8 +927,8 @@ function ProductCard({
   onSimulate,
 }: {
   p: ProductSummary;
-  onOpen: () => void;
-  onSimulate: () => void;
+  onOpen: (p: ProductSummary) => void;
+  onSimulate: (p: ProductSummary) => void;
 }) {
   const code = p.itemId ?? p.productId;
   return (
@@ -909,9 +942,7 @@ function ProductCard({
           {p.fulfillment && <Pill tone="green">Full</Pill>}
           {p.freeShipping && <Pill tone="yellow">Frete grátis</Pill>}
         </div>
-        <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-snug text-slate-100">
-          {p.title}
-        </h3>
+        <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-snug text-slate-100">{p.title}</h3>
         <p className="text-2xl font-bold text-[#facc15]">{formatBRL(p.price)}</p>
         <div className="grid grid-cols-3 gap-2 text-xs">
           <Mini label="Criado em" value={formatDate(p.createdAt)} sub={formatDaysOnAir(p.daysOnAir)} />
@@ -923,10 +954,10 @@ function ProductCard({
           />
         </div>
         <div className="mt-auto grid grid-cols-2 gap-2 pt-1">
-          <button type="button" onClick={onOpen} disabled={!code} className={BTN_SM_BLUE}>
+          <button type="button" onClick={() => onOpen(p)} disabled={!code} className={BTN_SM_BLUE}>
             <Search size={14} /> Abrir Raio-X
           </button>
-          <button type="button" onClick={onSimulate} className={BTN_SM_YELLOW}>
+          <button type="button" onClick={() => onSimulate(p)} className={BTN_SM_YELLOW}>
             <Calculator size={14} /> Simular Margem
           </button>
         </div>
@@ -968,11 +999,7 @@ function ProductTable({
                 <td className="px-4 py-3">
                   <div className="flex min-w-[260px] items-center gap-3">
                     <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1">
-                      <SafeImage
-                        src={p.image}
-                        alt={p.title}
-                        className="max-h-full max-w-full object-contain"
-                      />
+                      <SafeImage src={p.image} alt={p.title} className="max-h-full max-w-full object-contain" />
                     </div>
                     <div className="min-w-0">
                       <p className="line-clamp-2 font-medium text-slate-100">{p.title}</p>
@@ -987,19 +1014,12 @@ function ProductTable({
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-slate-200">{p.seller?.nickname ?? HIDDEN}</p>
-                  <p className="text-xs text-slate-400">
-                    {formatAccountAge(p.seller?.accountYears ?? null)}
-                  </p>
+                  <p className="text-xs text-slate-400">{formatAccountAge(p.seller?.accountYears ?? null)}</p>
                 </td>
                 <td className="px-4 py-3 text-slate-200">{formatInt(p.soldQuantity)}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onOpen(p)}
-                      disabled={!code}
-                      className={BTN_SM_BLUE}
-                    >
+                    <button type="button" onClick={() => onOpen(p)} disabled={!code} className={BTN_SM_BLUE}>
                       <Search size={14} /> Raio-X
                     </button>
                     <button type="button" onClick={() => onSimulate(p)} className={BTN_SM_YELLOW}>
@@ -1041,7 +1061,7 @@ function KeywordView({
           <p className="text-xs uppercase tracking-wide text-slate-400">Resultados para</p>
           <h2 className="text-lg font-semibold text-slate-100">&ldquo;{result.query}&rdquo;</h2>
           <p className="text-sm text-slate-400">
-            Mostrando {formatInt(visible.length, '0')} de {formatInt(result.products.length, '0')} anúncios
+            Mostrando {visible.length} de {result.products.length} anúncios
           </p>
         </div>
         <div className="flex rounded-xl bg-[#111827] p-1">
@@ -1101,8 +1121,8 @@ function KeywordView({
             <ProductCard
               key={`${p.itemId ?? p.productId ?? 'sem-codigo'}-${i}`}
               p={p}
-              onOpen={() => onOpen(p)}
-              onSimulate={() => onSimulate(p)}
+              onOpen={onOpen}
+              onSimulate={onSimulate}
             />
           ))}
         </div>
@@ -1112,3 +1132,330 @@ function KeywordView({
     </section>
   );
 }
+
+/* =============================================================================
+ * RAIO-X: dossiê, vendedor e concorrentes
+ * ============================================================================= */
+
+function SellerPanel({ seller }: { seller: SellerInfo | null }) {
+  if (!seller) return <EmptyBox>Vendedor oculto no anúncio.</EmptyBox>;
+  const location =
+    seller.city && seller.state
+      ? `${seller.city} - ${seller.state}`
+      : (seller.city ?? seller.state ?? HIDDEN);
+  return (
+    <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+      <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+        <Store size={16} className="text-[#10b981]" /> Vendedor
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Stat label="Loja" value={seller.nickname ?? HIDDEN} />
+        <Stat
+          label="Conta criada em"
+          value={formatDate(seller.registrationDate)}
+          hint={formatAccountAge(seller.accountYears)}
+        />
+        <Stat label="Localização" value={location} />
+        <Stat label="Medalha" value={seller.medal} valueClass="text-[#facc15]" />
+        <Stat label="Vendas concluídas" value={formatInt(seller.completedSales)} />
+      </div>
+    </div>
+  );
+}
+
+function CompetitorList({ rows }: { rows: CompetitorRow[] }) {
+  if (rows.length === 0) {
+    return <EmptyBox>Nenhuma oferta concorrente retornada para este catálogo.</EmptyBox>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-white/5 bg-[#111827]">
+      <table className="min-w-full text-left text-sm">
+        <thead className="bg-[#0b1220] text-xs uppercase tracking-wide text-slate-400">
+          <tr>
+            <th className="px-4 py-3 font-medium">Anúncio</th>
+            <th className="px-4 py-3 font-medium">Preço</th>
+            <th className="px-4 py-3 font-medium">Vendedor</th>
+            <th className="px-4 py-3 font-medium">Logística</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.itemId} className="border-t border-white/5">
+              <td className="px-4 py-3">
+                <p className="text-slate-200">{r.itemId}</p>
+                {r.listingType && <p className="text-xs text-slate-500">{r.listingType}</p>}
+              </td>
+              <td className="px-4 py-3 font-semibold text-[#facc15]">{formatBRL(r.price)}</td>
+              <td className="px-4 py-3">
+                <p className="text-slate-200">{r.sellerNickname ?? HIDDEN}</p>
+                <p className="text-xs text-slate-500">{r.sellerMedal ?? HIDDEN}</p>
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {r.fulfillment && <Pill tone="green">Full</Pill>}
+                  {r.freeShipping && <Pill tone="yellow">Frete grátis</Pill>}
+                  {!r.fulfillment && !r.freeShipping && <span className="text-xs text-slate-500">Padrão</span>}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DossierView({
+  d,
+  canGoBack,
+  onBack,
+  onSimulate,
+}: {
+  d: Dossier;
+  canGoBack: boolean;
+  onBack: () => void;
+  onSimulate: () => void;
+}) {
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const rev = revenueOf(d);
+  const estimated = d.soldSource === MARKER_SOURCE;
+  const velocity =
+    rev.dailyUnits !== null
+      ? `${rev.dailyUnits.toFixed(2).replace('.', ',')} vendas/dia (média desde a criação)`
+      : d.soldSource;
+  const ratingCountText = d.ratingCount === null ? 'Opiniões ocultas' : `${formatInt(d.ratingCount)} opiniões`;
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {canGoBack ? (
+          <button type="button" onClick={onBack} className={BTN_GHOST}>
+            <ChevronLeft size={14} /> Voltar à lista
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setJsonOpen(true)} className={BTN_GHOST}>
+            <Code size={14} /> Ver JSON Puro da API
+          </button>
+          <button type="button" onClick={onSimulate} className={BTN_SM_YELLOW}>
+            <Calculator size={14} /> Simular Margem
+          </button>
+          {d.permalink && (
+            <a href={d.permalink} target="_blank" rel="noreferrer" className={BTN_GHOST}>
+              <ExternalLink size={14} /> Abrir anúncio
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Pill>Fonte: {d.origin}</Pill>
+        {d.itemId && <Pill tone="blue">Anúncio: {d.itemId}</Pill>}
+        {d.productId && <Pill tone="blue">Catálogo: {d.productId}</Pill>}
+        {d.listingType && <Pill tone="yellow">{d.listingType}</Pill>}
+        {d.fulfillment && <Pill tone="green">Full</Pill>}
+        {d.freeShipping && <Pill tone="green">Frete grátis</Pill>}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="lg:col-span-2">
+          <Gallery key={d.itemId ?? d.productId ?? d.title} images={d.images} title={d.title} />
+        </div>
+
+        <div className="space-y-5 lg:col-span-3">
+          <div>
+            <h2 className="text-xl font-semibold leading-snug text-slate-100">{d.title}</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Marca: {d.brand ?? HIDDEN} · Modelo: {d.model ?? HIDDEN}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <p className="text-4xl font-bold text-[#facc15]">{formatBRL(d.price)}</p>
+              {d.originalPrice !== null && (
+                <p className="pb-1 text-sm text-slate-500 line-through">{formatBRL(d.originalPrice)}</p>
+              )}
+              {d.discountPct !== null && d.discountPct > 0 && <Pill tone="green">{d.discountPct}% OFF</Pill>}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <Star size={14} className="text-[#facc15]" />
+                {formatRating(d.ratingAverage)}
+              </span>
+              <span>{ratingCountText}</span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Stat
+              icon={<TrendingUp size={14} />}
+              label="Receita estimada 30d"
+              value={formatBRL(rev.est30)}
+              hint={
+                rev.est30 === null
+                  ? 'Requer vendas e data de criação visíveis'
+                  : estimated
+                    ? 'Piso mínimo: média diária desde a criação'
+                    : 'Média diária desde a criação × 30 dias'
+              }
+              valueClass="text-[#10b981]"
+            />
+            <Stat
+              icon={<TrendingUp size={14} />}
+              label="Faturamento bruto"
+              value={formatBRL(rev.gross)}
+              hint={estimated ? 'Vendas mínimas × preço atual' : 'Vendas totais × preço atual'}
+              valueClass="text-[#10b981]"
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              icon={<Calendar size={14} />}
+              label="Criação do anúncio"
+              value={formatDate(d.createdAt)}
+              hint={`${formatDaysOnAir(d.daysOnAir)} · ${d.createdSource}`}
+            />
+            <Stat
+              icon={<Camera size={14} />}
+              label="1ª foto (assinatura)"
+              value={d.firstPhotoDate ?? HIDDEN}
+              hint={d.firstPhotoSource}
+            />
+            <Stat icon={<TrendingUp size={14} />} label="Volume / velocidade" value={d.soldLabel} hint={velocity} />
+            <Stat
+              icon={<Truck size={14} />}
+              label="Logística"
+              value={d.fulfillment ? 'Full' : (d.logisticType ?? HIDDEN)}
+              hint={d.freeShipping ? 'Frete grátis' : 'Sem frete grátis'}
+            />
+          </div>
+
+          <SellerPanel seller={d.seller} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-200">Ofertas concorrentes</h3>
+        <CompetitorList rows={d.competitors} />
+      </div>
+
+      {d.notes.length > 0 && (
+        <ul className="space-y-1.5 rounded-2xl border border-white/5 bg-[#111827] p-4 text-xs leading-relaxed text-slate-400">
+          {d.notes.map((note, i) => (
+            <li key={i}>• {note}</li>
+          ))}
+        </ul>
+      )}
+
+      {jsonOpen && (
+        <Modal title="JSON puro da API" onClose={() => setJsonOpen(false)} wide>
+          <p className="mb-3 text-xs text-slate-400">
+            Resposta real usada para montar este Raio-X. Campos ocultos pelo Mercado Livre aparecem ausentes.
+          </p>
+          <pre className="max-h-[65vh] overflow-auto rounded-xl bg-[#070b14] p-4 text-xs leading-relaxed text-slate-300">
+            {JSON.stringify(d.raw, null, 2)}
+          </pre>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/* =============================================================================
+ * SIMULADOR DE MARGEM
+ * ============================================================================= */
+
+function CalculatorView({
+  calc,
+  onChange,
+  margin,
+}: {
+  calc: CalcForm;
+  onChange: (patch: Partial<CalcForm>) => void;
+  margin: MarginResult;
+}) {
+  const hasPrice = parseInputNumber(calc.salePrice) > 0;
+  const belowTarget = hasPrice && margin.netMarginPct < MARGIN_TARGET_PCT;
+  const isPremium = calc.listing === 'premium';
+
+  return (
+    <section className="grid gap-6 lg:grid-cols-5">
+      <div className="space-y-4 rounded-2xl border border-white/5 bg-[#111827] p-5 lg:col-span-3">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <Calculator size={18} className="text-[#facc15]" /> Simulador de margem
+        </h2>
+
+        <Field label="Produto (opcional)">
+          <input
+            className={INPUT_CLASS}
+            value={calc.title}
+            onChange={(e) => onChange({ title: e.target.value })}
+            placeholder="Ex.: Creatina Growth 250g"
+          />
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Preço de venda (R$)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.salePrice}
+              onChange={(e) => onChange({ salePrice: e.target.value })}
+              placeholder="0,00"
+            />
+          </Field>
+          <Field label="Custo no fornecedor (R$)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.supplierCost}
+              onChange={(e) => onChange({ supplierCost: e.target.value })}
+              placeholder="0,00"
+            />
+          </Field>
+          <Field label="Embalagem / custo extra (R$)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.packagingCost}
+              onChange={(e) => onChange({ packagingCost: e.target.value })}
+              placeholder="0,00"
+            />
+          </Field>
+          <Field label="Imposto da nota fiscal (%)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.taxPct}
+              onChange={(e) => onChange({ taxPct: e.target.value })}
+              placeholder="0"
+            />
+          </Field>
+          <Field label="Tipo de anúncio">
+            <select
+              className={INPUT_CLASS}
+              value={calc.listing}
+              onChange={(e) => onChange({ listing: e.target.value as ListingKind })}
+            >
+              <option value="classico">{LISTING_LABEL.classico}</option>
+              <option value="premium">{LISTING_LABEL.premium}</option>
+            </select>
+          </Field>
+          <div className="space-y-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={calc.freeShipping}
+                onChange={(e) => onChange({ freeShipping: e.target.checked })}
+                className="h-4 w-4 accent-[#3b82f6]"
+              />
+              Frete grátis pelo vendedor (acima de R$ 79)
+            </label>
+            {calc.freeShipping && (
+              <Field label="Custo do frete (R$)">
+                <input
+                  inputMode="decimal"
