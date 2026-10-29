@@ -24,38 +24,32 @@ import {
 const BRL = 'R\u0024';
 
 export default function BuscasMLOfficialPlatform() {
-  const [activeView, setActiveView] = useState<'explorador' | 'calculadora'>('explorador');
-  const [displayMode, setDisplayMode] = useState<'grid' | 'table'>('grid');
+  const [activeView, setActiveView]: any = useState('explorador');
+  const [displayMode, setDisplayMode]: any = useState('grid');
 
-  const [searchInput, setSearchInput] = useState('Coroa tiara strass noiva');
-  const [loading, setLoading] = useState(false);
-  const [apiInfo, setApiInfo] = useState<{
-    endpoint?: string;
-    query_used?: string;
-    client_id?: string;
-    message?: string;
-    error?: string;
-  }>({});
+  const [searchInput, setSearchInput]: any = useState('Coroa tiara strass noiva');
+  const [loading, setLoading]: any = useState(false);
+  const [apiInfo, setApiInfo]: any = useState({});
 
-  const [products, setProducts] = useState<any[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
-  const [selectedPhoto, setSelectedPhoto] = useState<string>('');
-  const [rawJsonModalProduct, setRawJsonModalProduct] = useState<any>(null);
+  const [products, setProducts]: any = useState([]);
+  const [selectedProduct, setSelectedProduct]: any = useState(null);
+  const [selectedPhoto, setSelectedPhoto]: any = useState('');
+  const [rawJsonModalProduct, setRawJsonModalProduct]: any = useState(null);
 
-  const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedPreview, setUploadedPreview]: any = useState(null);
+  const fileInputRef: any = useRef(null);
 
-  const [calcTitle, setCalcTitle] = useState('Produto Selecionado');
-  const [salePrice, setSalePrice] = useState<number>(89.9);
-  const [supplierCost, setSupplierCost] = useState<number>(35.0);
-  const [packagingCost, setPackagingCost] = useState<number>(1.5);
-  const [taxRate, setTaxRate] = useState<number>(6.0);
-  const [shippingCost, setShippingCost] = useState<number>(18.9);
-  const [adType, setAdType] = useState<'classico' | 'premium'>('premium');
+  const [calcTitle, setCalcTitle]: any = useState('Produto Selecionado');
+  const [salePrice, setSalePrice]: any = useState(89.9);
+  const [supplierCost, setSupplierCost]: any = useState(35.0);
+  const [packagingCost, setPackagingCost]: any = useState(1.5);
+  const [taxRate, setTaxRate]: any = useState(6.0);
+  const [shippingCost, setShippingCost]: any = useState(18.9);
+  const [adType, setAdType]: any = useState('premium');
 
-  const executeOfficialSearch = async (e?: React.FormEvent, customInput?: string) => {
-    if (e) e.preventDefault();
-    const q = (customInput ?? searchInput).trim();
+  const executeOfficialSearch = async (e?: any, customInput?: string) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const q = String(customInput ?? searchInput).trim();
     if (!q) return;
 
     setLoading(true);
@@ -80,24 +74,24 @@ export default function BuscasMLOfficialPlatform() {
         const list = Array.isArray(data.items) ? data.items : [];
         setProducts(list);
 
-        if (list.length > 0) {
+        if (list.length !== 0) {
           setSelectedProduct(list[0]);
-          setSelectedPhoto(list[0].thumbnail || list[0].pictures?.[0] || '');
+          setSelectedPhoto(list[0].thumbnail || (list[0].pictures && list[0].pictures[0]) || '');
         } else {
           setSelectedProduct(null);
         }
       }
     } catch (err: any) {
-      setApiInfo({ error: 'Falha de rede: ' + String(err?.message || 'Verifique sua conexao') });
+      setApiInfo({ error: 'Falha de rede: ' + String((err && err.message) || 'Verifique sua conexao') });
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePhotoUpload = async (file: File) => {
+  const handlePhotoUpload = async (file: any) => {
     const reader = new FileReader();
     reader.onload = async () => {
-      const base64 = reader.result as string;
+      const base64 = String(reader.result || '');
       setUploadedPreview(base64);
       setLoading(true);
       try {
@@ -121,13 +115,20 @@ export default function BuscasMLOfficialPlatform() {
     executeOfficialSearch(undefined, 'Coroa tiara strass noiva');
   }, []);
 
+  const numSale = Number(salePrice) || 0;
+  const numSupplier = Number(supplierCost) || 0;
+  const numPack = Number(packagingCost) || 0;
+  const numTax = Number(taxRate) || 0;
+  const numShip = Number(shippingCost) || 0;
+
   const mlRate = adType === 'classico' ? 12 : 17;
-  const fixedFee = salePrice > 0 && salePrice < 79 ? 6.25 : 0;
-  const effectiveShip = salePrice >= 79 ? shippingCost : 0;
-  const mlCommission = (salePrice * mlRate) / 100 + fixedFee;
-  const taxVal = (salePrice * taxRate) / 100;
-  const netProfit = salePrice - supplierCost - packagingCost - mlCommission - taxVal - effectiveShip;
-  const netMargin = salePrice > 0 ? (netProfit / salePrice) * 100 : 0;
+  const isUnder79 = numSale !== 0 && 79 > numSale;
+  const fixedFee = isUnder79 ? 6.25 : 0;
+  const effectiveShip = isUnder79 ? 0 : numShip;
+  const mlCommission = (numSale * mlRate) / 100 + fixedFee;
+  const taxVal = (numSale * numTax) / 100;
+  const netProfit = numSale - numSupplier - numPack - mlCommission - taxVal - effectiveShip;
+  const netMargin = numSale !== 0 ? (netProfit / numSale) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100">
@@ -185,7 +186,7 @@ export default function BuscasMLOfficialPlatform() {
                   Prova Real: JSON Oficial Retornado pelo Servidor do Mercado Livre
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Dados brutos entregues pelas rotas /products/{rawJsonModalProduct.product_id}, /items e /users
+                  Dados brutos entregues pelas rotas oficiais da API do Mercado Livre
                 </p>
               </div>
               <button
@@ -211,8 +212,7 @@ export default function BuscasMLOfficialPlatform() {
               </h1>
               <p className="text-slate-400 text-sm mt-1 mb-6">
                 Conectado diretamente às rotas oficiais <code>/products/search</code>,{' '}
-                <code>/products/&#123;id&#125;/items</code> e <code>/users/&#123;seller_id&#125;</code> usando suas
-                credenciais.
+                <code>{'/products/{id}/items'}</code> e <code>{'/users/{seller_id}'}</code> usando suas credenciais.
               </p>
 
               <form onSubmit={executeOfficialSearch} className="flex flex-col sm:flex-row gap-3">
@@ -229,7 +229,7 @@ export default function BuscasMLOfficialPlatform() {
 
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
                   className="px-5 py-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 shrink-0"
                 >
                   <Camera size={18} className="text-yellow-400" />
@@ -241,7 +241,7 @@ export default function BuscasMLOfficialPlatform() {
                   accept="image/*"
                   className="hidden"
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
+                    const file = e.target.files && e.target.files[0];
                     if (file) handlePhotoUpload(file);
                   }}
                 />
@@ -284,7 +284,7 @@ export default function BuscasMLOfficialPlatform() {
                   <span className="truncate">
                     <strong className="text-emerald-400">● 200 OK:</strong> {apiInfo.endpoint}
                   </span>
-                  <span className="text-yellow-400">Termo processado: &quot;{apiInfo.query_used}&quot;</span>
+                  <span className="text-yellow-400">{'Termo processado: "' + String(apiInfo.query_used) + '"'}</span>
                 </div>
               )}
 
@@ -350,7 +350,7 @@ export default function BuscasMLOfficialPlatform() {
                         )}
                       </div>
 
-                      {selectedProduct.pictures?.length > 1 && (
+                      {selectedProduct.pictures && selectedProduct.pictures.length > 1 && (
                         <div className="flex gap-2 overflow-x-auto pt-3 pb-1">
                           {selectedProduct.pictures.map((pic: string, i: number) => (
                             <button
@@ -403,16 +403,12 @@ export default function BuscasMLOfficialPlatform() {
                           <strong className="text-white">{selectedProduct.brand || 'Não informada'}</strong>
                         </span>
                         {selectedProduct.model && (
-                          <>
-                            <span>•</span>
-                            <span>
-                              Modelo: <strong className="text-white">{selectedProduct.model}</strong>
-                            </span>
-                          </>
+                          <span>
+                            • Modelo: <strong className="text-white">{selectedProduct.model}</strong>
+                          </span>
                         )}
-                        <span>•</span>
                         <span>
-                          Vendedores no Catálogo:{' '}
+                          • Vendedores no Catálogo:{' '}
                           <strong className="text-yellow-400">{selectedProduct.active_sellers_count}</strong>
                         </span>
                       </div>
@@ -428,7 +424,9 @@ export default function BuscasMLOfficialPlatform() {
                         </span>
                         <span className="text-3xl sm:text-4xl font-black text-yellow-400">
                           {selectedProduct.price !== null
-                            ? BRL + ' ' + Number(selectedProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+                            ? BRL +
+                              ' ' +
+                              Number(selectedProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
                             : 'Sem ofertas ativas no catálogo'}
                         </span>
                       </div>
@@ -459,13 +457,13 @@ export default function BuscasMLOfficialPlatform() {
                         <p className="text-base font-extrabold text-white mt-1">
                           {selectedProduct.date_created
                             ? new Date(selectedProduct.date_created).toLocaleDateString('pt-BR')
-                            : 'Não informada'}
+                            : selectedProduct.first_photo_month_year || 'Não informada'}
                         </p>
                         <span className="text-[11px] text-emerald-400">
                           {selectedProduct.days_old
                             ? 'Há ' + String(selectedProduct.days_old) + ' dias no ML'
                             : selectedProduct.first_photo_month_year
-                            ? 'Foto de ' + String(selectedProduct.first_photo_month_year)
+                            ? 'Extraída da Foto CDN ML'
                             : 'Campo date_created'}
                         </span>
                       </div>
@@ -487,7 +485,7 @@ export default function BuscasMLOfficialPlatform() {
                         <p className="text-base font-extrabold text-white mt-1 capitalize">
                           {selectedProduct.logistic_type === 'fulfillment'
                             ? 'Fulfillment (Full)'
-                            : selectedProduct.logistic_type || 'Não informada'}
+                            : selectedProduct.logistic_type || 'Padrão ML'}
                         </p>
                         <span className="text-[11px] text-slate-400">
                           {selectedProduct.free_shipping === true
@@ -562,7 +560,8 @@ export default function BuscasMLOfficialPlatform() {
                           <div>
                             <span className="text-slate-400 block">Vendas Concluídas da Loja</span>
                             <p className="text-sm font-extrabold text-yellow-400 mt-0.5">
-                              {selectedProduct.seller.completed_transactions !== null
+                              {selectedProduct.seller.completed_transactions !== null &&
+                              selectedProduct.seller.completed_transactions !== undefined
                                 ? Number(selectedProduct.seller.completed_transactions).toLocaleString('pt-BR') +
                                   ' vendas'
                                 : 'Não informada'}
@@ -572,15 +571,14 @@ export default function BuscasMLOfficialPlatform() {
                       </div>
                     ) : (
                       <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
-                        Este produto de catálogo não possui um vendedor ativo listado em /products/
-                        {selectedProduct.product_id}/items no momento.
+                        Este produto de catálogo não possui ofertas adicionais listadas no momento.
                       </div>
                     )}
 
-                    {selectedProduct.competing_offers?.length > 1 && (
+                    {selectedProduct.competing_offers && selectedProduct.competing_offers.length > 1 && (
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800 space-y-2">
                         <p className="text-xs font-bold text-slate-300">
-                          Outras ofertas reais ativas para este produto (GET /products/{selectedProduct.product_id}/items):
+                          Outras ofertas reais ativas para este produto:
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                           {selectedProduct.competing_offers.slice(0, 6).map((off: any, i: number) => (
@@ -608,7 +606,7 @@ export default function BuscasMLOfficialPlatform() {
             )}
 
             {products.length > 0 && (
-              <>
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-extrabold text-white">
                     Produtos Encontrados na API Oficial ({products.length} resultados)
@@ -637,7 +635,7 @@ export default function BuscasMLOfficialPlatform() {
 
                 {displayMode === 'grid' ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {products.map((item) => (
+                    {products.map((item: any) => (
                       <div
                         key={item.product_id}
                         className="group bg-[#111827] border border-slate-800 hover:border-yellow-400/60 rounded-3xl overflow-hidden flex flex-col justify-between transition"
@@ -707,16 +705,17 @@ export default function BuscasMLOfficialPlatform() {
                             <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs">
                               <span className="text-[10px] text-slate-400 block">Vendedor Vencedor (API /users):</span>
                               <p className="font-bold text-slate-100 truncate">
-                                {item.seller?.nickname || 'Sem vendedor listado'}
+                                {(item.seller && item.seller.nickname) || 'Sem vendedor listado'}
                               </p>
-                              {item.seller?.registration_date && (
+                              {item.seller && item.seller.registration_date && (
                                 <p className="text-[11px] text-emerald-400 mt-0.5">
                                   Conta criada: {new Date(item.seller.registration_date).toLocaleDateString('pt-BR')} (
                                   {item.seller.account_age_years} anos)
                                 </p>
                               )}
-                              {item.seller?.completed_transactions !== null &&
-                                item.seller?.completed_transactions !== undefined && (
+                              {item.seller &&
+                                item.seller.completed_transactions !== null &&
+                                item.seller.completed_transactions !== undefined && (
                                   <p className="text-[11px] text-yellow-400">
                                     Vendas da loja: {Number(item.seller.completed_transactions).toLocaleString('pt-BR')}
                                   </p>
@@ -762,7 +761,7 @@ export default function BuscasMLOfficialPlatform() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/70">
-                          {products.map((item) => (
+                          {products.map((item: any) => (
                             <tr key={item.product_id} className="hover:bg-slate-800/40">
                               <td className="p-4 flex items-center gap-3.5 max-w-md">
                                 {item.thumbnail && (
@@ -786,7 +785,7 @@ export default function BuscasMLOfficialPlatform() {
                                 <span className="font-bold text-white block">
                                   {item.date_created
                                     ? new Date(item.date_created).toLocaleDateString('pt-BR')
-                                    : 'N/D'}
+                                    : item.first_photo_month_year || 'N/D'}
                                 </span>
                                 {item.days_old && (
                                   <span className="text-[11px] text-emerald-400">Há {item.days_old} dias</span>
@@ -794,17 +793,18 @@ export default function BuscasMLOfficialPlatform() {
                               </td>
                               <td className="p-4 whitespace-nowrap">
                                 <span className="font-bold text-white block">
-                                  {item.seller?.nickname || 'N/D'}
+                                  {(item.seller && item.seller.nickname) || 'N/D'}
                                 </span>
-                                {item.seller?.registration_date && (
+                                {item.seller && item.seller.registration_date && (
                                   <span className="text-[11px] text-slate-400">
                                     Conta criada: {new Date(item.seller.registration_date).toLocaleDateString('pt-BR')}
                                   </span>
                                 )}
                               </td>
                               <td className="p-4 font-bold text-emerald-400 whitespace-nowrap">
-                                {item.seller?.completed_transactions !== null &&
-                                item.seller?.completed_transactions !== undefined
+                                {item.seller &&
+                                item.seller.completed_transactions !== null &&
+                                item.seller.completed_transactions !== undefined
                                   ? Number(item.seller.completed_transactions).toLocaleString('pt-BR') + ' vendas'
                                   : 'N/D'}
                               </td>
@@ -833,7 +833,7 @@ export default function BuscasMLOfficialPlatform() {
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
@@ -901,46 +901,3 @@ export default function BuscasMLOfficialPlatform() {
                       step="0.25"
                       value={packagingCost}
                       onChange={(e) => setPackagingCost(Number(e.target.value))}
-                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Frete (&gt;79)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={shippingCost}
-                      onChange={(e) => setShippingCost(Number(e.target.value))}
-                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 flex flex-col justify-between">
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Comissão ML ({mlRate}%) + Taxa Fixa:</span>
-                    <span className="text-red-400 font-bold">
-                      - {BRL} {mlCommission.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Imposto Nota Fiscal ({taxRate}%):</span>
-                    <span className="text-red-400 font-bold">
-                      - {BRL} {taxVal.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Custo Embalagem + Frete:</span>
-                    <span className="text-red-400 font-bold">
-                      - {BRL} {(packagingCost + effectiveShip).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-800 pt-6 mt-6">
-                  <span className="text-xs text-slate-400 uppercase">Lucro Líquido por Venda</span>
-                  <p
-                    className={
-                      'text-4xl font-black
