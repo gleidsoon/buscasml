@@ -1,791 +1,541 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+/* =============================================================================
+ * CONFIGURAÇÃO
+ * ============================================================================= */
+
+const ML_API = 'https://api.mercadolibre.com';
 const CLIENT_ID = process.env.ML_CLIENT_ID || '8353552938244269';
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || '1mDuwaABTfcuIFd93BKMlohHfUmsRggn';
+const USER_TOKEN_HEADER = 'x-ml-user-token';
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const USER_TTL_MS = 10 * 60 * 1000;
+const CURRENT_YEAR = new Date().getFullYear();
 
-let cachedAppToken: any = null;
-let cachedUserToken: any = process.env.ML_ACCESS_TOKEN || null;
-let cachedRefreshToken: any = process.env.ML_REFRESH_TOKEN || null;
-let tokenExpiry = 0;
+/** Foto real de produto: exige D_NQ_NP_ e o padrão -MLB..._MMYYYY-X.ext (descarta banners promocionais). */
+const PHOTO_RE = /D_NQ_NP_.*?-MLB\d+_(\d{2})(\d{4})-[A-Za-z]\.(?:webp|jpe?g|png)/i;
 
-async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 7500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+const LISTING_LABEL: Record<string, string> = { gold_special: 'Clássico', gold_pro: 'Premium' };
+const MEDAL_LABEL: Record<string, string> = { platinum: 'Platinum', gold: 'Gold', silver: 'Prata' };
+
+type AnyObj = Record<string, any>;
+type MLResponse = { ok: boolean; status: number; data: any };
+
+type Photo = { url: string; photoId: string; month: number; year: number };
+
+type SellerInfo = {
+  id: number | null;
+  nickname: string | null;
+  registrationDate: string | null;
+  accountYears: number | null;
+  city: string | null;
+  state: string | null;
+  medal: string;
+  completedSales: number | null;
+};
+
+type ProductSummary = {
+  productId: string | null;
+  itemId: string | null;
+  title: string;
+  brand: string | null;
+  model: string | null;
+  image: string | null;
+  price: number | null;
+  soldQuantity: number | null;
+  listingType: string | null;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  createdAt: string | null;
+  createdSource: string;
+  daysOnAir: number | null;
+  firstPhotoDate: string | null;
+  seller: SellerInfo | null;
+  permalink: string | null;
+};
+
+type CompetitorRow = {
+  itemId: string;
+  price: number | null;
+  sellerId: number | null;
+  sellerNickname: string | null;
+  sellerMedal: string | null;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  listingType: string | null;
+};
+
+type Scraped = {
+  title: string | null;
+  price: number | null;
+  originalPrice: number | null;
+  soldMarker: string | null;
+  soldMin: number | null;
+  rating: number | null;
+  reviewsCount: number | null;
+  sellerName: string | null;
+  photos: Photo[];
+  itemIdFromPage: string | null;
+  sources: string[];
+};
+
+type Bundle = {
+  productId: string | null;
+  itemId: string | null;
+  product: AnyObj | null;
+  item: AnyObj | null;
+  winner: AnyObj | null;
+  reviews: AnyObj | null;
+  seller: SellerInfo | null;
+  sellerRaw: AnyObj | null;
+  competitors: CompetitorRow[];
+  competitorsRaw: AnyObj[];
+};
+
+type Dossier = {
+  origin: string;
+  productId: string | null;
+  itemId: string | null;
+  permalink: string | null;
+  title: string;
+  brand: string | null;
+  model: string | null;
+  images: string[];
+  price: number | null;
+  originalPrice: number | null;
+  discountPct: number | null;
+  currency: string;
+  listingType: string | null;
+  soldValue: number | null;
+  soldLabel: string;
+  soldSource: string;
+  ratingAverage: number | null;
+  ratingCount: number | null;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  logisticType: string | null;
+  createdAt: string | null;
+  createdSource: string;
+  daysOnAir: number | null;
+  firstPhotoDate: string | null;
+  firstPhotoSource: string;
+  seller: SellerInfo | null;
+  competitors: CompetitorRow[];
+  notes: string[];
+  raw: AnyObj;
+};
+
+/* =============================================================================
+ * ERROS E RESPOSTAS
+ * ============================================================================= */
+
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
   }
 }
 
-/* 1. Obtém Token Oficial (Prioriza User Token OAuth se autorizado, ou Client Credentials) */
-async function getOfficialAccessToken(userTokenFromClient?: string | null) {
-  if (userTokenFromClient) {
-    return { token: userTokenFromClient, isUserToken: true, error: null };
-  }
-  if (cachedUserToken) {
-    return { token: cachedUserToken, isUserToken: true, error: null };
-  }
-  if (cachedAppToken && Date.now() < tokenExpiry) {
-    return { token: cachedAppToken, isUserToken: false, error: null };
-  }
-
-  try {
-    const res = await fetchWithTimeout(
-      'https://api.mercadolibre.com/oauth/token',
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-        }),
-      },
-      5000
-    );
-
-    const data = await res.json();
-    if (res.ok && data.access_token) {
-      cachedAppToken = data.access_token;
-      tokenExpiry = Date.now() + (data.expires_in ? data.expires_in * 1000 - 60000 : 18000000);
-      return { token: cachedAppToken, isUserToken: false, error: null };
-    }
-    return { token: null, isUserToken: false, error: data.message || JSON.stringify(data) };
-  } catch (err: any) {
-    return {
-      token: null,
-      isUserToken: false,
-      error: (err && err.message) || 'Falha na conexao com oauth/token',
-    };
-  }
+function json(data: AnyObj, status = 200) {
+  return NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function extractReadableSlug(url: string): string {
-  try {
-    const u = new URL(url);
-    const goParam = u.searchParams.get('go');
-    const pathUrl = goParam ? new URL(goParam).pathname : u.pathname;
-
-    const segments = pathUrl.split('/').filter(Boolean);
-    for (const seg of segments) {
-      const lower = seg.toLowerCase();
-      const isCode = lower.startsWith('mlb') || lower.startsWith('mlbu');
-      const isReserved = ['p', 'up', 'sec', 'social', 'gz'].includes(lower);
-      if (seg.length > 8 && seg.includes('-') && !isCode && !isReserved) {
-        return seg
-          .replace(/^MLB-\d+-/i, '')
-          .replace(/-_JM/gi, '')
-          .replace(/-/g, ' ')
-          .trim();
-      }
-    }
-  } catch {
-    /* URL simples */
-  }
-  return '';
+function errorResponse(e: unknown) {
+  if (e instanceof HttpError) return json({ ok: false, error: e.message }, e.status);
+  return json({ ok: false, error: e instanceof Error ? e.message : 'Erro interno.' }, 500);
 }
 
-async function parseInputQueryOrUrl(rawInput: string) {
-  let target = rawInput.trim();
+/* =============================================================================
+ * UTILITÁRIOS
+ * ============================================================================= */
 
-  if (target.includes('meli.la') || target.includes('/sec/') || target.includes('/social/')) {
-    try {
-      const res = await fetchWithTimeout(target, { redirect: 'manual' }, 3500);
-      const loc = res.headers.get('location');
-      if (loc) target = loc;
-    } catch {
-      /* Mantem original */
-    }
-  }
-
-  const catalogMatch = target.match(/\/p\/(MLB\d{6,14})/i);
-  if (catalogMatch) {
-    const cId = catalogMatch[1].toUpperCase();
-    return {
-      catalogId: cId,
-      searchQuery: extractReadableSlug(target) || cId,
-      resolvedUrl: target,
-    };
-  }
-
-  const cleanCode = target.replace('-', '').toUpperCase();
-  const isMlbCode =
-    cleanCode.startsWith('MLB') &&
-    cleanCode.length >= 9 &&
-    18 > cleanCode.length &&
-    !isNaN(Number(cleanCode.slice(3)));
-
-  if (isMlbCode) {
-    return {
-      catalogId: cleanCode,
-      searchQuery: cleanCode,
-      resolvedUrl: 'https://www.mercadolivre.com.br/p/' + cleanCode,
-    };
-  }
-
-  if (target.startsWith('http')) {
-    const slugQuery = extractReadableSlug(target);
-    return {
-      catalogId: null,
-      searchQuery: slugQuery || target,
-      resolvedUrl: target,
-    };
-  }
-
-  return {
-    catalogId: null,
-    searchQuery: target,
-    resolvedUrl: '',
-  };
-}
-
-function extractPhotoUploadDate(photoUrl: string) {
-  if (!photoUrl) return null;
-  const m = photoUrl.match(/_(\d{2})(20\d{2})-[A-Z]\./i);
-  if (m) {
-    const month = parseInt(m[1], 10);
-    const year = parseInt(m[2], 10);
-    if (month >= 1 && 12 >= month && year >= 2015 && 2030 >= year) {
-      return {
-        label: m[1] + '/' + m[2],
-        isoDate: new Date(Date.UTC(year, month - 1, 10, 12, 0, 0)).toISOString(),
-      };
-    }
+function num(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
   return null;
 }
 
-/* 2. Consulta dados reais do Vendedor em GET /users/{seller_id} ou por Nickname */
-async function fetchOfficialSeller(sellerIdOrNick: any, authHeaders: any) {
-  if (!sellerIdOrNick) return null;
-  const strVal = String(sellerIdOrNick).trim();
-  const isNumericId = /^\d{4,15}$/.test(strVal);
-
-  try {
-    let u: any = null;
-
-    if (isNumericId) {
-      const res = await fetchWithTimeout(
-        'https://api.mercadolibre.com/users/' + strVal,
-        { headers: authHeaders },
-        4000
-      );
-      if (res.ok) {
-        u = await res.json();
-      }
-    } else {
-      /* Se tivermos o nickname da loja, busca na API por nickname */
-      const searchRes = await fetchWithTimeout(
-        'https://api.mercadolibre.com/sites/MLB/search?nickname=' + encodeURIComponent(strVal) + '&limit=1',
-        { headers: authHeaders },
-        4000
-      );
-      if (searchRes.ok) {
-        const sData = await searchRes.json();
-        const foundSellerId = sData && sData.seller && sData.seller.id;
-        if (foundSellerId) {
-          const uRes = await fetchWithTimeout(
-            'https://api.mercadolibre.com/users/' + String(foundSellerId),
-            { headers: authHeaders },
-            3500
-          );
-          if (uRes.ok) u = await uRes.json();
-        }
-      }
-    }
-
-    if (!u || !u.id) return null;
-
-    return {
-      id: u.id,
-      nickname: u.nickname || null,
-      registration_date: u.registration_date || null,
-      city: (u.address && u.address.city) || null,
-      state: (u.address && u.address.state) || null,
-      user_type: u.user_type || null,
-      power_seller_status: (u.seller_reputation && u.seller_reputation.power_seller_status) || null,
-      level_id: (u.seller_reputation && u.seller_reputation.level_id) || null,
-      completed_transactions:
-        u.seller_reputation && u.seller_reputation.transactions
-          ? u.seller_reputation.transactions.completed
-          : null,
-      canceled_transactions:
-        u.seller_reputation && u.seller_reputation.transactions
-          ? u.seller_reputation.transactions.canceled
-          : null,
-      total_transactions:
-        u.seller_reputation && u.seller_reputation.transactions
-          ? u.seller_reputation.transactions.total
-          : null,
-      permalink: u.permalink || null,
-      raw_user_json: u,
-    };
-  } catch {
-    return null;
-  }
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
 }
 
-/* 3. Lê Preço, Vendas e Vendedor da página pública (/p/MLB... ou link colado) quando a API ocultar /items */
-async function extractLivePageOffer(pageUrl: string) {
-  if (!pageUrl) return null;
-  try {
-    const jinaRes = await fetchWithTimeout(
-      'https://r.jina.ai/' + pageUrl,
-      { headers: { Accept: 'application/json' } },
-      6000
+/** "R$ 1.599,90" -> 1599.9 */
+function parseBRL(s: string): number | null {
+  const clean = s.replace(/[^\d,.]/g, '').replace(/\./g, '').replace(',', '.');
+  const n = Number(clean);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** "+5 mil vendidos" -> 5000 ; "+100 vendidos" -> 100 */
+function countFromMarker(marker: string): number | null {
+  const m = marker.match(/\d[\d.,]*/);
+  if (!m) return null;
+  const base = Number(m[0].replace(/\./g, '').replace(',', '.'));
+  if (!Number.isFinite(base)) return null;
+  return Math.round(/mil/i.test(marker) ? base * 1000 : base);
+}
+
+function daysSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+function yearsSince(iso: string | null | undefined): number | null {
+  const d = daysSince(iso);
+  return d === null ? null : Math.floor(d / 365.25);
+}
+
+function listOf(data: any): AnyObj[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  return [];
+}
+
+const priceAsc = (a: AnyObj, b: AnyObj) =>
+  (num(a.price) ?? Number.MAX_SAFE_INTEGER) - (num(b.price) ?? Number.MAX_SAFE_INTEGER);
+
+function listingLabel(id: unknown): string | null {
+  return typeof id === 'string' ? LISTING_LABEL[id] ?? id : null;
+}
+
+function attr(obj: AnyObj | null | undefined, id: string): string | null {
+  const list: AnyObj[] = Array.isArray(obj?.attributes) ? obj?.attributes : [];
+  const hit = list.find((a) => a?.id === id);
+  return typeof hit?.value_name === 'string' ? hit.value_name : null;
+}
+
+function urlsOf(pictures: AnyObj[]): string[] {
+  return pictures
+    .map((p) => (typeof p === 'string' ? p : p?.secure_url ?? p?.url))
+    .filter((u): u is string => typeof u === 'string');
+}
+
+/** Converte para a versão HD (-O.webp) e força https. */
+function toHD(url: string): string {
+  return url
+    .replace(/^http:\/\//i, 'https://')
+    .split('?')[0]
+    .replace(/-[A-Za-z]\.(?:webp|jpe?g|png)$/i, '-O.webp');
+}
+
+/** Mantém apenas fotos reais de produto e extrai a data de upload do padrão _MMYYYY. */
+function extractPhotos(urls: string[]): Photo[] {
+  const seen = new Set<string>();
+  const out: Photo[] = [];
+  for (const raw of urls) {
+    if (!raw.includes('D_NQ_NP_')) continue;
+    const m = raw.match(PHOTO_RE);
+    if (!m) continue;
+    const month = Number(m[1]);
+    const year = Number(m[2]);
+    if (month < 1 || month > 12 || year < 2005 || year > CURRENT_YEAR + 1) continue;
+    const file = (raw.split('?')[0].split('/').pop() ?? raw).replace(
+      /-[A-Za-z]\.(?:webp|jpe?g|png)$/i,
+      '',
     );
-    if (!jinaRes.ok) return null;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    out.push({ url: toHD(raw), photoId: file, month, year });
+  }
+  return out;
+}
 
-    const jinaJson = await jinaRes.json();
-    const content = String((jinaJson && jinaJson.data && jinaJson.data.content) || '');
-    const title = String((jinaJson && jinaJson.data && jinaJson.data.title) || '');
+function earliestPhoto(photos: Photo[]): Photo | null {
+  if (photos.length === 0) return null;
+  return photos.reduce((a, b) => (b.year * 12 + b.month < a.year * 12 + a.month ? b : a));
+}
 
-    if (!content || 150 > content.length) return null;
+function createdSourceLabel(item: AnyObj | null, product: AnyObj | null): string {
+  if (item?.date_created) return 'API Oficial (anúncio)';
+  if (product?.date_created) return 'API Oficial (catálogo)';
+  return 'Oculto no anúncio';
+}
 
-    /* Preço no título ("... - R$ 39,90") ou no topo da página */
-    const mainBlock = content.slice(0, 6000);
-    let currentPrice: any = null;
-    let originalPrice: any = null;
+/* =============================================================================
+ * TOKENS OAUTH
+ * ============================================================================= */
 
-    const titlePriceMatch = title.match(/R\u0024\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/i);
-    if (titlePriceMatch) {
-      currentPrice = parseFloat(titlePriceMatch[1].replace(/\./g, '').replace(',', '.'));
-    }
+let appToken: { value: string; expiresAt: number } | null = null;
 
-    const priceRegex = /R\u0024\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/g;
-    const foundPrices: number[] = [];
-    let pm;
-    while ((pm = priceRegex.exec(mainBlock)) !== null && 8 > foundPrices.length) {
-      const val = parseFloat(pm[1].replace(/\./g, '').replace(',', '.'));
-      if (val > 2 && 150000 > val) foundPrices.push(val);
-    }
+async function tokenRequest(params: Record<string, string>): Promise<AnyObj> {
+  const res = await fetch(`${ML_API}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams(params).toString(),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10000),
+  });
+  const data = (await res.json().catch(() => ({}))) as AnyObj;
+  if (!res.ok || !data.access_token) {
+    throw new HttpError(
+      res.status >= 400 && res.status < 600 ? res.status : 502,
+      `Mercado Livre recusou a autenticação: ${data.message ?? data.error ?? `HTTP ${res.status}`}`,
+    );
+  }
+  return data;
+}
 
-    if (!currentPrice && foundPrices.length !== 0) {
-      if (foundPrices.length >= 2 && foundPrices[0] > foundPrices[1] && foundPrices[1] > foundPrices[0] * 0.35) {
-        originalPrice = foundPrices[0];
-        currentPrice = foundPrices[1];
-      } else {
-        currentPrice = foundPrices[0];
-      }
-    } else if (currentPrice && foundPrices.length !== 0) {
-      const higher = foundPrices.find((p) => p > currentPrice * 1.05 && currentPrice * 3.5 > p);
-      if (higher) originalPrice = higher;
-    }
-
-    /* Quantidade vendida ("+100 vendidos", "+5 mil vendidos") */
-    let soldQuantity: any = null;
-    let soldLabel: any = null;
-    const soldMatch = mainBlock.match(/\+?\s*(\d+(?:[.,]\d+)?)\s*(mil\b)?\s*vendidos/i);
-    if (soldMatch) {
-      const base = parseFloat(soldMatch[1].replace('.', '').replace(',', '.'));
-      const mult = soldMatch[2] && soldMatch[2].toLowerCase() === 'mil' ? 1000 : 1;
-      soldQuantity = Math.round(base * mult);
-      soldLabel = soldMatch[0].trim();
-    }
-
-    /* Avaliação e quantidade de opiniões */
-    let rating: any = null;
-    let reviewsCount: any = null;
-    const ratingMatch = mainBlock.match(/(\d[.,]\d)\s*(?:de 5|estrelas|\()/i);
-    if (ratingMatch) rating = parseFloat(ratingMatch[1].replace(',', '.'));
-    const revMatch = mainBlock.match(/\((\d+(?:\.\d+)?)\s*(?:avaliações|opiniões)?\)/i);
-    if (revMatch) reviewsCount = parseInt(revMatch[1].replace(/\./g, ''), 10);
-
-    /* Nome do Vendedor / Loja na página */
-    const sellerLinkMatch =
-      mainBlock.match(/Vendido por\s*\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/i) ||
-      mainBlock.match(/Loja oficial\s*\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/i);
-    const sellerTextMatch =
-      mainBlock.match(/Vendido por\s*([^\n|[\]]{2,40})/i) ||
-      mainBlock.match(/Loja oficial\s*([^\n|[\]]{2,40})/i);
-
-    const sellerNickname = sellerLinkMatch
-      ? sellerLinkMatch[1].trim()
-      : sellerTextMatch
-      ? sellerTextMatch[1].trim()
-      : null;
-
-    const sellerSalesMatch = mainBlock.match(/\+?\s*(\d+(?:[.,]\d+)?)\s*(mil\b)?\s*vendas\b/i);
-    let sellerCompletedSales: any = null;
-    if (sellerSalesMatch) {
-      sellerCompletedSales = Math.round(
-        parseFloat(sellerSalesMatch[1].replace('.', '').replace(',', '.')) *
-          (sellerSalesMatch[2] ? 1000 : 1)
-      );
-    }
-
-    const isFull = /Enviado pelo\s*Full|Logística\s*Full|\bFull\b/i.test(mainBlock);
-    const isFreeShipping = /Frete\s*grátis|Chegará\s*grátis/i.test(mainBlock);
-    const isPremium = /sem\s*juros/i.test(mainBlock);
-    const itemMlbMatch =
-      mainBlock.match(/[?&]wid=(MLB\d{8,14})/i) ||
-      mainBlock.match(/-(MLB\d{8,14})_/i);
-
-    return {
-      item_id: itemMlbMatch ? itemMlbMatch[1].toUpperCase() : null,
-      price: currentPrice,
-      original_price: originalPrice,
-      sold_quantity: soldQuantity,
-      sold_label: soldLabel,
-      rating,
-      reviews_count: reviewsCount,
-      seller_nickname: sellerNickname,
-      seller_completed_sales: sellerCompletedSales,
-      logistic_type: isFull ? 'fulfillment' : 'padrao',
-      free_shipping: isFreeShipping,
-      listing_type_id: isPremium ? 'gold_pro' : 'gold_special',
+/** Token de aplicação (client_credentials), com cache em memória até perto da expiração. */
+async function getAppToken(): Promise<string | null> {
+  if (!CLIENT_SECRET) return null;
+  if (appToken && appToken.expiresAt > Date.now() + 60_000) return appToken.value;
+  try {
+    const data = await tokenRequest({
+      grant_type: 'client_credentials',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    });
+    appToken = {
+      value: String(data.access_token),
+      expiresAt: Date.now() + Number(data.expires_in ?? 21600) * 1000,
     };
+    return appToken.value;
   } catch {
     return null;
   }
 }
 
-/* 4. Hidrata o Produto combinando API Oficial (/products/{id}, /items, /users) + Leitura da Página Real */
-async function hydrateCatalogProduct(
-  productSummary: any,
-  authHeaders: any,
-  fallbackUserUrl?: string,
-  shouldReadLivePage = false
-) {
-  const productId = String(productSummary.id);
-
-  const [prodDetailRes, prodItemsRes] = await Promise.allSettled([
-    fetchWithTimeout('https://api.mercadolibre.com/products/' + productId, { headers: authHeaders }, 4500),
-    fetchWithTimeout(
-      'https://api.mercadolibre.com/products/' + productId + '/items?limit=10',
-      { headers: authHeaders },
-      4500
-    ),
-  ]);
-
-  let fullProduct: any = productSummary;
-  if (prodDetailRes.status === 'fulfilled' && prodDetailRes.value.ok) {
-    fullProduct = await prodDetailRes.value.json();
+function requireSecret(): void {
+  if (!CLIENT_SECRET) {
+    throw new HttpError(
+      500,
+      'ML_CLIENT_SECRET não configurado. Adicione em Vercel → Settings → Environment Variables.',
+    );
   }
+}
 
-  let itemsList: any = [];
-  if (prodItemsRes.status === 'fulfilled' && prodItemsRes.value.ok) {
-    const itemsJson = await prodItemsRes.value.json();
-    if (Array.isArray(itemsJson && itemsJson.results)) {
-      itemsList = itemsJson.results;
-    } else if (Array.isArray(itemsJson)) {
-      itemsList = itemsJson;
-    }
-  }
+/* =============================================================================
+ * CHAMADAS À API DO MERCADO LIVRE
+ * ============================================================================= */
 
-  const winnerItem = (fullProduct && fullProduct.buy_box_winner) || itemsList[0] || null;
-  let sellerId = (winnerItem && winnerItem.seller_id) || null;
-
-  const rawPictures = (fullProduct && fullProduct.pictures) || (productSummary && productSummary.pictures) || [];
-  const pictures = rawPictures.map((p: any) => p.url || p.secure_url).filter(Boolean);
-
-  const rawAttributes =
-    (fullProduct && fullProduct.attributes) || (productSummary && productSummary.attributes) || [];
-  const attributes = rawAttributes.map((a: any) => ({
-    id: a.id,
-    name: a.name,
-    value: a.value_name,
-  }));
-
-  const brandObj = attributes.find((a: any) => a.id === 'BRAND');
-  const modelObj = attributes.find((a: any) => a.id === 'MODEL');
-  const brandAttr = brandObj ? brandObj.value : null;
-  const modelAttr = modelObj ? modelObj.value : null;
-
-  const photoInfo = pictures[0] ? extractPhotoUploadDate(pictures[0]) : null;
-  const apiDateCreated =
-    (fullProduct && fullProduct.date_created) ||
-    (productSummary && productSummary.date_created) ||
-    (photoInfo && photoInfo.isoDate) ||
-    null;
-
-  let daysOld: any = null;
-  if (apiDateCreated) {
-    daysOld = Math.max(1, Math.floor((Date.now() - new Date(apiDateCreated).getTime()) / 86400000));
-  }
-
-  const permalink =
-    (fullProduct && fullProduct.permalink) ||
-    (winnerItem && winnerItem.permalink) ||
-    'https://www.mercadolivre.com.br/p/' + productId;
-
-  /* Se a API restringiu buy_box_winner / items (por estar sem OAuth de usuário), lê a oferta real na página do produto */
-  let liveOffer: any = null;
-  if (!winnerItem && shouldReadLivePage) {
-    liveOffer = await extractLivePageOffer(permalink);
-    if ((!liveOffer || !liveOffer.price) && fallbackUserUrl && fallbackUserUrl.startsWith('http')) {
-      const userUrlOffer = await extractLivePageOffer(fallbackUserUrl);
-      if (userUrlOffer && userUrlOffer.price) {
-        liveOffer = userUrlOffer;
+async function mlFetch(path: string, bearer: string | null = null): Promise<MLResponse> {
+  const token = bearer ?? (await getAppToken());
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${ML_API}${path}`, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+    });
+    // Token de usuário expirado ou inválido: repete a chamada com o token de aplicação.
+    if (res.status === 401 && bearer) return mlFetch(path, null);
+    const text = await res.text();
+    let data: any = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
       }
     }
-  }
-
-  const sellerData = sellerId
-    ? await fetchOfficialSeller(sellerId, authHeaders)
-    : liveOffer && liveOffer.seller_nickname
-    ? await fetchOfficialSeller(liveOffer.seller_nickname, authHeaders)
-    : null;
-
-  const prices = itemsList.map((it: any) => Number(it.price)).filter((p: number) => p > 0);
-  const mainPrice =
-    winnerItem && winnerItem.price !== undefined
-      ? winnerItem.price
-      : prices.length !== 0
-      ? prices[0]
-      : liveOffer && liveOffer.price
-      ? liveOffer.price
-      : null;
-
-  const minPrice = prices.length !== 0 ? Math.min(...prices) : mainPrice;
-  const maxPrice = prices.length !== 0 ? Math.max(...prices) : mainPrice;
-  const soldQty =
-    (winnerItem && winnerItem.sold_quantity) ?? (liveOffer && liveOffer.sold_quantity) ?? null;
-
-  const dailySales =
-    soldQty !== null && daysOld ? Number((soldQty / Math.max(1, daysOld)).toFixed(1)) : null;
-  const revenueTotal =
-    soldQty !== null && mainPrice ? Number((soldQty * mainPrice).toFixed(2)) : null;
-
-  let sellerObject: any = null;
-  if (sellerData) {
-    sellerObject = {
-      id: sellerData.id,
-      nickname: sellerData.nickname,
-      registration_date: sellerData.registration_date,
-      account_age_years: sellerData.registration_date
-        ? Math.max(1, new Date().getFullYear() - new Date(sellerData.registration_date).getFullYear())
-        : null,
-      city: sellerData.city || null,
-      state: sellerData.state || null,
-      power_seller_status: sellerData.power_seller_status,
-      level_id: sellerData.level_id,
-      completed_transactions:
-        sellerData.completed_transactions ?? (liveOffer && liveOffer.seller_completed_sales) ?? null,
-      permalink: sellerData.permalink,
-    };
-  } else if (liveOffer && liveOffer.seller_nickname) {
-    sellerObject = {
-      id: 'ML-STORE',
-      nickname: liveOffer.seller_nickname,
-      registration_date: null,
-      account_age_years: null,
-      city: null,
-      state: null,
-      power_seller_status: null,
-      level_id: null,
-      completed_transactions: liveOffer.seller_completed_sales || null,
-      permalink: permalink,
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      data: { message: err instanceof Error ? err.message : 'Falha de rede' },
     };
   }
+}
 
+async function fetchItem(itemId: string, bearer: string | null): Promise<AnyObj | null> {
+  const r = await mlFetch(`/items/${itemId}`, bearer);
+  return r.ok ? (r.data as AnyObj) : null;
+}
+
+/* =============================================================================
+ * VENDEDOR (cache de 10 min)
+ * ============================================================================= */
+
+const userCache = new Map<number, { at: number; raw: AnyObj | null }>();
+
+function toSeller(u: AnyObj | null): SellerInfo | null {
+  if (!u) return null;
+  const rep: AnyObj = u.seller_reputation ?? {};
+  const power = typeof rep.power_seller_status === 'string' ? rep.power_seller_status : null;
+  const addr: AnyObj = u.address ?? {};
+  const reg = typeof u.registration_date === 'string' ? u.registration_date : null;
   return {
-    product_id: productId,
-    item_id: (winnerItem && winnerItem.item_id) || (liveOffer && liveOffer.item_id) || null,
-    title: (fullProduct && fullProduct.name) || (productSummary && productSummary.name) || 'Produto Catalogo ML',
-    status: (fullProduct && fullProduct.status) || 'active',
-    domain_id: (fullProduct && fullProduct.domain_id) || null,
-    permalink,
-    thumbnail: pictures[0] || '',
-    pictures,
-    price: mainPrice,
-    min_price: minPrice,
-    max_price: maxPrice,
-    original_price:
-      (winnerItem && winnerItem.original_price) || (liveOffer && liveOffer.original_price) || null,
-    currency_id: 'BRL',
-    active_sellers_count: itemsList.length || (mainPrice ? 1 : 0),
-    sold_quantity: soldQty,
-    sold_label: (liveOffer && liveOffer.sold_label) || (soldQty !== null ? String(soldQty) + ' vendidos' : null),
-    daily_sales: dailySales,
-    total_revenue: revenueTotal,
-    rating: (liveOffer && liveOffer.rating) || null,
-    reviews_count: (liveOffer && liveOffer.reviews_count) || null,
-    date_created: apiDateCreated,
-    days_old: daysOld,
-    first_photo_month_year: photoInfo ? photoInfo.label : null,
-    condition: (winnerItem && winnerItem.condition) || 'new',
-    listing_type_id:
-      (winnerItem && winnerItem.listing_type_id) || (liveOffer && liveOffer.listing_type_id) || null,
-    logistic_type:
-      (winnerItem && winnerItem.shipping && winnerItem.shipping.logistic_type) ||
-      (liveOffer && liveOffer.logistic_type) ||
-      null,
-    free_shipping:
-      winnerItem && winnerItem.shipping
-        ? winnerItem.shipping.free_shipping
-        : liveOffer
-        ? liveOffer.free_shipping
-        : null,
-    warranty: (winnerItem && winnerItem.warranty) || null,
-    brand: brandAttr,
-    model: modelAttr,
-    attributes: attributes.slice(0, 10),
-    seller: sellerObject,
-    competing_offers: itemsList.map((offer: any) => ({
-      item_id: offer.item_id,
-      seller_id: offer.seller_id,
-      price: offer.price,
-      condition: offer.condition,
-      free_shipping: Boolean(offer.shipping && offer.shipping.free_shipping),
-      logistic_type: (offer.shipping && offer.shipping.logistic_type) || 'padrao',
-      listing_type_id: offer.listing_type_id,
-    })),
-    raw_api_proof: {
-      endpoint_product: 'https://api.mercadolibre.com/products/' + productId,
-      endpoint_items: 'https://api.mercadolibre.com/products/' + productId + '/items',
-      endpoint_seller: sellerData ? 'https://api.mercadolibre.com/users/' + String(sellerData.id) : null,
-      product_date_created: (fullProduct && fullProduct.date_created) || null,
-      photo_upload_month_year: photoInfo ? photoInfo.label : null,
-      winner_item: winnerItem,
-      live_page_offer: liveOffer,
-      seller_response: (sellerData && sellerData.raw_user_json) || null,
-    },
+    id: num(u.id),
+    nickname: typeof u.nickname === 'string' ? u.nickname : null,
+    registrationDate: reg,
+    accountYears: yearsSince(reg),
+    city: typeof addr.city === 'string' ? addr.city : null,
+    state: typeof addr.state === 'string' ? addr.state : null,
+    medal: power ? MEDAL_LABEL[power] ?? power : 'Sem medalha',
+    completedSales: num(rep.transactions?.completed),
   };
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const action = searchParams.get('action') || '';
-    const userTokenParam = searchParams.get('user_token') || null;
-
-    /* Troca o ?code=... do OAuth pelo Access Token de Usuário Oficial do Mercado Livre */
-    if (action === 'exchange_code') {
-      const code = searchParams.get('code') || '';
-      const redirectUri = searchParams.get('redirect_uri') || '';
-      const tokenRes = await fetchWithTimeout(
-        'https://api.mercadolibre.com/oauth/token',
-        {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
-            code,
-            redirect_uri: redirectUri,
-          }),
-        },
-        5000
-      );
-      const tokenData = await tokenRes.json();
-      if (tokenRes.ok && tokenData.access_token) {
-        cachedUserToken = tokenData.access_token;
-        cachedRefreshToken = tokenData.refresh_token || null;
-        return NextResponse.json({
-          ok: true,
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-          user_id: tokenData.user_id,
-        });
-      }
-      return NextResponse.json(
-        { ok: false, error: tokenData.message || 'Falha ao validar codigo OAuth' },
-        { status: 400 }
-      );
-    }
-
-    const rawQuery = (searchParams.get('q') || searchParams.get('input') || '').trim();
-    const auth = await getOfficialAccessToken(userTokenParam);
-
-    if (!auth.token) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Falha ao autenticar suas credenciais no Mercado Livre: ' + String(auth.error || ''),
-        },
-        { status: 401 }
-      );
-    }
-
-    const authHeaders = {
-      Authorization: 'Bearer ' + auth.token,
-      Accept: 'application/json',
-    };
-
-    if (!rawQuery) {
-      return NextResponse.json({
-        ok: true,
-        status: 'Conectado oficialmente a API do Mercado Livre',
-        client_id: CLIENT_ID,
-        is_user_oauth: auth.isUserToken,
-      });
-    }
-
-    const parsed = await parseInputQueryOrUrl(rawQuery);
-    const rawCatalogResults: any = [];
-    let usedSearchTerm = parsed.searchQuery;
-
-    if (parsed.catalogId) {
-      const directRes = await fetchWithTimeout(
-        'https://api.mercadolibre.com/products/' + parsed.catalogId,
-        { headers: authHeaders },
-        4500
-      );
-      if (directRes.ok) {
-        const directProd = await directRes.json();
-        if (directProd && directProd.id && directProd.name) {
-          rawCatalogResults.push(directProd);
-          usedSearchTerm = directProd.name;
-        }
-      }
-    }
-
-    const words = usedSearchTerm.split(/\s+/).filter(Boolean);
-    const candidateQueries = Array.from(
-      new Set([
-        usedSearchTerm,
-        words.slice(0, 5).join(' '),
-        words.slice(0, 3).join(' '),
-        words.slice(0, 2).join(' '),
-      ])
-    ).filter((q) => q.length >= 2);
-
-    let executedEndpoint = '';
-
-    for (const candidate of candidateQueries) {
-      const url =
-        'https://api.mercadolibre.com/products/search?status=active&site_id=MLB&q=' +
-        encodeURIComponent(candidate) +
-        '&limit=12';
-      executedEndpoint = url;
-
-      const searchRes = await fetchWithTimeout(url, { headers: authHeaders }, 5500);
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        if (Array.isArray(searchData && searchData.results) && searchData.results.length !== 0) {
-          const existingIds = new Set(rawCatalogResults.map((p: any) => p.id));
-          for (const item of searchData.results) {
-            if (!existingIds.has(item.id)) {
-              rawCatalogResults.push(item);
-              existingIds.add(item.id);
-            }
-          }
-          break;
-        }
-      }
-    }
-
-    if (rawCatalogResults.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        authenticated_client_id: CLIENT_ID,
-        is_user_oauth: auth.isUserToken,
-        executed_endpoint: executedEndpoint,
-        total: 0,
-        items: [],
-        message:
-          'A API Oficial (/products/search) nao encontrou produtos de catalogo para "' +
-          usedSearchTerm +
-          '". Tente usar palavras mais curtas (ex: Coroa Noiva, Creatina, Cadeira Gamer).',
-      });
-    }
-
-    /* Hidrata os produtos (lendo a oferta ao vivo na página para os 4 primeiros caso /items esteja restrito sem OAuth) */
-    const hydratedItems = await Promise.all(
-      rawCatalogResults
-        .slice(0, 10)
-        .map((prod: any, index: number) =>
-          hydrateCatalogProduct(prod, authHeaders, index === 0 ? parsed.resolvedUrl : '', 4 > index)
-        )
-    );
-
-    return NextResponse.json({
-      ok: true,
-      authenticated_client_id: CLIENT_ID,
-      is_user_oauth: auth.isUserToken,
-      executed_endpoint: executedEndpoint,
-      query_used: usedSearchTerm,
-      total: hydratedItems.length,
-      items: hydratedItems,
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: 'Erro na comunicacao com a API Oficial: ' + String((err && err.message) || 'Erro desconhecido'),
-      },
-      { status: 500 }
-    );
+async function sellerData(
+  id: number | null,
+  bearer: string | null,
+): Promise<{ info: SellerInfo | null; raw: AnyObj | null }> {
+  if (id === null) return { info: null, raw: null };
+  const hit = userCache.get(id);
+  let raw: AnyObj | null;
+  if (hit && Date.now() - hit.at < USER_TTL_MS) {
+    raw = hit.raw;
+  } else {
+    const r = await mlFetch(`/users/${id}`, bearer);
+    raw = r.ok ? (r.data as AnyObj) : null;
+    userCache.set(id, { at: Date.now(), raw });
   }
+  return { info: toSeller(raw), raw };
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { imageBase64, filename } = body;
-    let detectedKeyword = '';
+/* =============================================================================
+ * CONCORRENTES
+ * ============================================================================= */
 
-    if (imageBase64) {
-      try {
-        const visionRes = await fetchWithTimeout(
-          'https://text.pollinations.ai/openai',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'openai',
-              messages: [
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'text',
-                      text: 'Identifique este produto para busca no catalogo do Mercado Livre Brasil. Responda APENAS com 2 a 3 palavras principais do produto em portugues (sem pontuacao). Exemplo: Coroa Noiva Strass ou Creatina Growth.',
-                    },
-                    {
-                      type: 'image_url',
-                      image_url: { url: imageBase64 },
-                    },
-                  ],
-                },
-              ],
-            }),
-          },
-          6000
-        );
-        if (visionRes.ok) {
-          const visionData = await visionRes.json();
-          const reply =
-            (visionData &&
-              visionData.choices &&
-              visionData.choices[0] &&
-              visionData.choices[0].message &&
-              visionData.choices[0].message.content &&
-              visionData.choices[0].message.content.trim()) ||
-            '';
-          if (reply && reply.length >= 2 && 50 >= reply.length) {
-            detectedKeyword = reply.replace(/[."']/g, '');
-          }
-        }
-      } catch {
-        /* Fallback pelo nome do arquivo */
-      }
-    }
+async function competitorRows(list: AnyObj[], bearer: string | null): Promise<CompetitorRow[]> {
+  const top = [...list]
+    .filter((c) => typeof c?.item_id === 'string')
+    .sort(priceAsc)
+    .slice(0, 10);
+  return Promise.all(
+    top.map(async (c): Promise<CompetitorRow> => {
+      const sid = num(c.seller_id);
+      const { info } = await sellerData(sid, bearer);
+      const sh: AnyObj = c.shipping ?? {};
+      return {
+        itemId: String(c.item_id),
+        price: num(c.price),
+        sellerId: sid,
+        sellerNickname: info?.nickname ?? null,
+        sellerMedal: info?.medal ?? null,
+        fulfillment: sh.logistic_type === 'fulfillment',
+        freeShipping: sh.free_shipping === true,
+        listingType: listingLabel(c.listing_type_id),
+      };
+    }),
+  );
+}
 
-    if (!detectedKeyword && filename) {
-      const parts = String(filename).split('.');
-      const withoutExt = parts.length > 1 ? parts.slice(0, -1).join(' ') : String(filename);
-      const cleanName = withoutExt
-        .replace(/[-_]/g, ' ')
-        .replace(/whatsapp|image|captura|tela|screenshot|print|\d{4,}/gi, '')
-        .trim();
-      if (cleanName.length >= 3) detectedKeyword = cleanName;
-    }
+/* =============================================================================
+ * RESUMO DE PRODUTO (listagens)
+ * ============================================================================= */
 
-    return NextResponse.json({ keyword: detectedKeyword || 'Creatina' });
-  } catch (err: any) {
-    return NextResponse.json({ keyword: 'Creatina', error: err && err.message });
+type ComposeInput = {
+  product: AnyObj | null;
+  item: AnyObj | null;
+  winner: AnyObj | null;
+  seller: SellerInfo | null;
+  productId: string | null;
+  itemId: string | null;
+};
+
+function composeSummary(c: ComposeInput): ProductSummary {
+  const { product: p, item, winner } = c;
+  const sh: AnyObj = item?.shipping ?? winner?.shipping ?? {};
+  const pictures: AnyObj[] = (p?.pictures?.length ? p.pictures : item?.pictures) ?? [];
+  const photos = extractPhotos(urlsOf(pictures));
+  const first = earliestPhoto(photos);
+  const createdAt: string | null = item?.date_created ?? p?.date_created ?? null;
+  return {
+    productId: c.productId,
+    itemId: c.itemId,
+    title: p?.name ?? item?.title ?? 'Sem título',
+    brand: attr(p, 'BRAND') ?? attr(item, 'BRAND'),
+    model: attr(p, 'MODEL') ?? attr(item, 'MODEL'),
+    image: photos[0]?.url ?? null,
+    price: num(winner?.price) ?? num(item?.price),
+    soldQuantity: num(item?.sold_quantity),
+    listingType: listingLabel(item?.listing_type_id ?? winner?.listing_type_id),
+    fulfillment: sh.logistic_type === 'fulfillment',
+    freeShipping: sh.free_shipping === true,
+    createdAt,
+    createdSource: createdSourceLabel(item, p),
+    daysOnAir: daysSince(createdAt),
+    firstPhotoDate: first ? `${pad2(first.month)}/${first.year}` : null,
+    seller: c.seller,
+    permalink: item?.permalink ?? null,
+  };
+}
+
+async function summaryFromProduct(
+  productId: string,
+  bearer: string | null,
+): Promise<ProductSummary | null> {
+  const pr = await mlFetch(`/products/${productId}`, bearer);
+  if (!pr.ok) return null;
+  const product = pr.data as AnyObj;
+  const winner: AnyObj | null = product.buy_box_winner ?? null;
+  const wid = winner?.item_id;
+  let itemId: string | null = typeof wid === 'string' ? wid : null;
+  if (!itemId) {
+    // Sem buy box: usa a oferta mais barata do catálogo.
+    const its = await mlFetch(`/products/${productId}/items`, bearer);
+    const cheapest = [...listOf(its.data)].sort(priceAsc)[0];
+    const cid = cheapest?.item_id;
+    itemId = typeof cid === 'string' ? cid : null;
   }
+  const item = itemId ? await fetchItem(itemId, bearer) : null;
+  const sellerId = num(winner?.seller_id) ?? num(item?.seller_id);
+  const { info } = await sellerData(sellerId, bearer);
+  return composeSummary({ product, item, winner, seller: info, productId, itemId });
+}
+
+async function summaryFromItem(itemId: string, bearer: string | null): Promise<ProductSummary | null> {
+  const item = await fetchItem(itemId, bearer);
+  if (!item) return null;
+  const cpid = item.catalog_product_id;
+  const { info } = await sellerData(num(item.seller_id), bearer);
+  return composeSummary({
+    product: null,
+    item,
+    winner: null,
+    seller: info,
+    productId: typeof cpid === 'string' ? cpid : null,
+    itemId,
+  });
+}
+
+/* =============================================================================
+ * BUSCA HÍBRIDA: catálogo oficial primeiro, rota antiga como último recurso
+ * ============================================================================= */
+
+async function searchCatalog(
+  q: string,
+  bearer: string | null,
+): Promise<{ productIds: string[]; itemIds: string[]; note: string | null }> {
+  const r = await mlFetch(
+    `/products/search?status=active&site_id=MLB&q=${encodeURIComponent(q)}&limit=12`,
+    bearer,
+  );
+  const results: AnyObj[] = Array.isArray(r.data?.results) ? r.data.results : [];
+  const productIds = results.map((x) => x?.id).filter((x): x is string => typeof x === 'string');
+  if (productIds.length > 0) return { productIds, itemIds: [], note: null };
+
+  const f = await mlFetch(`/sites/MLB/search?q=${encodeURIComponent(q)}&limit=12`, bearer);
+  const fr: AnyObj[] = Array.isArray(f.data?.results) ? f.data.results : [];
+  const itemIds = fr.map((x) => x?.id).filter((x): x is string => typeof x === 'string');
+  if (f.ok && itemIds.length > 0) {
+    return {
+      productIds: [],
+      itemIds,
+      note: 'Resultados obtidos via /sites/MLB/search (requer OAuth de usuário).',
+    };
+  }
+  return {
+    productIds: [],
+    itemIds: [],
+    note:
+      f.status === 403
+        ? 'Rota /sites/MLB/search bloqueada (403). Autorize sua conta ML (OAuth) para liberar a busca completa.'
+        : null,
+  };
 }
