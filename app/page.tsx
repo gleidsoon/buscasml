@@ -7,53 +7,49 @@ import {
   ExternalLink,
   Calendar,
   Truck,
-  DollarSign,
   Star,
-  Award,
-  ShieldCheck,
   Sparkles,
   LayoutGrid,
   List,
-  UserCheck,
   Clock,
-  Package,
   TrendingUp,
   Calculator,
   X,
-  MapPin,
-  Tag,
-  BarChart3,
-  Upload,
-  CheckCircle2,
   Store,
   RefreshCw,
+  KeyRound,
+  CheckCircle2,
 } from 'lucide-react';
 
 export default function BuscasMLModernPlatform() {
-  // Navegação limpa: apenas Explorador de Produtos e Simulador de Lucro
   const [activeView, setActiveView] = useState<'explorador' | 'calculadora'>('explorador');
   const [displayMode, setDisplayMode] = useState<'grid' | 'table'>('grid');
 
-  // Busca Unificada (Aceita Link, Código MLB, Palavra-chave ou Foto)
-  const [searchInput, setSearchInput] = useState('Pote para tempero');
+  // Busca Unificada
+  const [searchInput, setSearchInput] = useState(
+    'https://www.mercadolivre.com.br/coroa-tiara-de-strass-para-noiva-debutante-daminha-miss-luxo/up/MLBU1745689012'
+  );
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [products, setProducts] = useState<any[]>([]);
   const [featuredProduct, setFeaturedProduct] = useState<any>(null);
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string>('');
 
+  // Estado OAuth Oficial do Mercado Livre
+  const [userAccessToken, setUserAccessToken] = useState<string | null>(null);
+  const [showOauthModal, setShowOauthModal] = useState(false);
+
   // Busca por Foto / Print
   const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
   const [detectedPhotoTerm, setDetectedPhotoTerm] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filtros Rápidos e Organizados
+  // Filtros
   const [maxAgeDays, setMaxAgeDays] = useState<number>(9999);
   const [logisticFilter, setLogisticFilter] = useState<'all' | 'full' | 'free'>('all');
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'catalog' | 'normal'>('all');
   const [sortBy, setSortBy] = useState<'revenue' | 'sales' | 'newest' | 'price'>('revenue');
 
-  // Estados do Simulador de Lucro Integrado
+  // Simulador de Margem
   const [calcTitle, setCalcTitle] = useState('Produto Selecionado');
   const [salePrice, setSalePrice] = useState<number>(89.9);
   const [supplierCost, setSupplierCost] = useState<number>(35.0);
@@ -62,108 +58,115 @@ export default function BuscasMLModernPlatform() {
   const [shippingCost, setShippingCost] = useState<number>(18.9);
   const [adType, setAdType] = useState<'classico' | 'premium'>('premium');
 
-  // Enriquecimento direto pelo navegador do usuário (IP Residencial Brasileiro = Zero bloqueio do ML!)
-  const enrichWithBrowserDirectApi = async (itemsList: any[], token?: string | null) => {
+  // Verifica se o Mercado Livre redirecionou de volta com ?code=... do OAuth
+  useEffect(() => {
+    const savedToken = localStorage.getItem('buscasml_oauth_token');
+    if (savedToken) setUserAccessToken(savedToken);
+
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code) {
+      const redirectUri = window.location.origin;
+      fetch(
+        `/api/ml?action=exchange_code&code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.ok && data.access_token) {
+            localStorage.setItem('buscasml_oauth_token', data.access_token);
+            setUserAccessToken(data.access_token);
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        });
+    }
+  }, []);
+
+  // Consulta dados reais do Vendedor direto do navegador do utilizador (IP Residencial no Brasil)
+  const fetchSellerFromBrowser = async (sellerId: string | number, token?: string | null) => {
+    const cleanId = String(sellerId || '').replace(/\D/g, '');
+    if (!cleanId) return null;
     try {
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const validMlbs = itemsList
-        .map((i) => i.id)
-        .filter((id) => /^MLB\d{8,14}$/.test(id))
-        .slice(0, 20);
+      const res = await fetch(`https://api.mercadolibre.com/users/${cleanId}`, { headers });
+      if (!res.ok) return null;
+      const u = await res.json();
+      if (!u?.id) return null;
 
-      if (validMlbs.length === 0) return itemsList;
-
-      const itemsRes = await fetch(`https://api.mercadolibre.com/items?ids=${validMlbs.join(',')}`, {
-        headers,
-      });
-      if (!itemsRes.ok) return itemsList;
-
-      const itemsData = await itemsRes.json();
-      const apiItemsMap: Record<string, any> = {};
-      const sellerIds: number[] = [];
-
-      if (Array.isArray(itemsData)) {
-        for (const entry of itemsData) {
-          if (entry?.body?.id) {
-            apiItemsMap[entry.body.id] = entry.body;
-            if (entry.body.seller_id) sellerIds.push(entry.body.seller_id);
-          }
-        }
-      }
-
-      // Busca dados reais dos vendedores (Nome e Data de Criação da Conta) direto do navegador
-      const apiSellersMap: Record<string, any> = {};
-      const uniqueSellers = Array.from(new Set(sellerIds)).slice(0, 20);
-      if (uniqueSellers.length > 0) {
-        const usersRes = await fetch(`https://api.mercadolibre.com/users?ids=${uniqueSellers.join(',')}`, {
-          headers,
-        });
-        if (usersRes.ok) {
-          const usersData = await usersRes.json();
-          if (Array.isArray(usersData)) {
-            for (const uEntry of usersData) {
-              const u = uEntry?.body;
-              if (u?.id) {
-                const medalNames: Record<string, string> = {
-                  platinum: 'MercadoLíder Platinum',
-                  gold: 'MercadoLíder Gold',
-                  silver: 'MercadoLíder',
-                };
-                apiSellersMap[String(u.id)] = {
-                  seller_id: u.id,
-                  seller_name: u.nickname || `Loja #${u.id}`,
-                  seller_registration_date: u.registration_date,
-                  seller_account_years: u.registration_date
-                    ? Math.max(1, new Date().getFullYear() - new Date(u.registration_date).getFullYear())
-                    : 5,
-                  seller_city: u.address?.city || 'São Paulo',
-                  seller_state: u.address?.state?.replace('BR-', '') || 'SP',
-                  seller_medal: medalNames[u.seller_reputation?.power_seller_status] || 'Vendedor Verificado',
-                  seller_completed_sales: u.seller_reputation?.transactions?.completed || 1200,
-                  seller_permalink: u.permalink,
-                };
-              }
-            }
-          }
-        }
-      }
-
-      return itemsList.map((item) => {
-        const b = apiItemsMap[item.id];
-        if (!b) return item;
-        const s = b.seller_id ? apiSellersMap[String(b.seller_id)] : null;
-        const created = b.date_created || item.date_created;
-        const daysOld = Math.max(1, Math.floor((Date.now() - new Date(created).getTime()) / 86400000));
-        const photos = b.pictures?.map((p: any) => p.secure_url) || item.pictures;
-
-        return {
-          ...item,
-          title: b.title || item.title,
-          price: b.price || item.price,
-          original_price: b.original_price || item.original_price,
-          thumbnail: photos?.[0] || item.thumbnail,
-          pictures: photos || item.pictures,
-          date_created: created,
-          date_source: b.date_created ? 'Exata (API Oficial ML)' : item.date_source,
-          last_updated: b.last_updated || item.last_updated,
-          days_old: daysOld,
-          seller_id: s?.seller_id || b.seller_id || item.seller_id,
-          seller_name: s?.seller_name || item.seller_name,
-          seller_registration_date: s?.seller_registration_date || item.seller_registration_date,
-          seller_account_years: s?.seller_account_years || item.seller_account_years,
-          seller_city: s?.seller_city || item.seller_city,
-          seller_state: s?.seller_state || item.seller_state,
-          seller_medal: s?.seller_medal || item.seller_medal,
-          seller_completed_sales: s?.seller_completed_sales || item.seller_completed_sales,
-          seller_permalink: s?.seller_permalink || item.seller_permalink,
-        };
-      });
+      const medalMap: Record<string, string> = {
+        platinum: 'MercadoLíder Platinum',
+        gold: 'MercadoLíder Gold',
+        silver: 'MercadoLíder',
+      };
+      return {
+        seller_id: u.id,
+        seller_name: u.nickname,
+        seller_registration_date: u.registration_date || null,
+        seller_account_years: u.registration_date
+          ? Math.max(1, new Date().getFullYear() - new Date(u.registration_date).getFullYear())
+          : null,
+        seller_city: u.address?.city || '',
+        seller_state: u.address?.state?.replace('BR-', '') || '',
+        seller_medal:
+          medalMap[u.seller_reputation?.power_seller_status] ||
+          (u.seller_reputation?.level_id === '5_green' ? 'Reputação Verde' : 'Vendedor Ativo'),
+        seller_completed_sales: u.seller_reputation?.transactions?.completed ?? null,
+      };
     } catch {
-      return itemsList;
+      return null;
     }
   };
 
-  // Função Unificada de Busca (Detecta sozinha se é Link/MLB ou Palavra-Chave)
+  // Enriquecimento direto no navegador para nunca cair em bloqueio de IP de servidor
+  const enrichProductInBrowser = async (prod: any, originalUrl: string, token?: string | null) => {
+    let updated = { ...prod };
+
+    // 1. Se ainda faltar foto ou preço e for uma URL do ML, tenta ler via proxy residencial no navegador
+    if ((!updated.thumbnail || !updated.price) && originalUrl.startsWith('http')) {
+      try {
+        const proxyRes = await fetch(
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(originalUrl)}`
+        );
+        if (proxyRes.ok) {
+          const html = await proxyRes.text();
+          if (!html.includes('gz/account-verification')) {
+            const imgMatch = html.match(
+              /https:\/\/http2\.mlstatic\.com\/D_(?:N?Q_)?NP_[^\s)"'<>\\]+?\.(?:webp|jpg|png)/i
+            );
+            const priceMatch =
+              html.match(/property=["']product:price:amount["'][^>]*content=["']([\d.]+)["']/i)?.[1] ||
+              html.match(/itemprop=["']price["'][^>]*content=["']([\d.]+)["']/i)?.[1];
+            const sellerIdMatch = html.match(/"seller_id"\s*:\s*(\d{5,13})/i)?.[1];
+
+            if (imgMatch && !updated.thumbnail) {
+              const hd = imgMatch[0].replace(/-[A-Z]\.(webp|jpg|png)$/i, '-O.$1');
+              updated.thumbnail = hd;
+              updated.pictures = [hd];
+            }
+            if (priceMatch && !updated.price) {
+              updated.price = parseFloat(priceMatch);
+            }
+            if (sellerIdMatch && !updated.seller_id) {
+              updated.seller_id = sellerIdMatch;
+            }
+          }
+        }
+      } catch {
+        // Segue
+      }
+    }
+
+    // 2. Se tivermos o seller_id mas ainda não tivermos a data de criação da conta do vendedor, busca na API /users/{id}
+    if (updated.seller_id && !updated.seller_registration_date) {
+      const sInfo = await fetchSellerFromBrowser(updated.seller_id, token);
+      if (sInfo) {
+        updated = { ...updated, ...sInfo };
+      }
+    }
+
+    return updated;
+  };
+
+  // Busca Unificada (Link, Código MLB ou Palavra-Chave)
   const handleUnifiedSearch = async (e?: React.FormEvent, overrideQuery?: string) => {
     if (e) e.preventDefault();
     const raw = (overrideQuery ?? searchInput).trim();
@@ -178,44 +181,28 @@ export default function BuscasMLModernPlatform() {
       /^MLB-?\d{8,14}$/i.test(raw);
 
     try {
-      // Obtém token da API para enriquecimento híbrido
-      let token: string | null = null;
-      try {
-        const tRes = await fetch('/api/ml?action=token');
-        const tData = await tRes.json();
-        token = tData.access_token || null;
-      } catch {
-        token = null;
-      }
+      const tokenParam = userAccessToken ? `&user_token=${encodeURIComponent(userAccessToken)}` : '';
 
       if (isDirectLinkOrMlb) {
-        setStatusText('Extraindo dossiê completo do anúncio, histórico e dados da conta do vendedor...');
-        const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(raw)}`);
+        setStatusText('Extraindo dados reais do anúncio, fotos HD e conta do vendedor...');
+        const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(raw)}${tokenParam}`);
         const data = await res.json();
 
         if (data?.product) {
-          const enrichedMain = await enrichWithBrowserDirectApi([data.product], token);
-          const mainProd = enrichedMain[0];
-          setFeaturedProduct(mainProd);
-          setSelectedPhotoUrl(mainProd.thumbnail || mainProd.pictures?.[0] || '');
+          const enrichedMain = await enrichProductInBrowser(data.product, raw, userAccessToken);
+          setFeaturedProduct(enrichedMain);
+          setSelectedPhotoUrl(enrichedMain.thumbnail || enrichedMain.pictures?.[0] || '');
 
           if (Array.isArray(data.related_items) && data.related_items.length > 0) {
-            const enrichedList = await enrichWithBrowserDirectApi(data.related_items, token);
-            setProducts(enrichedList);
+            setProducts(data.related_items);
           }
         }
       } else {
-        setStatusText(`Buscando anúncios reais, fotos HD e vendedores para "${raw}"...`);
+        setStatusText(`Buscando anúncios reais para "${raw}" no Mercado Livre...`);
         setFeaturedProduct(null);
-        const res = await fetch(`/api/ml?action=search&q=${encodeURIComponent(raw)}`);
+        const res = await fetch(`/api/ml?action=search&q=${encodeURIComponent(raw)}${tokenParam}`);
         const data = await res.json();
-
-        if (Array.isArray(data?.items) && data.items.length > 0) {
-          const enriched = await enrichWithBrowserDirectApi(data.items, token);
-          setProducts(enriched);
-        } else {
-          setProducts([]);
-        }
+        setProducts(Array.isArray(data?.items) ? data.items : []);
       }
     } finally {
       setLoading(false);
@@ -223,14 +210,14 @@ export default function BuscasMLModernPlatform() {
     }
   };
 
-  // Processa upload ou Ctrl+V de Foto / Print
+  // Upload ou Ctrl+V de Foto
   const handleImageFile = async (file: File) => {
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result as string;
       setUploadedPreview(base64);
       setLoading(true);
-      setStatusText('Analisando a foto com Visão Computacional para identificar o produto...');
+      setStatusText('Identificando produto pela foto...');
 
       try {
         const res = await fetch('/api/ml', {
@@ -239,7 +226,7 @@ export default function BuscasMLModernPlatform() {
           body: JSON.stringify({ imageBase64: base64, filename: file.name }),
         });
         const data = await res.json();
-        const keyword = data.keyword || 'Creatina';
+        const keyword = data.keyword || 'Coroa Tiara Strass';
         setDetectedPhotoTerm(keyword);
         setSearchInput(keyword);
         await handleUnifiedSearch(undefined, keyword);
@@ -251,7 +238,6 @@ export default function BuscasMLModernPlatform() {
     reader.readAsDataURL(file);
   };
 
-  // Suporte a Ctrl+V de Print em qualquer lugar da tela
   useEffect(() => {
     const handlePaste = (evt: ClipboardEvent) => {
       const items = evt.clipboardData?.items;
@@ -268,44 +254,25 @@ export default function BuscasMLModernPlatform() {
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
-  // Busca inicial ao abrir o site
   useEffect(() => {
-    handleUnifiedSearch(undefined, 'Pote para tempero');
+    handleUnifiedSearch(undefined, 'Coroa tiara de strass noiva');
   }, []);
 
-  // Aplica filtros e ordenação na lista de produtos
   const filteredProducts = products
     .filter((item) => {
-      if (maxAgeDays < 9999 && (item.days_old || 30) > maxAgeDays) return false;
+      if (maxAgeDays < 9999 && item.days_old && item.days_old > maxAgeDays) return false;
       if (logisticFilter === 'full' && !String(item.logistic_type).toLowerCase().includes('full')) return false;
       if (logisticFilter === 'free' && !item.free_shipping) return false;
-      if (catalogFilter === 'catalog' && !item.is_catalog) return false;
-      if (catalogFilter === 'normal' && item.is_catalog) return false;
       return true;
     })
     .sort((a, b) => {
       if (sortBy === 'revenue') return (b.revenue_30d || 0) - (a.revenue_30d || 0);
       if (sortBy === 'sales') return (b.sold_quantity || 0) - (a.sold_quantity || 0);
-      if (sortBy === 'newest') return (a.days_old || 30) - (b.days_old || 30);
+      if (sortBy === 'newest') return (a.days_old || 999) - (b.days_old || 999);
       return (a.price || 0) - (b.price || 0);
     });
 
-  // Resumo Geral dos Resultados
-  const avgPrice =
-    filteredProducts.length > 0
-      ? filteredProducts.reduce((acc, p) => acc + Number(p.price || 0), 0) / filteredProducts.length
-      : 0;
-  const totalNicheRevenue = filteredProducts.reduce((acc, p) => acc + Number(p.revenue_30d || 0), 0);
-  const fullPercentage =
-    filteredProducts.length > 0
-      ? Math.round(
-          (filteredProducts.filter((p) => String(p.logistic_type).toLowerCase().includes('full')).length /
-            filteredProducts.length) *
-            100
-        )
-      : 0;
-
-  // Cálculos do Simulador de Lucro
+  // Simulador de Lucro
   const mlRate = adType === 'classico' ? 12 : 17;
   const fixedFee = salePrice > 0 && salePrice < 79 ? 6.25 : 0;
   const effectiveShip = salePrice >= 79 ? shippingCost : 0;
@@ -315,39 +282,29 @@ export default function BuscasMLModernPlatform() {
   const netMargin = salePrice > 0 ? (netProfit / salePrice) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100 selection:bg-yellow-400 selection:text-black">
-      {/* =======================================================================
-          BARRA SUPERIOR MODERNA (GLASSMORPHISM - SEM POLUIÇÃO VISUAL)
-      ======================================================================= */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/85 border-b border-slate-800/80">
+    <div className="min-h-screen bg-[#070b14] text-slate-100">
+      {/* CABEÇALHO MODERNO */}
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/90 border-b border-slate-800/80">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-300 via-yellow-400 to-amber-500 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-yellow-400/20">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-300 via-yellow-400 to-amber-500 flex items-center justify-center text-black font-black text-xl">
               B
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-extrabold tracking-tight text-white">
-                  Buscas<span className="text-yellow-400">ML</span>
-                </span>
-                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-yellow-400/15 text-yellow-300 border border-yellow-400/30">
-                  Pro Radar
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                Inteligência de Anúncios e Vendedores no Mercado Livre
-              </p>
+              <span className="text-lg font-extrabold tracking-tight text-white">
+                Buscas<span className="text-yellow-400">ML</span>
+              </span>
+              <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-yellow-400/15 text-yellow-300 border border-yellow-400/30">
+                Pro Radar
+              </span>
             </div>
           </div>
 
-          {/* Seletor Central Limpo */}
           <div className="flex items-center bg-[#111827] p-1 rounded-xl border border-slate-800">
             <button
               onClick={() => setActiveView('explorador')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
-                activeView === 'explorador'
-                  ? 'bg-yellow-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white'
+                activeView === 'explorador' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
               }`}
             >
               <Search size={15} /> Busca & Raio-X de Produtos
@@ -355,62 +312,90 @@ export default function BuscasMLModernPlatform() {
             <button
               onClick={() => setActiveView('calculadora')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
-                activeView === 'calculadora'
-                  ? 'bg-yellow-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white'
+                activeView === 'calculadora' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
               }`}
             >
               <Calculator size={15} /> Simulador de Margem
             </button>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            API Oficial ML Conectada
-          </div>
+          <button
+            onClick={() => setShowOauthModal(true)}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
+              userAccessToken
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-yellow-400'
+            }`}
+          >
+            <KeyRound size={14} />
+            {userAccessToken ? 'OAuth ML Autenticado ✓' : 'Conectar OAuth ML'}
+          </button>
         </div>
       </header>
+
+      {/* MODAL PARA CONECTAR CONTA DO MERCADO LIVRE (OAUTH 2.0 OFICIAL) */}
+      {showOauthModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-3xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-white">
+                Conectar Chave OAuth Oficial do Mercado Livre
+              </h3>
+              <button onClick={() => setShowOauthModal(false)} className="text-slate-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Para que o Mercado Livre libere 100% dos dados privados da API (data de criação ao segundo de qualquer
+              anúncio `/up/MLBU` e histórico completo de vendedores), confirme se o endereço abaixo está nas{' '}
+              <strong>URIs de redirect</strong> do seu painel DevCenter do Mercado Livre:
+            </p>
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs text-yellow-400 select-all">
+              {typeof window !== 'undefined' ? window.location.origin : 'https://buscasml.vercel.app'}
+            </div>
+            <div className="flex gap-3 pt-2">
+              <a
+                href={`https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=8353552938244269&redirect_uri=${encodeURIComponent(
+                  typeof window !== 'undefined' ? window.location.origin : ''
+                )}`}
+                className="flex-1 py-3 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs text-center"
+              >
+                Autorizar com Minha Conta do Mercado Livre →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeView === 'explorador' && (
           <div className="space-y-8">
-            {/* =================================================================
-                CENTRAL DE BUSCA UNIFICADA (LINK, PALAVRA-CHAVE OU FOTO/PRINT)
-            ================================================================= */}
-            <div className="relative rounded-3xl bg-gradient-to-b from-[#111827] to-[#0c1220] border border-slate-800/90 p-6 sm:p-8 shadow-2xl">
-              <div className="max-w-3xl mb-6">
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                  Pesquisa Inteligente de Produtos e Concorrentes
-                </h1>
-                <p className="text-slate-400 text-sm mt-1">
-                  Digite uma <strong>palavra-chave</strong> para listar os produtos do mercado, cole o{' '}
-                  <strong>link de um anúncio (ou meli.la / MLB)</strong> para abrir o Raio-X, ou envie uma{' '}
-                  <strong>foto / print (`Ctrl+V`)</strong>.
-                </p>
-              </div>
+            {/* BARRA DE BUSCA UNIFICADA */}
+            <div className="rounded-3xl bg-gradient-to-b from-[#111827] to-[#0c1220] border border-slate-800/90 p-6 sm:p-8 shadow-2xl">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
+                Pesquisa Inteligente de Produtos e Concorrentes
+              </h1>
+              <p className="text-slate-400 text-sm mt-1 mb-6">
+                Digite uma <strong>palavra-chave</strong>, cole <strong>qualquer link do Mercado Livre</strong> (incluindo{' '}
+                <code>/up/MLBU...</code> ou <code>meli.la</code>) ou envie uma <strong>foto / print</strong>.
+              </p>
 
-              {/* Barra Principal */}
               <form onSubmit={handleUnifiedSearch} className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
-                  <Search
-                    size={20}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                  />
+                  <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Digite o nome do produto (ex: Creatina, Pote tempero) ou cole qualquer link do Mercado Livre..."
-                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-[#070b14] border border-slate-700/80 text-white placeholder-slate-500 text-sm sm:text-base focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition"
+                    placeholder="Cole o link do anúncio ou digite o nome do produto..."
+                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-[#070b14] border border-slate-700 text-white text-sm sm:text-base focus:outline-none focus:border-yellow-400"
                   />
                 </div>
 
-                {/* Botão de Busca por Foto Integrado */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-5 py-4 rounded-2xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 transition shrink-0"
-                  title="Envie uma foto ou aperte Ctrl+V com um print copiado"
+                  className="px-5 py-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 shrink-0"
                 >
                   <Camera size={18} className="text-yellow-400" />
                   <span>Buscar por Foto</span>
@@ -426,67 +411,34 @@ export default function BuscasMLModernPlatform() {
                   }}
                 />
 
-                {/* Botão Principal de Ação */}
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-8 py-4 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-300 hover:to-amber-300 text-black font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-yellow-400/20 transition shrink-0"
+                  className="px-8 py-4 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shrink-0"
                 >
                   {loading ? <RefreshCw size={18} className="animate-spin" /> : <Sparkles size={18} />}
                   {loading ? 'Analisando...' : 'Analisar Agora'}
                 </button>
               </form>
 
-              {/* Preview quando o usuário envia ou cola uma Foto */}
-              {uploadedPreview && (
-                <div className="mt-4 p-3.5 rounded-2xl bg-slate-900/90 border border-yellow-400/30 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={uploadedPreview}
-                      alt="Foto enviada"
-                      className="w-12 h-12 rounded-xl object-cover bg-white p-0.5"
-                    />
-                    <div>
-                      <span className="text-[11px] font-bold uppercase text-yellow-400">
-                        Busca por Imagem Ativa
-                      </span>
-                      <p className="text-xs text-slate-200 mt-0.5">
-                        Produto identificado na foto: <strong>{detectedPhotoTerm || searchInput}</strong>
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setUploadedPreview(null);
-                      setDetectedPhotoTerm('');
-                    }}
-                    className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              )}
-
-              {/* Sugestões Rápidas para Testar com 1 Clique */}
               <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400 font-medium">Testar busca rápida:</span>
+                <span className="text-slate-400">Buscas rápidas:</span>
                 {[
+                  'Coroa tiara de strass noiva',
                   'Pote para tempero',
                   'Creatina Growth 250g',
                   'Jogo 6 taças diamante',
                   'Cadeira gamer reclinável',
-                  'Parafusadeira furadeira sem fio',
-                  'https://meli.la/1GUtykq',
-                ].map((item) => (
+                ].map((sample) => (
                   <button
-                    key={item}
+                    key={sample}
                     onClick={() => {
-                      setSearchInput(item);
-                      handleUnifiedSearch(undefined, item);
+                      setSearchInput(sample);
+                      handleUnifiedSearch(undefined, sample);
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-[#070b14]/90 hover:bg-slate-800 border border-slate-800 hover:border-yellow-400/40 text-slate-300 transition"
+                    className="px-3 py-1.5 rounded-xl bg-[#070b14] hover:bg-slate-800 border border-slate-800 text-slate-300 transition"
                   >
-                    {item.startsWith('http') ? '🔗 Link: Creatina (meli.la)' : item}
+                    {sample}
                   </button>
                 ))}
               </div>
@@ -499,13 +451,11 @@ export default function BuscasMLModernPlatform() {
               )}
             </div>
 
-            {/* =================================================================
-                DOSSIÊ RAIO-X COMPLETO (QUANDO BUSCA LINK OU CLICA NUM PRODUTO)
-            ================================================================= */}
+            {/* DOSSIÊ RAIO-X COMPLETO DO PRODUTO ANALISADO */}
             {featuredProduct && (
-              <div className="rounded-3xl bg-[#111827] border-2 border-yellow-400/50 p-6 sm:p-8 shadow-2xl space-y-6">
+              <div className="rounded-3xl bg-[#111827] border-2 border-yellow-400/60 p-6 sm:p-8 shadow-2xl space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     <span className="px-3 py-1 rounded-full bg-yellow-400 text-black font-extrabold text-xs uppercase">
                       Dossiê Raio-X Completo
                     </span>
@@ -513,28 +463,32 @@ export default function BuscasMLModernPlatform() {
                       {featuredProduct.id}
                     </span>
                     <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
-                      Fonte: {featuredProduct.date_source || 'API Oficial ML'}
+                      Fonte da Data: {featuredProduct.date_source}
                     </span>
                   </div>
 
                   <button
                     onClick={() => setFeaturedProduct(null)}
-                    className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl transition"
+                    className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl"
                   >
                     <X size={15} /> Fechar Raio-X
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  {/* Galeria de Fotos Reais */}
+                  {/* Coluna da Foto Real */}
                   <div className="lg:col-span-4 flex flex-col justify-between bg-[#0b101d] border border-slate-800 rounded-2xl p-5">
                     <div>
                       <div className="w-full h-72 rounded-xl bg-white p-4 flex items-center justify-center overflow-hidden">
-                        <img
-                          src={selectedPhotoUrl || featuredProduct.thumbnail}
-                          alt={featuredProduct.title}
-                          className="max-h-full max-w-full object-contain"
-                        />
+                        {selectedPhotoUrl || featuredProduct.thumbnail ? (
+                          <img
+                            src={selectedPhotoUrl || featuredProduct.thumbnail}
+                            alt={featuredProduct.title}
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        ) : (
+                          <span className="text-slate-400 text-xs">Imagem não disponível</span>
+                        )}
                       </div>
 
                       {featuredProduct.pictures?.length > 1 && (
@@ -543,9 +497,9 @@ export default function BuscasMLModernPlatform() {
                             <button
                               key={i}
                               onClick={() => setSelectedPhotoUrl(pic)}
-                              className={`w-14 h-14 rounded-lg bg-white p-1 border-2 shrink-0 transition ${
+                              className={`w-14 h-14 rounded-lg bg-white p-1 border-2 shrink-0 ${
                                 (selectedPhotoUrl || featuredProduct.thumbnail) === pic
-                                  ? 'border-yellow-400 scale-105'
+                                  ? 'border-yellow-400'
                                   : 'border-transparent opacity-60 hover:opacity-100'
                               }`}
                             >
@@ -572,77 +526,86 @@ export default function BuscasMLModernPlatform() {
                           setSupplierCost(Number(((featuredProduct.price || 89.9) * 0.4).toFixed(2)));
                           setActiveView('calculadora');
                         }}
-                        className="text-xs bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-3.5 py-2 rounded-xl transition"
+                        className="text-xs bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-3.5 py-2 rounded-xl"
                       >
                         Simular Margem →
                       </button>
                     </div>
                   </div>
 
-                  {/* Informações do Produto + Datas + Vendedor */}
+                  {/* Coluna de Dados Reais do Produto e do Vendedor */}
                   <div className="lg:col-span-8 space-y-5">
                     <div>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-1">
-                        <span>Marca: <strong className="text-white">{featuredProduct.brand}</strong></span>
-                        <span>•</span>
-                        <span>Modalidade: <strong className="text-purple-300">{featuredProduct.ad_type}</strong></span>
-                        <span>•</span>
-                        <span className="text-yellow-400 font-bold">
-                          ★ {featuredProduct.rating} ({featuredProduct.reviews_count} avaliações)
+                        <span>
+                          Marca: <strong className="text-white">{featuredProduct.brand}</strong>
                         </span>
+                        <span>•</span>
+                        <span>
+                          Modalidade: <strong className="text-purple-300">{featuredProduct.ad_type}</strong>
+                        </span>
+                        {featuredProduct.rating && (
+                          <>
+                            <span>•</span>
+                            <span className="text-yellow-400 font-bold">
+                              ★ {featuredProduct.rating} ({featuredProduct.reviews_count || '+'} avaliações)
+                            </span>
+                          </>
+                        )}
                       </div>
                       <h2 className="text-xl sm:text-2xl font-extrabold text-white leading-snug">
                         {featuredProduct.title}
                       </h2>
                     </div>
 
-                    {/* Faixa de Preço e Faturamento */}
+                    {/* Preço e Faturamento */}
                     <div className="p-5 rounded-2xl bg-[#0b101d] border border-slate-800 flex flex-wrap items-center justify-between gap-6">
                       <div>
                         {featuredProduct.original_price > featuredProduct.price && (
                           <span className="text-xs text-slate-400 line-through block">
-                            Preço original: R$ {Number(featuredProduct.original_price).toFixed(2)}
+                            De: R$ {Number(featuredProduct.original_price).toFixed(2)}
                           </span>
                         )}
-                        <div className="flex items-center gap-3">
-                          <span className="text-3xl sm:text-4xl font-black text-yellow-400">
-                            R$ {Number(featuredProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                          {featuredProduct.discount_percent > 0 && (
-                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-xs">
-                              -{featuredProduct.discount_percent}% OFF
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-3xl sm:text-4xl font-black text-yellow-400">
+                          {featuredProduct.price > 0
+                            ? `R$ ${Number(featuredProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                            : 'Ver no ML'}
+                        </span>
                       </div>
 
                       <div className="flex gap-6">
                         <div>
-                          <span className="text-[11px] text-slate-400 uppercase block">Receita Estimada (30d)</span>
+                          <span className="text-[11px] text-slate-400 uppercase block">Receita 30 dias Est.</span>
                           <span className="text-xl font-black text-emerald-400">
-                            R$ {Number(featuredProduct.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                            {featuredProduct.revenue_30d !== null
+                              ? `R$ ${Number(featuredProduct.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
+                              : 'Sob consulta'}
                           </span>
                         </div>
                         <div>
-                          <span className="text-[11px] text-slate-400 uppercase block">Faturamento Total Acumulado</span>
+                          <span className="text-[11px] text-slate-400 uppercase block">Faturamento Acumulado</span>
                           <span className="text-xl font-black text-blue-400">
-                            R$ {Number(featuredProduct.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                            {featuredProduct.total_revenue !== null
+                              ? `R$ ${Number(featuredProduct.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
+                              : 'Sob consulta'}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Grade de Métricas do Anúncio (Criação, Vendas, Logística) */}
+                    {/* Métricas de Criação e Vendas */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
                           <Calendar size={13} className="text-yellow-400" /> Criação do Anúncio
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          {new Date(featuredProduct.date_created).toLocaleDateString('pt-BR')}
+                          {featuredProduct.date_created
+                            ? new Date(featuredProduct.date_created).toLocaleDateString('pt-BR')
+                            : 'Conectar OAuth'}
                         </p>
                         <span className="text-[11px] text-emerald-400">
-                          Há {featuredProduct.days_old} dias no ar
+                          {featuredProduct.days_old ? `Há ${featuredProduct.days_old} dias no ar` : 'Data da 1ª Foto / API'}
                         </span>
                       </div>
 
@@ -651,10 +614,12 @@ export default function BuscasMLModernPlatform() {
                           <TrendingUp size={13} className="text-blue-400" /> Volume de Vendas
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          {Number(featuredProduct.sold_quantity).toLocaleString('pt-BR')} vendidos
+                          {featuredProduct.sold_quantity !== null
+                            ? `${Number(featuredProduct.sold_quantity).toLocaleString('pt-BR')} vendidos`
+                            : featuredProduct.sold_label}
                         </p>
                         <span className="text-[11px] text-blue-300">
-                          Média: {featuredProduct.daily_sales} vendas/dia
+                          {featuredProduct.daily_sales ? `Média: ${featuredProduct.daily_sales}/dia` : 'Contagem pública ML'}
                         </span>
                       </div>
 
@@ -666,28 +631,32 @@ export default function BuscasMLModernPlatform() {
                           {featuredProduct.logistic_type}
                         </p>
                         <span className="text-[11px] text-slate-400">
-                          {featuredProduct.free_shipping ? '✓ Frete Grátis' : 'Frete pago pelo cliente'}
+                          {featuredProduct.free_shipping ? '✓ Frete Grátis' : 'Frete por conta do cliente'}
                         </span>
                       </div>
 
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
-                          <Clock size={13} className="text-purple-400" /> Última Atualização
+                          <Clock size={13} className="text-purple-400" /> Estoque / Status
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          {new Date(featuredProduct.last_updated).toLocaleDateString('pt-BR')}
+                          {featuredProduct.available_quantity
+                            ? `${featuredProduct.available_quantity} disponíveis`
+                            : 'Anúncio Ativo'}
                         </p>
                         <span className="text-[11px] text-slate-400">
-                          Estoque: ~{featuredProduct.available_quantity} un.
+                          {featuredProduct.last_updated
+                            ? `Atualizado ${new Date(featuredProduct.last_updated).toLocaleDateString('pt-BR')}`
+                            : 'Sincronizado'}
                         </span>
                       </div>
                     </div>
 
-                    {/* CARD COMPLETO DO VENDEDOR (NOME, DATA DE CRIAÇÃO DA CONTA, MEDALHA E CIDADE) */}
+                    {/* DADOS REAIS DO VENDEDOR */}
                     <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-slate-900 to-purple-500/10 border border-blue-500/30">
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                         <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
-                          <Store size={15} /> Raio-X Completo do Vendedor / Conta Concorrente
+                          <Store size={15} /> Dados do Vendedor / Conta Concorrente
                         </h3>
                         <span className="px-2.5 py-0.5 rounded-full bg-yellow-400/20 text-yellow-300 text-[11px] font-bold">
                           ★ {featuredProduct.seller_medal}
@@ -703,26 +672,29 @@ export default function BuscasMLModernPlatform() {
                         </div>
 
                         <div>
-                          <span className="text-slate-400 block">Conta Criada em (Idade da Loja)</span>
+                          <span className="text-slate-400 block">Data de Criação da Conta</span>
                           <p className="text-sm font-extrabold text-emerald-400 mt-0.5">
-                            {new Date(featuredProduct.seller_registration_date).toLocaleDateString('pt-BR')}{' '}
-                            <span className="text-xs font-normal text-slate-300">
-                              ({featuredProduct.seller_account_years} anos no ML)
-                            </span>
+                            {featuredProduct.seller_registration_date
+                              ? `${new Date(featuredProduct.seller_registration_date).toLocaleDateString('pt-BR')} (${featuredProduct.seller_account_years} anos)`
+                              : 'Conectar OAuth para ver'}
                           </p>
                         </div>
 
                         <div>
-                          <span className="text-slate-400 block">Localização do Vendedor</span>
+                          <span className="text-slate-400 block">Localização</span>
                           <p className="text-sm font-bold text-slate-200 mt-0.5">
-                            {featuredProduct.seller_city} - {featuredProduct.seller_state}
+                            {featuredProduct.seller_city || featuredProduct.seller_state
+                              ? `${featuredProduct.seller_city} ${featuredProduct.seller_state}`
+                              : 'Brasil'}
                           </p>
                         </div>
 
                         <div>
-                          <span className="text-slate-400 block">Vendas Concluídas da Loja</span>
+                          <span className="text-slate-400 block">Total de Vendas da Loja</span>
                           <p className="text-sm font-bold text-yellow-400 mt-0.5">
-                            +{Number(featuredProduct.seller_completed_sales).toLocaleString('pt-BR')} vendas
+                            {featuredProduct.seller_completed_sales
+                              ? `+${Number(featuredProduct.seller_completed_sales).toLocaleString('pt-BR')} concluídas`
+                              : 'Ver perfil da loja'}
                           </p>
                         </div>
                       </div>
@@ -732,248 +704,162 @@ export default function BuscasMLModernPlatform() {
               </div>
             )}
 
-            {/* =================================================================
-                BARRA DE FILTROS E RESUMO DO MERCADO PARA A PALAVRA-CHAVE
-            ================================================================= */}
-            {products.length > 0 && (
+            {/* LISTA DE PRODUTOS ENCONTRADOS NA PALAVRA-CHAVE */}
+            {filteredProducts.length > 0 && (
               <>
-                {/* Cards de Resumo da Palavra-Chave */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
-                    <span className="text-xs text-slate-400">Anúncios Analisados</span>
-                    <p className="text-2xl font-black text-white mt-1">{filteredProducts.length} produtos</p>
-                  </div>
-                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
-                    <span className="text-xs text-slate-400">Ticket Médio da Busca</span>
-                    <p className="text-2xl font-black text-yellow-400 mt-1">R$ {avgPrice.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
-                    <span className="text-xs text-slate-400">Movimentação Mensal (Amostra)</span>
-                    <p className="text-2xl font-black text-emerald-400 mt-1">
-                      R$ {totalNicheRevenue.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                    </p>
-                  </div>
-                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
-                    <span className="text-xs text-slate-400">Presença no Envio Full</span>
-                    <p className="text-2xl font-black text-blue-400 mt-1">{fullPercentage}% dos anúncios</p>
-                  </div>
-                </div>
-
-                {/* Controles de Filtro e Visualização */}
                 <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
                   <div className="flex flex-wrap items-center gap-3">
-                    <div>
-                      <span className="text-slate-400 mr-2">Idade do Anúncio:</span>
-                      <select
-                        value={maxAgeDays}
-                        onChange={(e) => setMaxAgeDays(Number(e.target.value))}
-                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
-                      >
-                        <option value={9999}>Todas as idades</option>
-                        <option value={30}>Criados há até 30 dias</option>
-                        <option value={60}>Criados há até 60 dias</option>
-                        <option value={90}>Criados há até 90 dias</option>
-                        <option value={180}>Criados há até 180 dias</option>
-                      </select>
-                    </div>
+                    <span className="font-bold text-white">
+                      {filteredProducts.length} produtos reais encontrados
+                    </span>
+                    <select
+                      value={maxAgeDays}
+                      onChange={(e) => setMaxAgeDays(Number(e.target.value))}
+                      className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
+                    >
+                      <option value={9999}>Qualquer idade de anúncio</option>
+                      <option value={30}>Criados há até 30 dias</option>
+                      <option value={60}>Criados há até 60 dias</option>
+                      <option value={90}>Criados há até 90 dias</option>
+                      <option value={180}>Criados há até 180 dias</option>
+                    </select>
 
-                    <div>
-                      <span className="text-slate-400 mr-2">Logística:</span>
-                      <select
-                        value={logisticFilter}
-                        onChange={(e) => setLogisticFilter(e.target.value as any)}
-                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
-                      >
-                        <option value="all">Todas</option>
-                        <option value="full">Somente Full ⚡</option>
-                        <option value="free">Com Frete Grátis</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <span className="text-slate-400 mr-2">Ordenar por:</span>
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as any)}
-                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
-                      >
-                        <option value="revenue">Maior Receita (30d)</option>
-                        <option value="sales">Mais Vendidos</option>
-                        <option value="newest">Mais Recentes (Menor Idade)</option>
-                        <option value="price">Menor Preço</option>
-                      </select>
-                    </div>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as any)}
+                      className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
+                    >
+                      <option value="revenue">Maior Receita Estimada</option>
+                      <option value="sales">Maior Volume de Vendas</option>
+                      <option value="newest">Mais Recentes (Menor Idade)</option>
+                      <option value="price">Menor Preço</option>
+                    </select>
                   </div>
 
-                  {/* Alternador Grade de Cards vs Tabela */}
                   <div className="flex items-center gap-1 bg-[#070b14] p-1 rounded-xl border border-slate-800">
                     <button
                       onClick={() => setDisplayMode('grid')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition ${
-                        displayMode === 'grid' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold ${
+                        displayMode === 'grid' ? 'bg-yellow-400 text-black' : 'text-slate-400'
                       }`}
                     >
-                      <LayoutGrid size={14} /> Cards Detalhados
+                      <LayoutGrid size={14} /> Cards
                     </button>
                     <button
                       onClick={() => setDisplayMode('table')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition ${
-                        displayMode === 'table' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold ${
+                        displayMode === 'table' ? 'bg-yellow-400 text-black' : 'text-slate-400'
                       }`}
                     >
-                      <List size={14} /> Tabela Completa
+                      <List size={14} /> Tabela
                     </button>
                   </div>
                 </div>
 
-                {/* =============================================================
-                    MODO 1: GRADE DE CARDS MODERNA E ATRATIVA (COM FOTOS GRANDES)
-                ============================================================= */}
-                {displayMode === 'grid' && (
+                {displayMode === 'grid' ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredProducts.map((item) => (
+                    {filteredProducts.map((item, idx) => (
                       <div
-                        key={item.id}
-                        className="group bg-[#111827] border border-slate-800/90 hover:border-yellow-400/60 rounded-3xl overflow-hidden flex flex-col justify-between transition-all duration-200 hover:shadow-2xl hover:shadow-yellow-400/5"
+                        key={`${item.id}-${idx}`}
+                        className="group bg-[#111827] border border-slate-800 hover:border-yellow-400/60 rounded-3xl overflow-hidden flex flex-col justify-between transition"
                       >
                         <div>
-                          {/* Área da Foto Real do Produto */}
                           <div className="relative h-56 bg-white p-4 flex items-center justify-center overflow-hidden">
                             {item.thumbnail ? (
                               <img
                                 src={item.thumbnail}
                                 alt={item.title}
-                                className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
+                                className="max-h-full max-w-full object-contain group-hover:scale-105 transition"
                               />
                             ) : (
-                              <div className="text-slate-400 text-xs">Sem imagem</div>
+                              <div className="text-slate-400 text-xs">Sem foto</div>
                             )}
-
-                            {/* Badges Superiores na Foto */}
-                            <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
-                              <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-yellow-400 font-mono font-bold text-[11px] backdrop-blur-md">
+                            <div className="absolute top-3 left-3 flex gap-1.5">
+                              <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-yellow-400 font-mono font-bold text-[11px]">
                                 {item.id}
-                              </span>
-                              {String(item.logistic_type).includes('Full') && (
-                                <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-extrabold text-[11px]">
-                                  ⚡ FULL
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="absolute top-3 right-3">
-                              <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-white font-bold text-[11px] backdrop-blur-md">
-                                ★ {item.rating} ({item.reviews_count})
                               </span>
                             </div>
                           </div>
 
-                          {/* Corpo do Card */}
-                          <div className="p-5 space-y-4">
+                          <div className="p-5 space-y-3">
                             <h3
                               onClick={() => {
-                                setFeaturedProduct(item);
-                                setSelectedPhotoUrl(item.thumbnail);
+                                setSearchInput(item.permalink);
+                                handleUnifiedSearch(undefined, item.permalink);
                                 window.scrollTo({ top: 0, behavior: 'smooth' });
                               }}
-                              className="font-bold text-sm text-white group-hover:text-yellow-400 line-clamp-2 cursor-pointer transition leading-snug"
+                              className="font-bold text-sm text-white group-hover:text-yellow-400 line-clamp-2 cursor-pointer"
                             >
                               {item.title}
                             </h3>
 
-                            {/* Preço e Faturamento Mensal */}
-                            <div className="flex items-baseline justify-between pt-1">
-                              <div>
-                                {item.original_price > item.price && (
-                                  <span className="text-[11px] text-slate-500 line-through block">
-                                    R$ {Number(item.original_price).toFixed(2)}
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-2xl font-black text-yellow-400">
+                                R$ {Number(item.price || 0).toFixed(2)}
+                              </span>
+                              {item.revenue_30d !== null && (
+                                <div className="text-right">
+                                  <span className="text-[10px] text-slate-400 uppercase block">Receita Est.</span>
+                                  <span className="text-sm font-extrabold text-emerald-400">
+                                    R$ {Number(item.revenue_30d).toLocaleString('pt-BR')}
                                   </span>
-                                )}
-                                <span className="text-2xl font-black text-yellow-400">
-                                  R$ {Number(item.price).toFixed(2)}
-                                </span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-[10px] text-slate-400 uppercase block">Receita 30 dias</span>
-                                <span className="text-base font-extrabold text-emerald-400">
-                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                                </span>
-                              </div>
+                                </div>
+                              )}
                             </div>
 
-                            {/* Bloco de Datas do Anúncio e Vendas */}
-                            <div className="grid grid-cols-2 gap-2.5 p-3 rounded-2xl bg-[#090d16] border border-slate-800/80 text-xs">
+                            <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-[#090d16] border border-slate-800 text-xs">
                               <div>
-                                <span className="text-[10px] text-slate-400 block">Criado em (Anúncio)</span>
+                                <span className="text-[10px] text-slate-400 block">Criação do Anúncio</span>
                                 <strong className="text-white">
-                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                  {item.date_created
+                                    ? new Date(item.date_created).toLocaleDateString('pt-BR')
+                                    : 'Ver Raio-X'}
                                 </strong>
-                                <span className="block text-[10px] text-emerald-400">
-                                  Há {item.days_old} dias
-                                </span>
+                                {item.days_old && (
+                                  <span className="block text-[10px] text-emerald-400">Há {item.days_old} dias</span>
+                                )}
                               </div>
                               <div>
                                 <span className="text-[10px] text-slate-400 block">Vendas Capturadas</span>
                                 <strong className="text-blue-400">
-                                  {Number(item.sold_quantity).toLocaleString('pt-BR')} un.
+                                  {item.sold_quantity !== null ? `+${item.sold_quantity} un.` : 'Ver Raio-X'}
                                 </strong>
-                                <span className="block text-[10px] text-slate-400">
-                                  {item.daily_sales} vendas/dia
-                                </span>
+                                {item.daily_sales && (
+                                  <span className="block text-[10px] text-slate-400">{item.daily_sales}/dia</span>
+                                )}
                               </div>
                             </div>
 
-                            {/* Bloco Completo do Vendedor (Nome + Data da Conta Criada) */}
-                            <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800/90 text-xs space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-slate-400 uppercase font-semibold">
-                                  Vendedor:
-                                </span>
-                                <span className="text-[10px] text-yellow-400 font-bold">
-                                  {item.seller_medal} • {item.seller_state}
-                                </span>
-                              </div>
-                              <p className="font-bold text-slate-100 truncate">{item.seller_name}</p>
-                              <p className="text-[11px] text-slate-400">
-                                Conta criada em:{' '}
-                                <strong className="text-slate-200">
-                                  {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')}
-                                </strong>{' '}
-                                ({item.seller_account_years} anos no ML)
+                            <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs">
+                              <span className="text-[10px] text-slate-400 block">Vendedor:</span>
+                              <p className="font-bold text-slate-100 truncate">
+                                {item.seller_name || 'Clique em Raio-X para extrair vendedor'}
                               </p>
+                              {item.seller_registration_date && (
+                                <p className="text-[11px] text-emerald-400 mt-0.5">
+                                  Conta criada em: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        {/* Rodapé de Ações do Card */}
                         <div className="px-5 pb-5 pt-2 flex gap-2">
                           <button
                             onClick={() => {
-                              setFeaturedProduct(item);
-                              setSelectedPhotoUrl(item.thumbnail);
+                              setSearchInput(item.permalink);
+                              handleUnifiedSearch(undefined, item.permalink);
                               window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
-                            className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs transition"
+                            className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs"
                           >
-                            Abrir Raio-X Completo
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCalcTitle(item.title);
-                              setSalePrice(Number(item.price));
-                              setSupplierCost(Number((item.price * 0.42).toFixed(2)));
-                              setActiveView('calculadora');
-                            }}
-                            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition"
-                          >
-                            Lucro
+                            Extrair Raio-X Completo
                           </button>
                           <a
                             href={item.permalink}
                             target="_blank"
                             rel="noreferrer"
-                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 flex items-center justify-center transition"
-                            title="Abrir no Mercado Livre"
+                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 flex items-center justify-center"
                           >
                             <ExternalLink size={15} />
                           </a>
@@ -981,104 +867,65 @@ export default function BuscasMLModernPlatform() {
                       </div>
                     ))}
                   </div>
-                )}
-
-                {/* =============================================================
-                    MODO 2: TABELA ANALÍTICA COMPLETA (COM FOTO AO LADO E VENDEDOR)
-                ============================================================= */}
-                {displayMode === 'table' && (
-                  <div className="bg-[#111827] border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                ) : (
+                  <div className="bg-[#111827] border border-slate-800 rounded-3xl overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-[#0b101d]">
                             <th className="p-4">Foto & Produto</th>
                             <th className="p-4">Preço</th>
-                            <th className="p-4">Vendas & Ritmo</th>
-                            <th className="p-4">Receita 30d</th>
-                            <th className="p-4">Data Criação do Anúncio</th>
-                            <th className="p-4">Vendedor & Criação da Conta</th>
-                            <th className="p-4">Ações</th>
+                            <th className="p-4">Vendas</th>
+                            <th className="p-4">Criação do Anúncio</th>
+                            <th className="p-4">Vendedor</th>
+                            <th className="p-4">Ação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/70">
-                          {filteredProducts.map((item) => (
-                            <tr key={item.id} className="hover:bg-slate-800/40 transition">
+                          {filteredProducts.map((item, idx) => (
+                            <tr key={`${item.id}-${idx}`} className="hover:bg-slate-800/40">
                               <td className="p-4 flex items-center gap-3.5 max-w-md">
                                 <img
                                   src={item.thumbnail}
-                                  alt={item.title}
-                                  className="w-16 h-16 rounded-xl bg-white object-contain p-1.5 shrink-0 border border-slate-700"
+                                  alt=""
+                                  className="w-14 h-14 rounded-xl bg-white object-contain p-1 shrink-0"
                                 />
-                                <div className="min-w-0">
-                                  <button
-                                    onClick={() => {
-                                      setFeaturedProduct(item);
-                                      setSelectedPhotoUrl(item.thumbnail);
-                                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                                    }}
-                                    className="font-bold text-white hover:text-yellow-400 text-left line-clamp-2 transition"
-                                  >
-                                    {item.title}
-                                  </button>
-                                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px]">
-                                    <span className="font-mono text-blue-400">{item.id}</span>
-                                    <span className="text-emerald-400 font-semibold">{item.logistic_type}</span>
-                                    <span className="text-yellow-400">★ {item.rating}</span>
-                                  </div>
+                                <div>
+                                  <p className="font-bold text-white line-clamp-2">{item.title}</p>
+                                  <span className="font-mono text-[11px] text-blue-400">{item.id}</span>
                                 </div>
                               </td>
-
-                              <td className="p-4 whitespace-nowrap">
-                                <span className="text-sm font-black text-yellow-400">
-                                  R$ {Number(item.price).toFixed(2)}
-                                </span>
-                                <span className="block text-[10px] text-slate-400">{item.ad_type}</span>
+                              <td className="p-4 font-black text-yellow-400 text-sm whitespace-nowrap">
+                                R$ {Number(item.price || 0).toFixed(2)}
                               </td>
-
-                              <td className="p-4 whitespace-nowrap">
-                                <span className="font-bold text-white text-sm">
-                                  {Number(item.sold_quantity).toLocaleString('pt-BR')} un.
-                                </span>
-                                <span className="block text-[11px] text-blue-400">
-                                  {item.daily_sales} vendas/dia
-                                </span>
+                              <td className="p-4 font-bold text-white whitespace-nowrap">
+                                {item.sold_quantity !== null ? `+${item.sold_quantity} un.` : 'Ver Raio-X'}
                               </td>
-
                               <td className="p-4 whitespace-nowrap">
-                                <span className="font-black text-emerald-400 text-sm">
-                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                <span className="font-bold text-white block">
+                                  {item.date_created
+                                    ? new Date(item.date_created).toLocaleDateString('pt-BR')
+                                    : 'Ver Raio-X'}
                                 </span>
-                                <span className="block text-[10px] text-slate-400">
-                                  Total: R$ {Number(item.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                                </span>
+                                {item.days_old && (
+                                  <span className="text-[11px] text-emerald-400">Há {item.days_old} dias</span>
+                                )}
                               </td>
-
                               <td className="p-4 whitespace-nowrap">
-                                <span className="font-bold text-white">
-                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                <span className="font-bold text-white block">
+                                  {item.seller_name || 'Clique em Raio-X'}
                                 </span>
-                                <span className="block text-[11px] text-emerald-400 font-semibold">
-                                  Há {item.days_old} dias
-                                </span>
+                                {item.seller_registration_date && (
+                                  <span className="text-[11px] text-slate-400">
+                                    Conta: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')}
+                                  </span>
+                                )}
                               </td>
-
                               <td className="p-4 whitespace-nowrap">
-                                <span className="font-bold text-white block">{item.seller_name}</span>
-                                <span className="text-[11px] text-slate-300 block">
-                                  Conta criada: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')} (
-                                  {item.seller_account_years}a)
-                                </span>
-                                <span className="text-[10px] text-yellow-400">
-                                  {item.seller_medal} • {item.seller_state}
-                                </span>
-                              </td>
-
-                              <td className="p-4 whitespace-nowrap space-x-2">
                                 <button
                                   onClick={() => {
-                                    setFeaturedProduct(item);
-                                    setSelectedPhotoUrl(item.thumbnail);
+                                    setSearchInput(item.permalink);
+                                    handleUnifiedSearch(undefined, item.permalink);
                                     window.scrollTo({ top: 0, behavior: 'smooth' });
                                   }}
                                   className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-3 py-2 rounded-xl"
@@ -1098,30 +945,22 @@ export default function BuscasMLModernPlatform() {
           </div>
         )}
 
-        {/* ===================================================================
-            SIMULADOR DE MARGEM E VIABILIDADE DE COMPRA
-        =================================================================== */}
         {activeView === 'calculadora' && (
           <div className="max-w-4xl mx-auto space-y-6">
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-extrabold">Simulador de Margem e Viabilidade no Mercado Livre</h1>
-                <p className="text-slate-400 text-sm">
-                  Descubra exatamente quanto sobra no bolso e o preço máximo para pagar no fornecedor
-                </p>
-              </div>
+              <h1 className="text-2xl font-extrabold">Simulador de Margem e Viabilidade</h1>
               <button
                 onClick={() => setActiveView('explorador')}
                 className="text-xs bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold"
               >
-                ← Voltar para Busca de Produtos
+                ← Voltar para Busca
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 space-y-4 text-xs">
                 <div>
-                  <label className="text-slate-400 block mb-1">Produto Analisado</label>
+                  <label className="text-slate-400 block mb-1">Produto</label>
                   <input
                     type="text"
                     value={calcTitle}
@@ -1153,7 +992,7 @@ export default function BuscasMLModernPlatform() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="text-slate-400 block mb-1">Imposto NF (%)</label>
+                    <label className="text-slate-400 block mb-1">Imposto (%)</label>
                     <input
                       type="number"
                       step="0.5"
@@ -1183,28 +1022,6 @@ export default function BuscasMLModernPlatform() {
                     />
                   </div>
                 </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setAdType('classico')}
-                    className={`flex-1 py-3 rounded-xl font-bold border ${
-                      adType === 'classico'
-                        ? 'bg-yellow-400 text-black border-yellow-400'
-                        : 'border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    Clássico (12%)
-                  </button>
-                  <button
-                    onClick={() => setAdType('premium')}
-                    className={`flex-1 py-3 rounded-xl font-bold border ${
-                      adType === 'premium'
-                        ? 'bg-yellow-400 text-black border-yellow-400'
-                        : 'border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    Premium (17%)
-                  </button>
-                </div>
               </div>
 
               <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 flex flex-col justify-between">
@@ -1218,7 +1035,7 @@ export default function BuscasMLModernPlatform() {
                     <span className="text-red-400 font-bold">- R$ {taxVal.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-slate-400">
-                    <span>Custo Embalagem + Frete Grátis:</span>
+                    <span>Custo Embalagem + Frete:</span>
                     <span className="text-red-400 font-bold">
                       - R$ {(packagingCost + effectiveShip).toFixed(2)}
                     </span>
