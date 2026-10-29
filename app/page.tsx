@@ -155,6 +155,8 @@ type CalcForm = {
 
 type Notice = { kind: 'ok' | 'erro' | 'aviso'; text: string };
 
+type ChipOption = { value: string; label: string };
+
 /* =============================================================================
  * CONSTANTES
  * ============================================================================= */
@@ -723,16 +725,16 @@ function ToggleButton({
   );
 }
 
-function ChipGroup<T extends string>({
+function ChipGroup({
   label,
   options,
   value,
   onChange,
 }: {
   label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (next: T) => void;
+  options: ChipOption[];
+  value: string;
+  onChange: (next: string) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -1083,17 +1085,17 @@ function KeywordView({
       {result.note && <Banner kind="aviso">{result.note}</Banner>}
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/5 bg-[#111827] p-3">
-        <ChipGroup<AgeFilter>
+        <ChipGroup
           label="Idade"
           options={AGE_OPTIONS}
           value={filters.age}
-          onChange={(v) => onFilters({ age: v })}
+          onChange={(v) => onFilters({ age: v as AgeFilter })}
         />
-        <ChipGroup<LogisticFilter>
+        <ChipGroup
           label="Logística"
           options={LOGISTIC_OPTIONS}
           value={filters.logistic}
-          onChange={(v) => onFilters({ logistic: v })}
+          onChange={(v) => onFilters({ logistic: v as LogisticFilter })}
         />
         <label className="ml-auto flex items-center gap-2 text-xs text-slate-400">
           Ordenar
@@ -1223,7 +1225,8 @@ function DossierView({
     rev.dailyUnits !== null
       ? `${rev.dailyUnits.toFixed(2).replace('.', ',')} vendas/dia (média desde a criação)`
       : d.soldSource;
-  const ratingCountText = d.ratingCount === null ? 'Opiniões ocultas' : `${formatInt(d.ratingCount)} opiniões`;
+  const ratingCountText =
+    d.ratingCount === null ? 'Opiniões ocultas' : `${formatInt(d.ratingCount)} opiniões`;
 
   return (
     <section className="space-y-6">
@@ -1459,3 +1462,597 @@ function CalculatorView({
               <Field label="Custo do frete (R$)">
                 <input
                   inputMode="decimal"
+                  className={INPUT_CLASS}
+                  value={calc.shippingCost}
+                  onChange={(e) => onChange({ shippingCost: e.target.value })}
+                  placeholder="0,00"
+                />
+              </Field>
+            )}
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          {isPremium
+            ? 'Premium: taxa fixa de R$ 6,25 em vendas abaixo de R$ 79.'
+            : 'Clássico: sem taxa fixa nesta simulação. Confira no simulador oficial do Mercado Livre.'}
+        </p>
+      </div>
+
+      <div className="space-y-4 lg:col-span-2">
+        <div className="space-y-4 rounded-2xl border border-white/5 bg-[#111827] p-5">
+          <Stat
+            label="Lucro líquido por venda"
+            value={hasPrice ? formatBRL(margin.netProfit) : 'Informe o preço'}
+            valueClass={!hasPrice ? 'text-slate-400' : margin.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}
+          />
+          <Stat
+            label="Margem líquida"
+            value={hasPrice ? formatPercent(margin.netMarginPct) : 'Informe o preço'}
+            valueClass={belowTarget ? 'text-red-400' : 'text-emerald-400'}
+            hint={`Meta: ${MARGIN_TARGET_PCT}%`}
+          />
+          <Stat
+            label={`Teto no fornecedor (${MARGIN_TARGET_PCT}%)`}
+            value={hasPrice ? formatBRL(margin.maxSupplierCost) : 'Informe o preço'}
+            valueClass="text-[#facc15]"
+            hint={
+              hasPrice && margin.maxSupplierCost <= 0
+                ? 'Com este preço, a margem alvo não é atingível'
+                : 'Maior custo que ainda entrega a margem alvo'
+            }
+          />
+        </div>
+
+        <div className="space-y-2 rounded-2xl border border-white/5 bg-[#111827] p-5 text-sm">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Descontos calculados</p>
+          <div className="flex justify-between text-slate-300">
+            <span>Comissão ({isPremium ? '17%' : '12%'})</span>
+            <span>{formatBRL(margin.commission, 'R$ 0,00')}</span>
+          </div>
+          <div className="flex justify-between text-slate-300">
+            <span>Taxa fixa</span>
+            <span>{formatBRL(margin.fixedFee, 'R$ 0,00')}</span>
+          </div>
+          <div className="flex justify-between text-slate-300">
+            <span>Imposto</span>
+            <span>{formatBRL(margin.tax, 'R$ 0,00')}</span>
+          </div>
+          <div className="flex justify-between text-slate-300">
+            <span>Frete grátis</span>
+            <span>{formatBRL(margin.shipping, 'R$ 0,00')}</span>
+          </div>
+        </div>
+
+        {belowTarget && (
+          <Banner kind="aviso">
+            Margem abaixo da meta de {MARGIN_TARGET_PCT}%. Revise o preço ou o custo no fornecedor.
+          </Banner>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* =============================================================================
+ * MODAL OAUTH
+ * ============================================================================= */
+
+function OAuthModal({
+  session,
+  onClose,
+  onDisconnect,
+}: {
+  session: StoredSession | null;
+  onClose: () => void;
+  onDisconnect: () => void;
+}) {
+  const origin = window.location.origin;
+  return (
+    <Modal title="Autorizar Conta ML (OAuth)" onClose={onClose}>
+      <div className="space-y-4 text-sm text-slate-300">
+        <p>
+          Ao autorizar, o Mercado Livre libera as rotas privadas da sua conta. O client secret continua somente no
+          servidor.
+        </p>
+        <div>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">redirect_uri desta aplicação</p>
+          <code className="block break-all rounded-lg bg-[#070b14] px-3 py-2 text-xs text-[#facc15]">{origin}</code>
+          <p className="mt-2 text-xs text-slate-500">
+            Cadastre exatamente este endereço no DevCenter, sem barra final.
+          </p>
+        </div>
+
+        {session ? (
+          <div className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <p className="flex items-center gap-2 font-medium text-emerald-200">
+              <Check size={16} /> Conta conectada
+            </p>
+            <p className="text-xs text-slate-300">ID do usuário: {session.tokens.userId ?? HIDDEN}</p>
+            <p className="text-xs text-slate-300">
+              Token válido até {new Date(session.tokens.expiresAt).toLocaleString('pt-BR')}. Ele é renovado
+              automaticamente.
+            </p>
+            <button type="button" onClick={onDisconnect} className={BTN_GHOST}>
+              <LogOut size={14} /> Desconectar
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = buildAuthorizeUrl(origin);
+            }}
+            className={`${BTN_PRIMARY} w-full`}
+          >
+            <Key size={16} /> Ir para o Mercado Livre
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* =============================================================================
+ * COMPONENTE PRINCIPAL
+ * ============================================================================= */
+
+export default function BuscasMLPro() {
+  const [tab, setTab] = useState<TabKey>('busca');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [keywordResult, setKeywordResult] = useState<KeywordAnalysis | null>(null);
+  const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [calc, setCalc] = useState<CalcForm>(INITIAL_CALC);
+  const [session, setSession] = useState<StoredSession | null>(null);
+  const [envStatus, setEnvStatus] = useState<StatusEnvelope | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+
+  const sessionRef = useRef<StoredSession | null>(null);
+  const refreshRef = useRef<Promise<string | null> | null>(null);
+  const exchangeStartedRef = useRef(false);
+  const photoUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchSeqRef = useRef(0);
+
+  const margin = useMemo(
+    () =>
+      computeMargin({
+        salePrice: parseInputNumber(calc.salePrice),
+        supplierCost: parseInputNumber(calc.supplierCost),
+        packagingCost: parseInputNumber(calc.packagingCost),
+        taxPct: parseInputNumber(calc.taxPct),
+        listing: calc.listing,
+        freeShipping: calc.freeShipping,
+        shippingCost: parseInputNumber(calc.shippingCost),
+      }),
+    [calc],
+  );
+
+  /* ---------- sessão ---------- */
+
+  const persistSession = useCallback((next: StoredSession | null) => {
+    sessionRef.current = next;
+    setSession(next);
+    if (next) writeSession(next);
+    else clearSession();
+  }, []);
+
+  /**
+   * Devolve um token válido. O refresh token rotaciona a cada renovação, então
+   * chamadas simultâneas compartilham a mesma renovação em andamento.
+   */
+  const getBearer = useCallback(async (): Promise<string | null> => {
+    const current = sessionRef.current;
+    if (!current) return null;
+    const { tokens } = current;
+
+    if (!needsRefresh(tokens)) return tokens.accessToken;
+
+    if (!tokens.refreshToken) {
+      if (tokens.expiresAt > Date.now()) return tokens.accessToken;
+      persistSession(null);
+      setNotice({ kind: 'aviso', text: 'Sua autorização do Mercado Livre expirou. Autorize a conta novamente.' });
+      return null;
+    }
+
+    let pending = refreshRef.current;
+    if (!pending) {
+      const refreshToken = tokens.refreshToken;
+      pending = requestRefresh(refreshToken)
+        .then((fresh) => {
+          persistSession({ tokens: fresh, savedAt: Date.now() });
+          return fresh.accessToken;
+        })
+        .catch(() => {
+          persistSession(null);
+          setNotice({
+            kind: 'erro',
+            text: 'Não foi possível renovar a autorização. Conecte a conta novamente.',
+          });
+          return null;
+        })
+        .finally(() => {
+          refreshRef.current = null;
+        });
+      refreshRef.current = pending;
+    }
+    return pending;
+  }, [persistSession]);
+
+  useEffect(() => {
+    const stored = readSession();
+    if (stored) {
+      sessionRef.current = stored;
+      setSession(stored);
+    }
+  }, []);
+
+  /** Retorno do Mercado Livre com ?code=... ou ?error=...: troca o código e limpa a URL. */
+  useEffect(() => {
+    if (exchangeStartedRef.current) return;
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+    const oauthError = url.searchParams.get('error');
+    if (!code && !oauthError) return;
+
+    exchangeStartedRef.current = true;
+    ['code', 'state', 'error', 'error_description'].forEach((key) => url.searchParams.delete(key));
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+
+    if (oauthError || !code) {
+      setNotice({ kind: 'erro', text: 'O Mercado Livre não concluiu a autorização. Tente novamente.' });
+      return;
+    }
+
+    setLoading('Concluindo a autorização com o Mercado Livre...');
+    requestExchange(code, window.location.origin)
+      .then((tokens) => {
+        persistSession({ tokens, savedAt: Date.now() });
+        setNotice({
+          kind: 'ok',
+          text: 'Conta do Mercado Livre autorizada. As rotas privadas já estão liberadas.',
+        });
+      })
+      .catch((err: unknown) => {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Falha ao trocar o código de autorização.') });
+      })
+      .finally(() => setLoading(null));
+  }, [persistSession]);
+
+  useEffect(() => {
+    let active = true;
+    requestStatus()
+      .then((s) => {
+        if (active) setEnvStatus(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+    };
+  }, []);
+
+  /* ---------- buscas ---------- */
+
+  const applyAnalysis = useCallback((a: Analysis) => {
+    if (a.mode === 'keyword') {
+      setKeywordResult(a);
+      setDossier(null);
+    } else {
+      setDossier(a.dossier);
+    }
+  }, []);
+
+  /** Em erro, os resultados anteriores permanecem na tela. Só respostas da busca mais recente são aplicadas. */
+  const runAnalysis = useCallback(
+    async (input: string, label: string) => {
+      const seq = ++searchSeqRef.current;
+      setLoading(label);
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const analysis = await requestAnalysis(input, bearer);
+        if (seq === searchSeqRef.current) applyAnalysis(analysis);
+      } catch (err) {
+        if (seq === searchSeqRef.current) {
+          setNotice({ kind: 'erro', text: errorMessage(err, 'Falha na consulta. Tente novamente.') });
+        }
+      } finally {
+        if (seq === searchSeqRef.current) setLoading(null);
+      }
+    },
+    [applyAnalysis, getBearer],
+  );
+
+  const runPhoto = useCallback(
+    async (file: File) => {
+      const previous = photoUrlRef.current;
+      const url = URL.createObjectURL(file);
+      photoUrlRef.current = url;
+      setPhotoPreview(url);
+      if (previous) URL.revokeObjectURL(previous);
+
+      setTab('busca');
+      const seq = ++searchSeqRef.current;
+      setLoading('Identificando o produto na imagem...');
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const env = await requestPhoto(file, bearer);
+        if (seq === searchSeqRef.current) {
+          setQuery(env.identified.query);
+          applyAnalysis(env.data);
+          setNotice({
+            kind: 'ok',
+            text: `Produto identificado: "${env.identified.query}" (confiança ${env.identified.confidence}). ${env.identified.reason}`.trim(),
+          });
+        }
+      } catch (err) {
+        if (seq === searchSeqRef.current) {
+          setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível identificar a imagem.') });
+        }
+      } finally {
+        if (seq === searchSeqRef.current) setLoading(null);
+      }
+    },
+    [applyAnalysis, getBearer],
+  );
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const file = imageFromDataTransfer(event.clipboardData);
+      if (!file) return;
+      event.preventDefault();
+      void runPhoto(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [runPhoto]);
+
+  const submitSearch = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const input = query.trim();
+    if (!input) {
+      setNotice({ kind: 'aviso', text: 'Digite uma palavra-chave, um código MLB ou um link do Mercado Livre.' });
+      return;
+    }
+    void runAnalysis(input, 'Consultando o Mercado Livre...');
+  };
+
+  const runExample = (text: string) => {
+    setQuery(text);
+    void runAnalysis(text, `Buscando "${text}"...`);
+  };
+
+  const openProduct = (p: ProductSummary) => {
+    const code = p.itemId ?? p.productId;
+    if (!code) {
+      setNotice({ kind: 'aviso', text: 'Este anúncio não tem código para abrir o Raio-X.' });
+      return;
+    }
+    void runAnalysis(code, 'Abrindo o Raio-X...');
+  };
+
+  const onFileChosen = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) void runPhoto(file);
+  };
+
+  const clearPhoto = () => {
+    if (photoUrlRef.current) {
+      URL.revokeObjectURL(photoUrlRef.current);
+      photoUrlRef.current = null;
+    }
+    setPhotoPreview(null);
+  };
+
+  /* ---------- calculadora e filtros ---------- */
+
+  const simulate = (src: {
+    title: string;
+    price: number | null;
+    listingType: string | null;
+    freeShipping: boolean;
+  }) => {
+    setCalc({
+      ...INITIAL_CALC,
+      title: src.title,
+      salePrice: src.price !== null ? formatInputNumber(src.price) : '',
+      listing: kindFromLabel(src.listingType) ?? 'classico',
+      freeShipping: src.freeShipping,
+    });
+    setTab('calculadora');
+  };
+
+  const patchCalc = useCallback((patch: Partial<CalcForm>) => {
+    setCalc((c) => ({ ...c, ...patch }));
+  }, []);
+
+  const patchFilters = useCallback((patch: Partial<FilterState>) => {
+    setFilters((f) => ({ ...f, ...patch }));
+  }, []);
+
+  const disconnect = () => {
+    persistSession(null);
+    setAuthOpen(false);
+    setNotice({
+      kind: 'aviso',
+      text: 'Conta desconectada. As rotas privadas ficam indisponíveis até nova autorização.',
+    });
+  };
+
+  const dossierKey = dossier ? (dossier.itemId ?? dossier.productId ?? dossier.title) : '';
+
+  return (
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#070b14]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#facc15] text-sm font-black text-[#070b14]">
+              ML
+            </span>
+            <div>
+              <p className="text-sm font-bold leading-tight">
+                BuscasML <span className="text-[#facc15]">Pro</span>
+              </p>
+              <p className="text-[11px] leading-tight text-slate-500">Inteligência de mercado</p>
+            </div>
+          </div>
+
+          <nav className="flex rounded-xl bg-[#111827] p-1">
+            <ToggleButton
+              active={tab === 'busca'}
+              onClick={() => setTab('busca')}
+              icon={<Search size={15} />}
+              label="Busca & Raio-X"
+            />
+            <ToggleButton
+              active={tab === 'calculadora'}
+              onClick={() => setTab('calculadora')}
+              icon={<Calculator size={15} />}
+              label="Simulador de Margem"
+            />
+          </nav>
+
+          <div className="flex items-center gap-2">
+            {session && <Pill tone="green">Conta conectada</Pill>}
+            <button type="button" onClick={() => setAuthOpen(true)} className={BTN_SM_YELLOW}>
+              <Key size={14} /> Autorizar Conta ML (OAuth)
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+        {envStatus && !envStatus.secretConfigured && (
+          <Banner kind="erro">
+            ML_CLIENT_SECRET não configurado na Vercel. Sem ele, as buscas não funcionam.
+          </Banner>
+        )}
+        {notice && (
+          <Banner kind={notice.kind} onClose={() => setNotice(null)}>
+            {notice.text}
+          </Banner>
+        )}
+
+        {tab === 'busca' ? (
+          <>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Busca & Raio-X de produtos</h1>
+              <p className="mt-1 max-w-3xl text-sm text-slate-400">
+                Dados da API oficial do Mercado Livre e do anúncio público. Campos ocultos aparecem como
+                &quot;Oculto no anúncio&quot;; nada é inventado.
+              </p>
+            </div>
+
+            <form onSubmit={submitSearch} className="rounded-2xl border border-white/5 bg-[#111827] p-3">
+              <div className="flex flex-col gap-3 md:flex-row">
+                <div className="relative flex-1">
+                  <Search
+                    size={18}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                  />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Palavra-chave, código MLB ou link (meli.la, /p/MLB, /up/MLBU)"
+                    aria-label="Pesquisa no Mercado Livre"
+                    className={`${INPUT_CLASS} py-3 pl-10`}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={loading !== null} className={BTN_PRIMARY}>
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                    Buscar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={loading !== null}
+                    className={BTN_GHOST}
+                    title={
+                      envStatus?.photoSearchConfigured === false
+                        ? 'Configure ANTHROPIC_API_KEY na Vercel'
+                        : 'Buscar por foto'
+                    }
+                  >
+                    <Camera size={16} /> Buscar por Foto
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={onFileChosen}
+                  />
+                </div>
+              </div>
+
+              <p className="mt-2 px-1 text-xs text-slate-500">
+                Dica: cole um print em qualquer lugar da página com Ctrl+V para identificar o produto.
+                {envStatus?.photoSearchConfigured === false &&
+                  ' A busca por foto precisa de ANTHROPIC_API_KEY na Vercel.'}
+              </p>
+
+              {photoPreview && (
+                <div className="mt-3 flex items-center gap-3 rounded-xl bg-[#070b14] p-2">
+                  <img src={photoPreview} alt="Foto enviada" className="h-14 w-14 rounded-lg object-cover" />
+                  <p className="flex-1 text-xs text-slate-400">Foto usada na busca.</p>
+                  <button
+                    type="button"
+                    onClick={clearPhoto}
+                    aria-label="Remover foto"
+                    className="rounded p-1 text-slate-400 transition hover:text-slate-100"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+            </form>
+
+            {loading && <LoadingBlock label={loading} />}
+
+            {dossier ? (
+              <DossierView
+                key={dossierKey}
+                d={dossier}
+                canGoBack={keywordResult !== null}
+                onBack={() => setDossier(null)}
+                onSimulate={() => simulate(dossier)}
+              />
+            ) : keywordResult ? (
+              <KeywordView
+                result={keywordResult}
+                filters={filters}
+                onFilters={patchFilters}
+                onOpen={openProduct}
+                onSimulate={simulate}
+              />
+            ) : loading ? null : (
+              <>
+                <Onboarding />
+                <ExamplesRow onPick={runExample} />
+              </>
+            )}
+          </>
+        ) : (
+          <CalculatorView calc={calc} onChange={patchCalc} margin={margin} />
+        )}
+      </main>
+
+      {authOpen && (
+        <OAuthModal session={session} onClose={() => setAuthOpen(false)} onDisconnect={disconnect} />
+      )}
+    </div>
+  );
+}
