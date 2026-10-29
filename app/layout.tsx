@@ -1,17 +1,21 @@
-import React from 'react';
+import type { Metadata, Viewport } from 'next';
+import type { ReactNode } from 'react';
+import './globals.css';
 
-export const metadata = {
-  title: 'BuscasML - Inteligência de Mercado Livre',
-  description: 'Plataforma de análise de anúncios, concorrência e tendências no Mercado Livre',
+export const metadata: Metadata = {
+  title: 'BuscasML Pro | Inteligência de Mercado Mercado Livre',
+  description:
+    'Garimpo de produtos, Raio-X de anúncios e calculadora de margem para o Mercado Livre Brasil.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const viewport: Viewport = {
+  themeColor: '#070b14',
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
-      <head>
-        <script src="https://cdn.tailwindcss.com"></script>
-      </head>
-      <body className="bg-[#0b0f19] text-slate-100 antialiased selection:bg-yellow-400 selection:text-black">
+      <body className="min-h-screen bg-[#070b14] font-sans text-slate-100 antialiased">
         {children}
       </body>
     </html>
