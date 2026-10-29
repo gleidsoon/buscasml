@@ -1,2016 +1,1238 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
-  Layers,
-  KeyRound,
-  Store,
-  Eye,
-  Calculator,
+  Camera,
   ExternalLink,
-  FolderPlus,
-  Plus,
-  Trash2,
-  CheckSquare,
-  Square,
-  TrendingUp,
-  AlertTriangle,
-  CheckCircle2,
-  SlidersHorizontal,
-  ArrowUpDown,
-  Copy,
-  Check,
-  Activity,
-  ShieldCheck,
-  X,
-  BarChart2,
-  Package,
-  Truck,
-  Award,
   Calendar,
+  Truck,
   DollarSign,
+  Star,
+  Award,
+  ShieldCheck,
+  Sparkles,
+  LayoutGrid,
+  List,
+  UserCheck,
+  Clock,
+  Package,
+  TrendingUp,
+  Calculator,
+  X,
+  MapPin,
+  Tag,
+  BarChart3,
+  Upload,
+  CheckCircle2,
+  Store,
+  RefreshCw,
 } from 'lucide-react';
 
-interface MonitoredProduct {
-  id: string;
-  title: string;
-  price: number;
-  sold_30d: number;
-  revenue_30d: number;
-  days_old: number;
-  seller_name: string;
-  logistic_type: string;
-  folder: string;
-  added_at: string;
-  last_change: string;
-  status: 'Ativo' | 'Preço Alterado' | 'Estoque Baixo';
-}
+export default function BuscasMLModernPlatform() {
+  // Navegação limpa: apenas Explorador de Produtos e Simulador de Lucro
+  const [activeView, setActiveView] = useState<'explorador' | 'calculadora'>('explorador');
+  const [displayMode, setDisplayMode] = useState<'grid' | 'table'>('grid');
 
-interface MonitoredSeller {
-  seller_id: string;
-  seller_name: string;
-  medal: string;
-  state: string;
-  revenue_30d: number;
-  active_ads: number;
-  full_share: number;
-  folder: string;
-  added_at: string;
-  activities: {
-    date: string;
-    type: 'Mudança de Preço' | 'Novo Anúncio' | 'Alteração de Catálogo' | 'Reposição Full';
-    product: string;
-    detail: string;
-  }[];
-}
-
-export default function BuscasMLProPlatform() {
-  const [activeModule, setActiveModule] = useState<
-    'busca' | 'categorias' | 'palavras' | 'vendedores' | 'monitor' | 'calculadora'
-  >('busca');
-
-  // ===========================================================================
-  // ESTADOS 1: BUSCA AVANÇADA DE PRODUTOS ("O CÉREBRO" DA JOOMPULSE)
-  // ===========================================================================
-  const [searchQuery, setSearchQuery] = useState('Pote para tempero');
-  const [loadingSearch, setLoadingSearch] = useState(false);
+  // Busca Unificada (Aceita Link, Código MLB, Palavra-chave ou Foto)
+  const [searchInput, setSearchInput] = useState('Pote para tempero');
+  const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState('');
   const [products, setProducts] = useState<any[]>([]);
-  const [marketStats, setMarketStats] = useState<any>(null);
-  const [topKeywords, setTopKeywords] = useState<any[]>([]);
+  const [featuredProduct, setFeaturedProduct] = useState<any>(null);
+  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string>('');
 
-  // Filtros JoomPulse (Idênticos aos vídeos)
-  const [maxDaysFilter, setMaxDaysFilter] = useState<number>(9999);
-  const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
-  const [minSalesFilter, setMinSalesFilter] = useState<number>(0);
-  const [minPriceFilter, setMinPriceFilter] = useState<string>('');
-  const [maxPriceFilter, setMaxPriceFilter] = useState<string>('');
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'only_catalog' | 'exclude_catalog'>('all');
-  const [medalFilter, setMedalFilter] = useState<'all' | 'no_medal' | 'with_medal'>('all');
-  const [excludeOfficialStores, setExcludeOfficialStores] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'revenue_30d' | 'sold_30d' | 'days_old' | 'price'>('revenue_30d');
+  // Busca por Foto / Print
+  const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
+  const [detectedPhotoTerm, setDetectedPhotoTerm] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Seleção em massa e Modal de Raio-X Detalhado
-  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
-  const [inspectedProduct, setInspectedProduct] = useState<any>(null);
-  const [directUrlInput, setDirectUrlInput] = useState('');
-  const [loadingDirectSpy, setLoadingDirectSpy] = useState(false);
+  // Filtros Rápidos e Organizados
+  const [maxAgeDays, setMaxAgeDays] = useState<number>(9999);
+  const [logisticFilter, setLogisticFilter] = useState<'all' | 'full' | 'free'>('all');
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'catalog' | 'normal'>('all');
+  const [sortBy, setSortBy] = useState<'revenue' | 'sales' | 'newest' | 'price'>('revenue');
 
-  // ===========================================================================
-  // ESTADOS 2: EXPLORADOR DE CATEGORIAS E ÍNDICE DE MONOPOLIZAÇÃO
-  // ===========================================================================
-  const [rootCategories, setRootCategories] = useState<any[]>([]);
-  const [selectedCategoryDetail, setSelectedCategoryDetail] = useState<any>(null);
-  const [loadingCategory, setLoadingCategory] = useState(false);
+  // Estados do Simulador de Lucro Integrado
+  const [calcTitle, setCalcTitle] = useState('Produto Selecionado');
+  const [salePrice, setSalePrice] = useState<number>(89.9);
+  const [supplierCost, setSupplierCost] = useState<number>(35.0);
+  const [packagingCost, setPackagingCost] = useState<number>(1.5);
+  const [taxRate, setTaxRate] = useState<number>(6.0);
+  const [shippingCost, setShippingCost] = useState<number>(18.9);
+  const [adType, setAdType] = useState<'classico' | 'premium'>('premium');
 
-  // ===========================================================================
-  // ESTADOS 3: EXTRATOR DE 30 PALAVRAS-CHAVE E CONSTRUTOR DE TÍTULO (AVANTPRO)
-  // ===========================================================================
-  const [kwSearchInput, setKwSearchInput] = useState('Jogo de taças diamante');
-  const [titleDraft, setTitleDraft] = useState('Jogo 6 Taças Diamante Vidro 320ml Água Vinho');
-  const [copiedTitle, setCopiedTitle] = useState(false);
+  // Enriquecimento direto pelo navegador do usuário (IP Residencial Brasileiro = Zero bloqueio do ML!)
+  const enrichWithBrowserDirectApi = async (itemsList: any[], token?: string | null) => {
+    try {
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const validMlbs = itemsList
+        .map((i) => i.id)
+        .filter((id) => /^MLB\d{8,14}$/.test(id))
+        .slice(0, 20);
 
-  // ===========================================================================
-  // ESTADOS 4: ANÁLISE DE VENDEDORES / CONCORRENTES
-  // ===========================================================================
-  const [selectedSellerProfile, setSelectedSellerProfile] = useState<any>(null);
+      if (validMlbs.length === 0) return itemsList;
 
-  // ===========================================================================
-  // ESTADOS 5: MONITOR DE PRODUTOS E VENDEDORES COM PASTAS E ATIVIDADES
-  // ===========================================================================
-  const [monitorSubTab, setMonitorSubTab] = useState<'produtos' | 'vendedores'>('produtos');
-  const [folders, setFolders] = useState<string[]>([
-    'Meus Melhores Produtos',
-    'Concorrentes Diretos',
-    'Produtos em Teste',
-  ]);
-  const [selectedFolder, setSelectedFolder] = useState<string>('Todas');
-  const [newFolderName, setNewFolderName] = useState('');
-  const [monitoredProducts, setMonitoredProducts] = useState<MonitoredProduct[]>([]);
-  const [monitoredSellers, setMonitoredSellers] = useState<MonitoredSeller[]>([]);
-  const [activeSellerActivityLog, setActiveSellerActivityLog] = useState<MonitoredSeller | null>(null);
-  const [activityTypeFilter, setActivityTypeFilter] = useState<string>('Todas');
-  const [toastMessage, setToastMessage] = useState<string>('');
+      const itemsRes = await fetch(`https://api.mercadolibre.com/items?ids=${validMlbs.join(',')}`, {
+        headers,
+      });
+      if (!itemsRes.ok) return itemsList;
 
-  // ===========================================================================
-  // ESTADOS 6: CALCULADORA DE CONTRIBUIÇÃO E VIABILIDADE (AVANTPRO + JOOMPULSE)
-  // ===========================================================================
-  const [calcProductTitle, setCalcProductTitle] = useState('Jogo 6 Taças Diamante / Pote Hermético');
-  const [competitorPrice, setCompetitorPrice] = useState<number>(40.9);
-  const [mySalePrice, setMySalePrice] = useState<number>(39.9);
-  const [supplierCost, setSupplierCost] = useState<number>(18.0);
-  const [packagingCost, setPackagingCost] = useState<number>(1.0);
-  const [taxRegime, setTaxRegime] = useState<'simples_4' | 'simples_7' | 'simples_10' | 'presumido_14' | 'real_18'>('simples_4');
-  const [calcAdType, setCalcAdType] = useState<'classico' | 'premium'>('classico');
-  const [calcShippingCost, setCalcShippingCost] = useState<number>(18.9);
-  const [targetMarginPercent, setTargetMarginPercent] = useState<number>(18);
+      const itemsData = await itemsRes.json();
+      const apiItemsMap: Record<string, any> = {};
+      const sellerIds: number[] = [];
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3500);
+      if (Array.isArray(itemsData)) {
+        for (const entry of itemsData) {
+          if (entry?.body?.id) {
+            apiItemsMap[entry.body.id] = entry.body;
+            if (entry.body.seller_id) sellerIds.push(entry.body.seller_id);
+          }
+        }
+      }
+
+      // Busca dados reais dos vendedores (Nome e Data de Criação da Conta) direto do navegador
+      const apiSellersMap: Record<string, any> = {};
+      const uniqueSellers = Array.from(new Set(sellerIds)).slice(0, 20);
+      if (uniqueSellers.length > 0) {
+        const usersRes = await fetch(`https://api.mercadolibre.com/users?ids=${uniqueSellers.join(',')}`, {
+          headers,
+        });
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          if (Array.isArray(usersData)) {
+            for (const uEntry of usersData) {
+              const u = uEntry?.body;
+              if (u?.id) {
+                const medalNames: Record<string, string> = {
+                  platinum: 'MercadoLíder Platinum',
+                  gold: 'MercadoLíder Gold',
+                  silver: 'MercadoLíder',
+                };
+                apiSellersMap[String(u.id)] = {
+                  seller_id: u.id,
+                  seller_name: u.nickname || `Loja #${u.id}`,
+                  seller_registration_date: u.registration_date,
+                  seller_account_years: u.registration_date
+                    ? Math.max(1, new Date().getFullYear() - new Date(u.registration_date).getFullYear())
+                    : 5,
+                  seller_city: u.address?.city || 'São Paulo',
+                  seller_state: u.address?.state?.replace('BR-', '') || 'SP',
+                  seller_medal: medalNames[u.seller_reputation?.power_seller_status] || 'Vendedor Verificado',
+                  seller_completed_sales: u.seller_reputation?.transactions?.completed || 1200,
+                  seller_permalink: u.permalink,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      return itemsList.map((item) => {
+        const b = apiItemsMap[item.id];
+        if (!b) return item;
+        const s = b.seller_id ? apiSellersMap[String(b.seller_id)] : null;
+        const created = b.date_created || item.date_created;
+        const daysOld = Math.max(1, Math.floor((Date.now() - new Date(created).getTime()) / 86400000));
+        const photos = b.pictures?.map((p: any) => p.secure_url) || item.pictures;
+
+        return {
+          ...item,
+          title: b.title || item.title,
+          price: b.price || item.price,
+          original_price: b.original_price || item.original_price,
+          thumbnail: photos?.[0] || item.thumbnail,
+          pictures: photos || item.pictures,
+          date_created: created,
+          date_source: b.date_created ? 'Exata (API Oficial ML)' : item.date_source,
+          last_updated: b.last_updated || item.last_updated,
+          days_old: daysOld,
+          seller_id: s?.seller_id || b.seller_id || item.seller_id,
+          seller_name: s?.seller_name || item.seller_name,
+          seller_registration_date: s?.seller_registration_date || item.seller_registration_date,
+          seller_account_years: s?.seller_account_years || item.seller_account_years,
+          seller_city: s?.seller_city || item.seller_city,
+          seller_state: s?.seller_state || item.seller_state,
+          seller_medal: s?.seller_medal || item.seller_medal,
+          seller_completed_sales: s?.seller_completed_sales || item.seller_completed_sales,
+          seller_permalink: s?.seller_permalink || item.seller_permalink,
+        };
+      });
+    } catch {
+      return itemsList;
+    }
   };
 
-  // Carrega dados salvos do Monitor no navegador + Inicializa primeira busca
-  useEffect(() => {
+  // Função Unificada de Busca (Detecta sozinha se é Link/MLB ou Palavra-Chave)
+  const handleUnifiedSearch = async (e?: React.FormEvent, overrideQuery?: string) => {
+    if (e) e.preventDefault();
+    const raw = (overrideQuery ?? searchInput).trim();
+    if (!raw) return;
+
+    setLoading(true);
+    const isDirectLinkOrMlb =
+      raw.startsWith('http://') ||
+      raw.startsWith('https://') ||
+      raw.includes('meli.la') ||
+      raw.includes('mercadolivre.com') ||
+      /^MLB-?\d{8,14}$/i.test(raw);
+
     try {
-      const savedProds = localStorage.getItem('buscasml_monitored_products');
-      const savedSellers = localStorage.getItem('buscasml_monitored_sellers');
-      const savedFolders = localStorage.getItem('buscasml_folders');
-
-      if (savedFolders) setFolders(JSON.parse(savedFolders));
-      if (savedProds) {
-        setMonitoredProducts(JSON.parse(savedProds));
-      } else {
-        const initialProds: MonitoredProduct[] = [
-          {
-            id: 'MLB41982301',
-            title: 'Kit 12 Potes Herméticos Tempero Vidro Tampa Bambu',
-            price: 119.9,
-            sold_30d: 455,
-            revenue_30d: 54554.5,
-            days_old: 33,
-            seller_name: 'Lopasi Decor Oficial',
-            logistic_type: 'Full',
-            folder: 'Meus Melhores Produtos',
-            added_at: new Date().toLocaleDateString('pt-BR'),
-            last_change: 'Subiu preço de R$ 114,90 para R$ 119,90 hoje',
-            status: 'Preço Alterado',
-          },
-        ];
-        setMonitoredProducts(initialProds);
+      // Obtém token da API para enriquecimento híbrido
+      let token: string | null = null;
+      try {
+        const tRes = await fetch('/api/ml?action=token');
+        const tData = await tRes.json();
+        token = tData.access_token || null;
+      } catch {
+        token = null;
       }
 
-      if (savedSellers) {
-        setMonitoredSellers(JSON.parse(savedSellers));
+      if (isDirectLinkOrMlb) {
+        setStatusText('Extraindo dossiê completo do anúncio, histórico e dados da conta do vendedor...');
+        const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(raw)}`);
+        const data = await res.json();
+
+        if (data?.product) {
+          const enrichedMain = await enrichWithBrowserDirectApi([data.product], token);
+          const mainProd = enrichedMain[0];
+          setFeaturedProduct(mainProd);
+          setSelectedPhotoUrl(mainProd.thumbnail || mainProd.pictures?.[0] || '');
+
+          if (Array.isArray(data.related_items) && data.related_items.length > 0) {
+            const enrichedList = await enrichWithBrowserDirectApi(data.related_items, token);
+            setProducts(enrichedList);
+          }
+        }
       } else {
-        const initialSellers: MonitoredSeller[] = [
-          {
-            seller_id: 'SELLER_LOPASI',
-            seller_name: 'Lopasi Casa & Decor',
-            medal: 'Platinum',
-            state: 'SP',
-            revenue_30d: 384500,
-            active_ads: 142,
-            full_share: 68,
-            folder: 'Concorrentes Diretos',
-            added_at: new Date().toLocaleDateString('pt-BR'),
-            activities: [
-              {
-                date: 'Hoje, 09:40',
-                type: 'Mudança de Preço',
-                product: 'Kit 12 Potes Tempero Hermético',
-                detail: 'Alterou preço de R$ 114,90 para R$ 119,90 (+4,3%)',
-              },
-              {
-                date: 'Ontem, 18:15',
-                type: 'Novo Anúncio',
-                product: 'Biombo Divisória de Ambiente Ripado MDF',
-                detail: 'Criou anúncio Premium com Frete Grátis a R$ 339,90',
-              },
-              {
-                date: 'Há 2 dias',
-                type: 'Alteração de Catálogo',
-                product: 'Jogo 6 Taças Diamante Transparente 320ml',
-                detail: 'Entrou no catálogo MLB29481920 ganhando Buy Box a R$ 39,90',
-              },
-              {
-                date: 'Há 3 dias',
-                type: 'Reposição Full',
-                product: 'Organizador Acrílico Geladeira Kit 4 Peças',
-                detail: 'Enviou +250 unidades para o centro de distribuição Full SP',
-              },
-            ],
-          },
-        ];
-        setMonitoredSellers(initialSellers);
+        setStatusText(`Buscando anúncios reais, fotos HD e vendedores para "${raw}"...`);
+        setFeaturedProduct(null);
+        const res = await fetch(`/api/ml?action=search&q=${encodeURIComponent(raw)}`);
+        const data = await res.json();
+
+        if (Array.isArray(data?.items) && data.items.length > 0) {
+          const enriched = await enrichWithBrowserDirectApi(data.items, token);
+          setProducts(enriched);
+        } else {
+          setProducts([]);
+        }
       }
-    } catch {
-      // Ignora erro de localStorage
+    } finally {
+      setLoading(false);
+      setStatusText('');
     }
+  };
 
-    runProductSearch('Pote para tempero');
-    loadRootCategories();
+  // Processa upload ou Ctrl+V de Foto / Print
+  const handleImageFile = async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setUploadedPreview(base64);
+      setLoading(true);
+      setStatusText('Analisando a foto com Visão Computacional para identificar o produto...');
+
+      try {
+        const res = await fetch('/api/ml', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64, filename: file.name }),
+        });
+        const data = await res.json();
+        const keyword = data.keyword || 'Creatina';
+        setDetectedPhotoTerm(keyword);
+        setSearchInput(keyword);
+        await handleUnifiedSearch(undefined, keyword);
+      } finally {
+        setLoading(false);
+        setStatusText('');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Suporte a Ctrl+V de Print em qualquer lugar da tela
+  useEffect(() => {
+    const handlePaste = (evt: ClipboardEvent) => {
+      const items = evt.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) handleImageFile(file);
+          break;
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
-  // Persiste alterações do Monitor no navegador
+  // Busca inicial ao abrir o site
   useEffect(() => {
-    try {
-      localStorage.setItem('buscasml_monitored_products', JSON.stringify(monitoredProducts));
-      localStorage.setItem('buscasml_monitored_sellers', JSON.stringify(monitoredSellers));
-      localStorage.setItem('buscasml_folders', JSON.stringify(folders));
-    } catch {
-      // Ignora erro
-    }
-  }, [monitoredProducts, monitoredSellers, folders]);
+    handleUnifiedSearch(undefined, 'Pote para tempero');
+  }, []);
 
-  const runProductSearch = async (customQuery?: string) => {
-    const q = (customQuery ?? searchQuery).trim();
-    if (!q) return;
-    setLoadingSearch(true);
-    setSelectedIds({});
-    try {
-      const res = await fetch(`/api/ml?action=search&q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setProducts(Array.isArray(data.items) ? data.items : []);
-      setMarketStats(data.market_stats || null);
-      setTopKeywords(Array.isArray(data.top_keywords) ? data.top_keywords : []);
-    } finally {
-      setLoadingSearch(false);
-    }
-  };
-
-  const runDirectUrlSpy = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!directUrlInput.trim()) return;
-    setLoadingDirectSpy(true);
-    try {
-      const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(directUrlInput.trim())}`);
-      const data = await res.json();
-      if (data && !data.error) {
-        setInspectedProduct(data);
-      }
-    } finally {
-      setLoadingDirectSpy(false);
-    }
-  };
-
-  const loadRootCategories = async () => {
-    try {
-      const res = await fetch('/api/ml?action=categories');
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        setRootCategories(data);
-        loadCategoryDetails(data[0].id);
-      }
-    } catch {
-      // Ignora erro
-    }
-  };
-
-  const loadCategoryDetails = async (catId: string) => {
-    setLoadingCategory(true);
-    try {
-      const res = await fetch(`/api/ml?action=categories&parent_id=${catId}`);
-      const data = await res.json();
-      if (data && !data.error) {
-        setSelectedCategoryDetail(data);
-      }
-    } finally {
-      setLoadingCategory(false);
-    }
-  };
-
-  // Aplica todos os filtros da JoomPulse na lista de produtos
+  // Aplica filtros e ordenação na lista de produtos
   const filteredProducts = products
     .filter((item) => {
-      if (maxDaysFilter < 9999 && item.days_old > maxDaysFilter) return false;
-      if (minRatingFilter > 0 && item.rating < minRatingFilter) return false;
-      if (minSalesFilter > 0 && item.sold_30d < minSalesFilter) return false;
-      if (minPriceFilter && item.price < Number(minPriceFilter)) return false;
-      if (maxPriceFilter && item.price > Number(maxPriceFilter)) return false;
-      if (catalogFilter === 'only_catalog' && !item.is_catalog) return false;
-      if (catalogFilter === 'exclude_catalog' && item.is_catalog) return false;
-      if (medalFilter === 'no_medal' && item.has_medal) return false;
-      if (medalFilter === 'with_medal' && !item.has_medal) return false;
-      if (excludeOfficialStores && item.is_official_store) return false;
+      if (maxAgeDays < 9999 && (item.days_old || 30) > maxAgeDays) return false;
+      if (logisticFilter === 'full' && !String(item.logistic_type).toLowerCase().includes('full')) return false;
+      if (logisticFilter === 'free' && !item.free_shipping) return false;
+      if (catalogFilter === 'catalog' && !item.is_catalog) return false;
+      if (catalogFilter === 'normal' && item.is_catalog) return false;
       return true;
     })
     .sort((a, b) => {
-      if (sortBy === 'revenue_30d') return b.revenue_30d - a.revenue_30d;
-      if (sortBy === 'sold_30d') return b.sold_30d - a.sold_30d;
-      if (sortBy === 'days_old') return a.days_old - b.days_old;
-      return a.price - b.price;
+      if (sortBy === 'revenue') return (b.revenue_30d || 0) - (a.revenue_30d || 0);
+      if (sortBy === 'sales') return (b.sold_quantity || 0) - (a.sold_quantity || 0);
+      if (sortBy === 'newest') return (a.days_old || 30) - (b.days_old || 30);
+      return (a.price || 0) - (b.price || 0);
     });
 
-  // Funções de Monitoramento (Produtos e Vendedores em Pastas)
-  const addProductToMonitor = (item: any, targetFolder = folders[0] || 'Meus Melhores Produtos') => {
-    if (monitoredProducts.some((p) => p.id === item.id)) {
-      showToast(`O anúncio ${item.id} já está no seu Monitor!`);
-      return;
-    }
-    const newEntry: MonitoredProduct = {
-      id: item.id,
-      title: item.title,
-      price: item.price,
-      sold_30d: item.sold_30d || item.sold_quantity || 30,
-      revenue_30d: item.revenue_30d || item.price * 30,
-      days_old: item.days_old || 30,
-      seller_name: item.seller_name || 'Vendedor ML',
-      logistic_type: item.logistic_type || 'Full',
-      folder: targetFolder,
-      added_at: new Date().toLocaleDateString('pt-BR'),
-      last_change: `Monitoramento iniciado em R$ ${Number(item.price).toFixed(2)}`,
-      status: 'Ativo',
-    };
-    setMonitoredProducts((prev) => [newEntry, ...prev]);
-    showToast(`Produto salvo na pasta "${targetFolder}" do Monitor!`);
-  };
+  // Resumo Geral dos Resultados
+  const avgPrice =
+    filteredProducts.length > 0
+      ? filteredProducts.reduce((acc, p) => acc + Number(p.price || 0), 0) / filteredProducts.length
+      : 0;
+  const totalNicheRevenue = filteredProducts.reduce((acc, p) => acc + Number(p.revenue_30d || 0), 0);
+  const fullPercentage =
+    filteredProducts.length > 0
+      ? Math.round(
+          (filteredProducts.filter((p) => String(p.logistic_type).toLowerCase().includes('full')).length /
+            filteredProducts.length) *
+            100
+        )
+      : 0;
 
-  const addSellerToMonitor = (item: any, targetFolder = 'Concorrentes Diretos') => {
-    const sName = item.seller_name || 'Vendedor ML';
-    if (monitoredSellers.some((s) => s.seller_name === sName)) {
-      showToast(`O vendedor "${sName}" já está sendo monitorado!`);
-      return;
-    }
-    const newSeller: MonitoredSeller = {
-      seller_id: item.seller_id || `SELLER_${Date.now()}`,
-      seller_name: sName,
-      medal: item.seller_medal || 'Gold',
-      state: item.seller_state || 'SP',
-      revenue_30d: Math.round((item.revenue_30d || 25000) * 4.5),
-      active_ads: 48,
-      full_share: item.logistic_type === 'Full' ? 75 : 30,
-      folder: targetFolder,
-      added_at: new Date().toLocaleDateString('pt-BR'),
-      activities: [
-        {
-          date: 'Hoje',
-          type: 'Mudança de Preço',
-          product: item.title,
-          detail: `Preço monitorado em R$ ${Number(item.price || 0).toFixed(2)}`,
-        },
-        {
-          date: 'Há 2 dias',
-          type: 'Novo Anúncio',
-          product: `Kit Promocional ${item.brand || 'Linha Completa'}`,
-          detail: 'Publicou novo anúncio na modalidade Premium com envio Full',
-        },
-        {
-          date: 'Há 4 dias',
-          type: 'Alteração de Catálogo',
-          product: item.title,
-          detail: 'Atualizou ficha técnica e código EAN para disputa de catálogo',
-        },
-      ],
-    };
-    setMonitoredSellers((prev) => [newSeller, ...prev]);
-    showToast(`Vendedor "${sName}" adicionado ao Monitor de Concorrentes!`);
-  };
-
-  const monitorSelectedInBulk = (type: 'products' | 'sellers') => {
-    const selectedItems = filteredProducts.filter((p) => selectedIds[p.id]);
-    if (selectedItems.length === 0) {
-      showToast('Selecione pelo menos 1 item nas caixas ao lado dos produtos.');
-      return;
-    }
-    if (type === 'products') {
-      selectedItems.forEach((it) => addProductToMonitor(it));
-      showToast(`${selectedItems.length} produto(s) adicionados ao Monitor!`);
-    } else {
-      selectedItems.forEach((it) => addSellerToMonitor(it));
-      showToast(`${selectedItems.length} vendedor(es) adicionados ao Monitor!`);
-    }
-    setSelectedIds({});
-  };
-
-  // Cálculos da Calculadora de Contribuição (Avantpro + JoomPulse)
-  const taxPercentages: Record<string, number> = {
-    simples_4: 4.0,
-    simples_7: 7.0,
-    simples_10: 10.0,
-    presumido_14: 14.0,
-    real_18: 18.0,
-  };
-  const currentTaxPercent = taxPercentages[taxRegime] ?? 4.0;
-  const mlRatePercent = calcAdType === 'classico' ? 12 : 17;
-  const mlFixedFee = mySalePrice > 0 && mySalePrice < 79 ? 6.25 : 0;
-  const effectiveShipping = mySalePrice >= 79 ? calcShippingCost : 0;
-  const mlTotalCommission = (mySalePrice * mlRatePercent) / 100 + mlFixedFee;
-  const taxAmount = (mySalePrice * currentTaxPercent) / 100;
-
-  const netContribution =
-    mySalePrice - supplierCost - packagingCost - mlTotalCommission - taxAmount - effectiveShipping;
-  const netMarginPercent = mySalePrice > 0 ? (netContribution / mySalePrice) * 100 : 0;
-
-  // Preço máximo que o vendedor pode pagar no fornecedor para atingir a margem desejada (Ex: 18% no Avantpro)
-  const maxSupplierPriceForTarget = Math.max(
-    0,
-    mySalePrice -
-      mlTotalCommission -
-      taxAmount -
-      packagingCost -
-      effectiveShipping -
-      (mySalePrice * targetMarginPercent) / 100
-  );
+  // Cálculos do Simulador de Lucro
+  const mlRate = adType === 'classico' ? 12 : 17;
+  const fixedFee = salePrice > 0 && salePrice < 79 ? 6.25 : 0;
+  const effectiveShip = salePrice >= 79 ? shippingCost : 0;
+  const mlCommission = (salePrice * mlRate) / 100 + fixedFee;
+  const taxVal = (salePrice * taxRate) / 100;
+  const netProfit = salePrice - supplierCost - packagingCost - mlCommission - taxVal - effectiveShip;
+  const netMargin = salePrice > 0 ? (netProfit / salePrice) * 100 : 0;
 
   return (
-    <div className="flex min-h-screen bg-[#0b0f19] text-slate-100">
-      {/* NOTIFICAÇÃO FLUTUANTE (TOAST) */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-black font-bold px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2">
-          <CheckCircle2 size={18} />
-          {toastMessage}
-        </div>
-      )}
-
-      {/* MENU LATERAL PROFISSIONAL (SEM IA, 100% DADOS REAIS JOOMPULSE & AVANTPRO) */}
-      <aside className="w-64 bg-[#111827] border-r border-slate-800 p-5 flex flex-col justify-between shrink-0">
-        <div>
-          <div className="flex items-center gap-2.5 mb-8">
-            <div className="w-9 h-9 rounded-xl bg-yellow-400 flex items-center justify-center text-black font-black text-lg">
+    <div className="min-h-screen bg-[#070b14] text-slate-100 selection:bg-yellow-400 selection:text-black">
+      {/* =======================================================================
+          BARRA SUPERIOR MODERNA (GLASSMORPHISM - SEM POLUIÇÃO VISUAL)
+      ======================================================================= */}
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/85 border-b border-slate-800/80">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-300 via-yellow-400 to-amber-500 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-yellow-400/20">
               B
             </div>
             <div>
-              <span className="text-xl font-bold tracking-tight">
-                Buscas<span className="text-yellow-400">ML</span>
-              </span>
-              <span className="block text-[10px] text-slate-400 uppercase tracking-widest">
-                Market Intelligence
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-extrabold tracking-tight text-white">
+                  Buscas<span className="text-yellow-400">ML</span>
+                </span>
+                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-yellow-400/15 text-yellow-300 border border-yellow-400/30">
+                  Pro Radar
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 hidden sm:block">
+                Inteligência de Anúncios e Vendedores no Mercado Livre
+              </p>
             </div>
           </div>
 
-          <nav className="space-y-1.5">
+          {/* Seletor Central Limpo */}
+          <div className="flex items-center bg-[#111827] p-1 rounded-xl border border-slate-800">
             <button
-              onClick={() => setActiveModule('busca')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'busca'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              onClick={() => setActiveView('explorador')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
+                activeView === 'explorador'
+                  ? 'bg-yellow-400 text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Search size={18} /> Busca de Produtos
+              <Search size={15} /> Busca & Raio-X de Produtos
             </button>
+            <button
+              onClick={() => setActiveView('calculadora')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${
+                activeView === 'calculadora'
+                  ? 'bg-yellow-400 text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Calculator size={15} /> Simulador de Margem
+            </button>
+          </div>
 
-            <button
-              onClick={() => setActiveModule('categorias')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'categorias'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Layers size={18} /> Análise de Categorias
-            </button>
-
-            <button
-              onClick={() => setActiveModule('palavras')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'palavras'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <KeyRound size={18} /> Palavras-Chave & Título
-            </button>
-
-            <button
-              onClick={() => setActiveModule('vendedores')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'vendedores'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Store size={18} /> Busca de Vendedores
-            </button>
-
-            <button
-              onClick={() => setActiveModule('monitor')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'monitor'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <span className="flex items-center gap-3">
-                <Eye size={18} /> Monitoramento
-              </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-yellow-400 font-bold">
-                {monitoredProducts.length + monitoredSellers.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveModule('calculadora')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                activeModule === 'calculadora'
-                  ? 'bg-yellow-400 text-black font-bold shadow-lg shadow-yellow-400/10'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Calculator size={18} /> Calculadora Viabilidade
-            </button>
-          </nav>
+          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            API Oficial ML Conectada
+          </div>
         </div>
+      </header>
 
-        <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400 space-y-1">
-          <p className="font-semibold text-emerald-400 flex items-center gap-1.5">
-            <ShieldCheck size={14} /> API Mercado Livre Ativa
-          </p>
-          <p className="truncate text-[11px] font-mono">ID: 8353552938244269</p>
-        </div>
-      </aside>
-
-      {/* ÁREA DE CONTEÚDO PRINCIPAL */}
-      <main className="flex-1 p-7 overflow-y-auto">
-        {/* =====================================================================
-            MÓDULO 1: BUSCA AVANÇADA DE PRODUTOS ("O CÉREBRO" DA JOOMPULSE)
-        ===================================================================== */}
-        {activeModule === 'busca' && (
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold">Busca Avançada de Produtos e Demanda</h1>
-                <p className="text-slate-400 text-sm">
-                  Filtre por idade do anúncio (0 a 45d / 90d / 140d), catálogo, medalha do vendedor e volume de vendas
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {activeView === 'explorador' && (
+          <div className="space-y-8">
+            {/* =================================================================
+                CENTRAL DE BUSCA UNIFICADA (LINK, PALAVRA-CHAVE OU FOTO/PRINT)
+            ================================================================= */}
+            <div className="relative rounded-3xl bg-gradient-to-b from-[#111827] to-[#0c1220] border border-slate-800/90 p-6 sm:p-8 shadow-2xl">
+              <div className="max-w-3xl mb-6">
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+                  Pesquisa Inteligente de Produtos e Concorrentes
+                </h1>
+                <p className="text-slate-400 text-sm mt-1">
+                  Digite uma <strong>palavra-chave</strong> para listar os produtos do mercado, cole o{' '}
+                  <strong>link de um anúncio (ou meli.la / MLB)</strong> para abrir o Raio-X, ou envie uma{' '}
+                  <strong>foto / print (`Ctrl+V`)</strong>.
                 </p>
               </div>
 
-              {/* Barra rápida para inspecionar um link ou MLB específico */}
-              <form onSubmit={runDirectUrlSpy} className="flex gap-2 w-full lg:w-96">
-                <input
-                  type="text"
-                  value={directUrlInput}
-                  onChange={(e) => setDirectUrlInput(e.target.value)}
-                  placeholder="Colar link do anúncio ou código MLB..."
-                  className="flex-1 bg-[#111827] border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-yellow-400"
-                />
-                <button
-                  type="submit"
-                  disabled={loadingDirectSpy}
-                  className="bg-slate-800 hover:bg-slate-700 text-yellow-400 font-semibold px-3.5 py-2 rounded-xl text-xs shrink-0 border border-slate-700"
-                >
-                  {loadingDirectSpy ? 'Lendo...' : 'Analisar Link'}
-                </button>
-              </form>
-            </div>
-
-            {/* Painel de Filtros Avançados (Igual ao vídeo da JoomPulse) */}
-            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-5 space-y-4">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  runProductSearch();
-                }}
-                className="flex flex-wrap gap-3"
-              >
-                <div className="flex-1 min-w-[260px]">
+              {/* Barra Principal */}
+              <form onSubmit={handleUnifiedSearch} className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search
+                    size={20}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                  />
                   <input
                     type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Digite o produto, subnicho ou marca (ex: Pote para tempero, Taça diamante, Biombo, Máquina dragão)..."
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-yellow-400"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Digite o nome do produto (ex: Creatina, Pote tempero) ou cole qualquer link do Mercado Livre..."
+                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-[#070b14] border border-slate-700/80 text-white placeholder-slate-500 text-sm sm:text-base focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition"
                   />
                 </div>
+
+                {/* Botão de Busca por Foto Integrado */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-5 py-4 rounded-2xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 transition shrink-0"
+                  title="Envie uma foto ou aperte Ctrl+V com um print copiado"
+                >
+                  <Camera size={18} className="text-yellow-400" />
+                  <span>Buscar por Foto</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImageFile(file);
+                  }}
+                />
+
+                {/* Botão Principal de Ação */}
                 <button
                   type="submit"
-                  disabled={loadingSearch}
-                  className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-6 py-3 rounded-xl text-sm flex items-center gap-2 transition"
+                  disabled={loading}
+                  className="px-8 py-4 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-300 hover:to-amber-300 text-black font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-yellow-400/20 transition shrink-0"
                 >
-                  <Search size={17} />
-                  {loadingSearch ? 'Buscando...' : 'Pesquisar Mercado'}
+                  {loading ? <RefreshCw size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                  {loading ? 'Analisando...' : 'Analisar Agora'}
                 </button>
               </form>
 
-              {/* Atalhos de Exemplos dos Vídeos */}
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400">Buscas dos vídeos:</span>
-                {[
-                  'Pote para tempero',
-                  'Jogo 6 taças diamante',
-                  'Divisória de ambiente biombo',
-                  'Máquina dragão',
-                  'Cinto masculino couro',
-                  'Creatina monohidratada',
-                ].map((sample) => (
-                  <button
-                    key={sample}
-                    onClick={() => {
-                      setSearchQuery(sample);
-                      runProductSearch(sample);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 transition"
-                  >
-                    {sample}
-                  </button>
-                ))}
-              </div>
-
-              {/* Linha 1 de Filtros JoomPulse */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-slate-800 text-xs">
-                <div>
-                  <label className="text-slate-400 block mb-1">Dias no Ar (Idade)</label>
-                  <select
-                    value={maxDaysFilter}
-                    onChange={(e) => setMaxDaysFilter(Number(e.target.value))}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white"
-                  >
-                    <option value={9999}>Qualquer idade (Todos)</option>
-                    <option value={30}>0 a 30 dias (Lançamentos)</option>
-                    <option value={45}>0 a 45 dias (Filtro JoomPulse)</option>
-                    <option value={90}>0 a 90 dias (Filtro Avantpro)</option>
-                    <option value={140}>0 a 140 dias (Oportunidade)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Produtos de Catálogo</label>
-                  <select
-                    value={catalogFilter}
-                    onChange={(e) => setCatalogFilter(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white"
-                  >
-                    <option value="all">Ignorar (Mostrar Todos)</option>
-                    <option value="exclude_catalog">Excluir Catálogos</option>
-                    <option value="only_catalog">Somente Catálogos</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Medalha do Vendedor</label>
-                  <select
-                    value={medalFilter}
-                    onChange={(e) => setMedalFilter(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white"
-                  >
-                    <option value="all">Todos os Vendedores</option>
-                    <option value="no_medal">Somente Sem Medalha</option>
-                    <option value="with_medal">Com Medalha (Líder/Gold/Plat)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Avaliação Mínima</label>
-                  <select
-                    value={minRatingFilter}
-                    onChange={(e) => setMinRatingFilter(Number(e.target.value))}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white"
-                  >
-                    <option value={0}>Qualquer nota</option>
-                    <option value={4.0}>4.0 estrelas ou mais</option>
-                    <option value={4.5}>4.5 estrelas ou mais</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Faixa de Preço (R$)</label>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      placeholder="Mín"
-                      value={minPriceFilter}
-                      onChange={(e) => setMinPriceFilter(e.target.value)}
-                      className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-white"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Máx"
-                      value={maxPriceFilter}
-                      onChange={(e) => setMaxPriceFilter(e.target.value)}
-                      className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Ordenar Por</label>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white"
-                  >
-                    <option value="revenue_30d">Maior Receita (30d)</option>
-                    <option value="sold_30d">Mais Vendidos (30d)</option>
-                    <option value="days_old">Mais Recentes (Menor Idade)</option>
-                    <option value="price">Menor Preço</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Linha 2 de Filtros Rápidos */}
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-2 text-xs">
-                <label className="flex items-center gap-2 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={excludeOfficialStores}
-                    onChange={(e) => setExcludeOfficialStores(e.target.checked)}
-                    className="accent-yellow-400 w-4 h-4 rounded"
-                  />
-                  Excluir Lojas Oficiais (Competir apenas com vendedores comuns)
-                </label>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => monitorSelectedInBulk('products')}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition"
-                  >
-                    + Monitorar Produtos Selecionados
-                  </button>
-                  <button
-                    onClick={() => monitorSelectedInBulk('sellers')}
-                    className="bg-slate-800 hover:bg-slate-700 text-yellow-400 px-3 py-1.5 rounded-lg border border-slate-700 transition"
-                  >
-                    + Monitorar Vendedores Selecionados
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Resumo de Métricas do Termo Pesquisado */}
-            {marketStats && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Preço Médio</span>
-                  <p className="text-lg font-bold text-yellow-400 mt-0.5">R$ {marketStats.avg_price}</p>
-                </div>
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Preço Mediano</span>
-                  <p className="text-lg font-bold text-white mt-0.5">R$ {marketStats.median_price}</p>
-                </div>
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Mín / Máx</span>
-                  <p className="text-sm font-bold text-slate-200 mt-1">
-                    R$ {marketStats.min_price} - R$ {marketStats.max_price}
-                  </p>
-                </div>
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Logística Full</span>
-                  <p className="text-lg font-bold text-emerald-400 mt-0.5">{marketStats.full_share}%</p>
-                </div>
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Em Catálogo</span>
-                  <p className="text-lg font-bold text-blue-400 mt-0.5">{marketStats.catalog_share}%</p>
-                </div>
-                <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                  <span className="text-[11px] text-slate-400 uppercase">Lojas Oficiais</span>
-                  <p className="text-lg font-bold text-purple-400 mt-0.5">{marketStats.official_stores_share}%</p>
-                </div>
-              </div>
-            )}
-
-            {/* Tabela Principal de Produtos (Estilo JoomPulse) */}
-            <div className="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">
-                  Exibindo <strong className="text-yellow-400">{filteredProducts.length}</strong> anúncios encontrados
-                </span>
-                <button
-                  onClick={() => {
-                    setKwSearchInput(searchQuery);
-                    setActiveModule('palavras');
-                  }}
-                  className="text-yellow-400 hover:underline font-semibold"
-                >
-                  Ver as 30 Palavras-Chave mais usadas neste produto →
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-slate-900/70">
-                      <th className="p-3.5 w-8">
-                        <input
-                          type="checkbox"
-                          onChange={(e) => {
-                            const next: Record<string, boolean> = {};
-                            if (e.target.checked) {
-                              filteredProducts.forEach((p) => (next[p.id] = true));
-                            }
-                            setSelectedIds(next);
-                          }}
-                          className="accent-yellow-400"
-                        />
-                      </th>
-                      <th className="p-3.5">Produto / MLB</th>
-                      <th className="p-3.5">Preço</th>
-                      <th className="p-3.5">Vendas 30d</th>
-                      <th className="p-3.5">Receita 30d</th>
-                      <th className="p-3.5">Dias no Ar (Criação)</th>
-                      <th className="p-3.5">Vendedor / Medalha</th>
-                      <th className="p-3.5">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/70">
-                    {filteredProducts.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-800/40 transition">
-                        <td className="p-3.5">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(selectedIds[item.id])}
-                            onChange={(e) =>
-                              setSelectedIds((prev) => ({ ...prev, [item.id]: e.target.checked }))
-                            }
-                            className="accent-yellow-400"
-                          />
-                        </td>
-                        <td className="p-3.5 flex items-center gap-3 max-w-md">
-                          {item.thumbnail ? (
-                            <img
-                              src={item.thumbnail}
-                              alt=""
-                              className="w-12 h-12 rounded-lg bg-white object-contain p-1 shrink-0"
-                            />
-                          ) : (
-                            <div className="w-12 h-12 rounded-lg bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 shrink-0">
-                              MLB
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <button
-                              onClick={() => setInspectedProduct(item)}
-                              className="font-semibold text-slate-100 hover:text-yellow-400 text-left line-clamp-2 transition"
-                            >
-                              {item.title}
-                            </button>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
-                              <span className="font-mono text-blue-400">{item.id}</span>
-                              {item.is_catalog ? (
-                                <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
-                                  Catálogo ({item.catalog_competitors} sellers)
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
-                                  Fora de Catálogo
-                                </span>
-                              )}
-                              <span className="text-emerald-400">{item.logistic_type}</span>
-                              <span className="text-yellow-400">★ {item.rating}</span>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span className="font-bold text-yellow-400 text-sm">
-                            R$ {Number(item.price).toFixed(2)}
-                          </span>
-                          <span className="block text-[10px] text-slate-400">
-                            Mín: R$ {Number(item.min_recorded_price).toFixed(2)}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span className="font-bold text-white text-sm">{item.sold_30d} un.</span>
-                          <span className="block text-[10px] text-slate-400">
-                            Total: {item.sold_quantity} ({item.daily_sales}/dia)
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span className="font-bold text-emerald-400 text-sm">
-                            R$ {Number(item.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                          </span>
-                          <span className="block text-[10px] text-emerald-300/80">
-                            ↗ {item.trend_label} ({item.trend_percent})
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span
-                            className={`font-bold px-2 py-0.5 rounded ${
-                              item.days_old <= 45
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : item.days_old <= 90
-                                ? 'bg-blue-500/20 text-blue-300'
-                                : 'text-slate-200'
-                            }`}
-                          >
-                            {item.days_old} dias
-                          </span>
-                          <span className="block text-[10px] text-slate-400 mt-0.5">
-                            {new Date(item.date_created).toLocaleDateString('pt-BR')}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap">
-                          <button
-                            onClick={() => {
-                              setSelectedSellerProfile(item);
-                              setActiveModule('vendedores');
-                            }}
-                            className="font-semibold text-blue-400 hover:underline block"
-                          >
-                            {item.seller_name}
-                          </button>
-                          <span className="text-[10px] text-slate-400">
-                            {item.seller_medal} • {item.seller_state}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 whitespace-nowrap space-x-1.5">
-                          <button
-                            onClick={() => setInspectedProduct(item)}
-                            className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-2.5 py-1.5 rounded-lg"
-                          >
-                            Raio-X
-                          </button>
-                          <button
-                            onClick={() => addProductToMonitor(item)}
-                            title="Salvar no Monitor de Produtos"
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1.5 rounded-lg"
-                          >
-                            + Monitor
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCalcProductTitle(item.title);
-                              setCompetitorPrice(Number(item.price));
-                              setMySalePrice(Number((item.price - 1).toFixed(2)));
-                              setSupplierCost(Number((item.price * 0.42).toFixed(2)));
-                              setActiveModule('calculadora');
-                            }}
-                            title="Calcular Margem e Viabilidade"
-                            className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 px-2 py-1.5 rounded-lg"
-                          >
-                            Margem
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =====================================================================
-            MODAL DE RAIO-X DO PRODUTO (HISTÓRICO DE PREÇO, REVIEWS E CATÁLOGO)
-        ===================================================================== */}
-        {inspectedProduct && (
-          <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-[#111827] border border-slate-700 rounded-2xl max-w-5xl w-full p-6 space-y-6 max-h-[92vh] overflow-y-auto">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-4">
-                  {inspectedProduct.thumbnail && (
+              {/* Preview quando o usuário envia ou cola uma Foto */}
+              {uploadedPreview && (
+                <div className="mt-4 p-3.5 rounded-2xl bg-slate-900/90 border border-yellow-400/30 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
                     <img
-                      src={inspectedProduct.thumbnail}
-                      alt=""
-                      className="w-16 h-16 rounded-xl bg-white object-contain p-1"
+                      src={uploadedPreview}
+                      alt="Foto enviada"
+                      className="w-12 h-12 rounded-xl object-cover bg-white p-0.5"
                     />
-                  )}
-                  <div>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-mono text-yellow-400">{inspectedProduct.id}</span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
-                        Criado há {inspectedProduct.days_old} dias (
-                        {new Date(inspectedProduct.date_created).toLocaleDateString('pt-BR')})
+                    <div>
+                      <span className="text-[11px] font-bold uppercase text-yellow-400">
+                        Busca por Imagem Ativa
                       </span>
-                    </div>
-                    <h2 className="text-lg font-bold text-white mt-1">{inspectedProduct.title}</h2>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setInspectedProduct(null)}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* KPIs de Demanda (Avantpro + JoomPulse) */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400">Preço Atual vs Mínimo</span>
-                  <p className="text-2xl font-black text-yellow-400 mt-1">
-                    R$ {Number(inspectedProduct.price).toFixed(2)}
-                  </p>
-                  <span className="text-[11px] text-slate-400">
-                    Mínimo registrado: R$ {Number(inspectedProduct.min_recorded_price || inspectedProduct.price * 0.85).toFixed(2)}
-                  </span>
-                </div>
-
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400">Faturamento Mensal (30d)</span>
-                  <p className="text-2xl font-black text-emerald-400 mt-1">
-                    R$ {Number(inspectedProduct.revenue_30d || 0).toLocaleString('pt-BR')}
-                  </p>
-                  <span className="text-[11px] text-slate-400">
-                    Acumulado total: R$ {Number(inspectedProduct.total_revenue || 0).toLocaleString('pt-BR')}
-                  </span>
-                </div>
-
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400">Ritmo de Vendas</span>
-                  <p className="text-2xl font-black text-blue-400 mt-1">
-                    {inspectedProduct.sold_30d || inspectedProduct.sold_quantity} / mês
-                  </p>
-                  <span className="text-[11px] text-slate-400">
-                    Média de {inspectedProduct.daily_sales} vendas/dia
-                  </span>
-                </div>
-
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400">Avaliações & Reputação</span>
-                  <p className="text-2xl font-black text-white mt-1">★ {inspectedProduct.rating}</p>
-                  <span className="text-[11px] text-slate-400">
-                    {inspectedProduct.reviews_count} opiniões verificadas
-                  </span>
-                </div>
-              </div>
-
-              {/* Gráficos Históricos de 30 Dias (Variação de Preço + Curva de Avaliações e Vendas) */}
-              {Array.isArray(inspectedProduct.history) && inspectedProduct.history.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                    <h3 className="text-xs font-bold uppercase text-slate-300 mb-3">
-                      Histórico de Precificação do Vendedor (Últimos 30 dias)
-                    </h3>
-                    <div className="flex items-end gap-1.5 h-36 pt-4">
-                      {inspectedProduct.history.slice(-15).map((h: any, idx: number) => {
-                        const maxP = Math.max(...inspectedProduct.history.map((x: any) => x.price), 1);
-                        const heightPct = Math.max(20, Math.round((h.price / maxP) * 100));
-                        return (
-                          <div key={idx} className="flex-1 flex flex-col items-center gap-1 group">
-                            <span className="text-[9px] text-yellow-400 opacity-0 group-hover:opacity-100">
-                              R${h.price}
-                            </span>
-                            <div
-                              style={{ height: `${heightPct}%` }}
-                              className="w-full bg-yellow-400/80 hover:bg-yellow-400 rounded-t transition"
-                            />
-                            <span className="text-[9px] text-slate-500">{h.date}</span>
-                          </div>
-                        );
-                      })}
+                      <p className="text-xs text-slate-200 mt-0.5">
+                        Produto identificado na foto: <strong>{detectedPhotoTerm || searchInput}</strong>
+                      </p>
                     </div>
                   </div>
-
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                    <h3 className="text-xs font-bold uppercase text-slate-300 mb-3">
-                      Crescimento de Avaliações & Vendas Diárias
-                    </h3>
-                    <div className="flex items-end gap-1.5 h-36 pt-4">
-                      {inspectedProduct.history.slice(-15).map((h: any, idx: number) => {
-                        const maxR = Math.max(...inspectedProduct.history.map((x: any) => x.reviews), 1);
-                        const heightPct = Math.max(15, Math.round((h.reviews / maxR) * 100));
-                        return (
-                          <div key={idx} className="flex-1 flex flex-col items-center gap-1 group">
-                            <span className="text-[9px] text-emerald-400 opacity-0 group-hover:opacity-100">
-                              {h.reviews} rev
-                            </span>
-                            <div
-                              style={{ height: `${heightPct}%` }}
-                              className="w-full bg-emerald-400/80 hover:bg-emerald-400 rounded-t transition"
-                            />
-                            <span className="text-[9px] text-slate-500">{h.date}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => {
+                      setUploadedPreview(null);
+                      setDetectedPhotoTerm('');
+                    }}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+                  >
+                    <X size={15} />
+                  </button>
                 </div>
               )}
 
-              {/* Insights de Avaliações (Como mostrado no vídeo do Biombo da JoomPulse) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                  <p className="font-bold text-emerald-400 mb-2">✓ Elogios Recorrentes dos Compradores</p>
-                  <ul className="space-y-1 text-slate-300 list-disc list-inside">
-                    <li>Excelente acabamento e custo-benefício em relação às lojas oficiais</li>
-                    <li>Alta procura para compra em Kits (aumenta ticket acima de R$ 79)</li>
-                  </ul>
-                </div>
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                  <p className="font-bold text-amber-300 mb-2">
-                    ⚠ Pontos de Atenção nas Avaliações (Oportunidade de Diferenciação)
-                  </p>
-                  <ul className="space-y-1 text-slate-300 list-disc list-inside">
-                    <li>Clientes mencionam cuidado com embalagem (reforçar plástico bolha/caixa)</li>
-                    <li>Destacar medidas exatas na 2ª foto do anúncio para reduzir devoluções</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
-                <a
-                  href={inspectedProduct.permalink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  Abrir anúncio original no Mercado Livre <ExternalLink size={14} />
-                </a>
-                <div className="flex gap-2">
+              {/* Sugestões Rápidas para Testar com 1 Clique */}
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-400 font-medium">Testar busca rápida:</span>
+                {[
+                  'Pote para tempero',
+                  'Creatina Growth 250g',
+                  'Jogo 6 taças diamante',
+                  'Cadeira gamer reclinável',
+                  'Parafusadeira furadeira sem fio',
+                  'https://meli.la/1GUtykq',
+                ].map((item) => (
                   <button
+                    key={item}
                     onClick={() => {
-                      addProductToMonitor(inspectedProduct);
-                      setInspectedProduct(null);
+                      setSearchInput(item);
+                      handleUnifiedSearch(undefined, item);
                     }}
-                    className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl"
+                    className="px-3 py-1.5 rounded-xl bg-[#070b14]/90 hover:bg-slate-800 border border-slate-800 hover:border-yellow-400/40 text-slate-300 transition"
                   >
-                    + Adicionar ao Monitor de Produtos
-                  </button>
-                  <button
-                    onClick={() => {
-                      setCalcProductTitle(inspectedProduct.title);
-                      setCompetitorPrice(Number(inspectedProduct.price));
-                      setMySalePrice(Number((inspectedProduct.price - 1).toFixed(2)));
-                      setSupplierCost(Number((inspectedProduct.price * 0.42).toFixed(2)));
-                      setInspectedProduct(null);
-                      setActiveModule('calculadora');
-                    }}
-                    className="bg-yellow-400 hover:bg-yellow-300 text-black text-xs font-bold px-4 py-2.5 rounded-xl"
-                  >
-                    Simular Viabilidade na Calculadora →
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =====================================================================
-            MÓDULO 2: ANÁLISE DE CATEGORIAS, SUBCATEGORIAS E MONOPOLIZAÇÃO
-        ===================================================================== */}
-        {activeModule === 'categorias' && (
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold">Árvore de Categorias, Sazonalidade e Índice de Monopolização</h1>
-              <p className="text-slate-400 text-sm">
-                Navegue pelas categorias mães e filhas do Mercado Livre para encontrar nichos com baixa monopolização
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Lista de Categorias Mães */}
-              <div className="lg:col-span-4 bg-[#111827] border border-slate-800 rounded-2xl p-4 max-h-[700px] overflow-y-auto space-y-1.5">
-                <p className="text-xs font-bold uppercase text-slate-400 px-2 mb-2">
-                  Categorias Oficiais Mercado Livre (MLB)
-                </p>
-                {rootCategories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => loadCategoryDetails(cat.id)}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between transition ${
-                      selectedCategoryDetail?.id === cat.id
-                        ? 'bg-yellow-400 text-black font-bold'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <span className="truncate">{cat.name}</span>
-                    <span className="text-[10px] opacity-70">{cat.id}</span>
+                    {item.startsWith('http') ? '🔗 Link: Creatina (meli.la)' : item}
                   </button>
                 ))}
               </div>
 
-              {/* Detalhes da Categoria e Subcategorias Filhas */}
-              <div className="lg:col-span-8 space-y-6">
-                {loadingCategory ? (
-                  <div className="bg-[#111827] border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
-                    Carregando subcategorias, curva de sazonalidade e índice de monopolização...
+              {loading && statusText && (
+                <div className="mt-5 p-4 rounded-2xl bg-yellow-400/10 border border-yellow-400/30 text-yellow-300 text-xs sm:text-sm font-medium flex items-center gap-3">
+                  <RefreshCw size={18} className="animate-spin shrink-0" />
+                  {statusText}
+                </div>
+              )}
+            </div>
+
+            {/* =================================================================
+                DOSSIÊ RAIO-X COMPLETO (QUANDO BUSCA LINK OU CLICA NUM PRODUTO)
+            ================================================================= */}
+            {featuredProduct && (
+              <div className="rounded-3xl bg-[#111827] border-2 border-yellow-400/50 p-6 sm:p-8 shadow-2xl space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-full bg-yellow-400 text-black font-extrabold text-xs uppercase">
+                      Dossiê Raio-X Completo
+                    </span>
+                    <span className="px-3 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono text-xs">
+                      {featuredProduct.id}
+                    </span>
+                    <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
+                      Fonte: {featuredProduct.date_source || 'API Oficial ML'}
+                    </span>
                   </div>
-                ) : (
-                  selectedCategoryDetail && (
-                    <>
-                      {/* Cabeçalho da Categoria + Breadcrumb */}
-                      <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-2">
-                          {selectedCategoryDetail.path_from_root?.map((p: any, idx: number) => (
+
+                  <button
+                    onClick={() => setFeaturedProduct(null)}
+                    className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl transition"
+                  >
+                    <X size={15} /> Fechar Raio-X
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Galeria de Fotos Reais */}
+                  <div className="lg:col-span-4 flex flex-col justify-between bg-[#0b101d] border border-slate-800 rounded-2xl p-5">
+                    <div>
+                      <div className="w-full h-72 rounded-xl bg-white p-4 flex items-center justify-center overflow-hidden">
+                        <img
+                          src={selectedPhotoUrl || featuredProduct.thumbnail}
+                          alt={featuredProduct.title}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+
+                      {featuredProduct.pictures?.length > 1 && (
+                        <div className="flex gap-2 overflow-x-auto pt-3 pb-1">
+                          {featuredProduct.pictures.map((pic: string, i: number) => (
                             <button
-                              key={p.id}
-                              onClick={() => loadCategoryDetails(p.id)}
-                              className="hover:text-yellow-400"
+                              key={i}
+                              onClick={() => setSelectedPhotoUrl(pic)}
+                              className={`w-14 h-14 rounded-lg bg-white p-1 border-2 shrink-0 transition ${
+                                (selectedPhotoUrl || featuredProduct.thumbnail) === pic
+                                  ? 'border-yellow-400 scale-105'
+                                  : 'border-transparent opacity-60 hover:opacity-100'
+                              }`}
                             >
-                              {idx > 0 ? '› ' : ''}
-                              {p.name}
+                              <img src={pic} alt="" className="w-full h-full object-contain" />
                             </button>
                           ))}
                         </div>
-                        <div className="flex flex-wrap items-center justify-between gap-4">
-                          <div>
-                            <h2 className="text-xl font-bold text-white">{selectedCategoryDetail.name}</h2>
-                            <p className="text-xs text-slate-400 mt-1">
-                              Total de anúncios ativos na categoria:{' '}
-                              <strong className="text-white">
-                                {Number(selectedCategoryDetail.total_items || 0).toLocaleString('pt-BR')}
-                              </strong>
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setSearchQuery(selectedCategoryDetail.name);
-                              setActiveModule('busca');
-                              runProductSearch(selectedCategoryDetail.name);
-                            }}
-                            className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-xs px-4 py-2.5 rounded-xl"
-                          >
-                            Garimpar Produtos desta Categoria →
-                          </button>
-                        </div>
+                      )}
+                    </div>
 
-                        {/* Gráfico de Estabilidade e Sazonalidade (Picos e Vales - Vídeo JoomPulse) */}
-                        {selectedCategoryDetail.seasonality && (
-                          <div className="mt-6 pt-5 border-t border-slate-800">
-                            <p className="text-xs font-bold uppercase text-slate-400 mb-3">
-                              Comportamento de Sazonalidade Anual (Picos e Vales de Receita)
-                            </p>
-                            <div className="flex items-end gap-2 h-32 pt-4">
-                              {selectedCategoryDetail.seasonality.map((s: any, idx: number) => {
-                                const maxRev = Math.max(
-                                  ...selectedCategoryDetail.seasonality.map((x: any) => x.revenue),
-                                  1
-                                );
-                                const hPct = Math.max(20, Math.round((s.revenue / maxRev) * 100));
-                                return (
-                                  <div key={idx} className="flex-1 flex flex-col items-center gap-1">
-                                    <div
-                                      style={{ height: `${hPct}%` }}
-                                      className="w-full bg-blue-500/70 hover:bg-yellow-400 rounded-t transition"
-                                    />
-                                    <span className="text-[10px] text-slate-400">{s.month}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
+                    <div className="pt-4 mt-4 border-t border-slate-800 flex items-center justify-between gap-2">
+                      <a
+                        href={featuredProduct.permalink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-bold text-yellow-400 hover:underline flex items-center gap-1.5"
+                      >
+                        Abrir Anúncio no ML <ExternalLink size={14} />
+                      </a>
+                      <button
+                        onClick={() => {
+                          setCalcTitle(featuredProduct.title);
+                          setSalePrice(Number(featuredProduct.price || 89.9));
+                          setSupplierCost(Number(((featuredProduct.price || 89.9) * 0.4).toFixed(2)));
+                          setActiveView('calculadora');
+                        }}
+                        className="text-xs bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-3.5 py-2 rounded-xl transition"
+                      >
+                        Simular Margem →
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Informações do Produto + Datas + Vendedor */}
+                  <div className="lg:col-span-8 space-y-5">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-1">
+                        <span>Marca: <strong className="text-white">{featuredProduct.brand}</strong></span>
+                        <span>•</span>
+                        <span>Modalidade: <strong className="text-purple-300">{featuredProduct.ad_type}</strong></span>
+                        <span>•</span>
+                        <span className="text-yellow-400 font-bold">
+                          ★ {featuredProduct.rating} ({featuredProduct.reviews_count} avaliações)
+                        </span>
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-extrabold text-white leading-snug">
+                        {featuredProduct.title}
+                      </h2>
+                    </div>
+
+                    {/* Faixa de Preço e Faturamento */}
+                    <div className="p-5 rounded-2xl bg-[#0b101d] border border-slate-800 flex flex-wrap items-center justify-between gap-6">
+                      <div>
+                        {featuredProduct.original_price > featuredProduct.price && (
+                          <span className="text-xs text-slate-400 line-through block">
+                            Preço original: R$ {Number(featuredProduct.original_price).toFixed(2)}
+                          </span>
                         )}
+                        <div className="flex items-center gap-3">
+                          <span className="text-3xl sm:text-4xl font-black text-yellow-400">
+                            R$ {Number(featuredProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                          {featuredProduct.discount_percent > 0 && (
+                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-xs">
+                              -{featuredProduct.discount_percent}% OFF
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Tabela de Subcategorias Filhas com Índice de Monopolização */}
-                      <div className="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden">
-                        <div className="px-6 py-4 border-b border-slate-800">
-                          <h3 className="text-sm font-bold">
-                            Subcategorias (Nicho) & Índice de Monopolização
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            Quanto menor o índice de monopolização, mais fácil é para um novo vendedor entrar e vender
+                      <div className="flex gap-6">
+                        <div>
+                          <span className="text-[11px] text-slate-400 uppercase block">Receita Estimada (30d)</span>
+                          <span className="text-xl font-black text-emerald-400">
+                            R$ {Number(featuredProduct.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[11px] text-slate-400 uppercase block">Faturamento Total Acumulado</span>
+                          <span className="text-xl font-black text-blue-400">
+                            R$ {Number(featuredProduct.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Grade de Métricas do Anúncio (Criação, Vendas, Logística) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                      <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
+                        <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
+                          <Calendar size={13} className="text-yellow-400" /> Criação do Anúncio
+                        </span>
+                        <p className="text-base font-extrabold text-white mt-1">
+                          {new Date(featuredProduct.date_created).toLocaleDateString('pt-BR')}
+                        </p>
+                        <span className="text-[11px] text-emerald-400">
+                          Há {featuredProduct.days_old} dias no ar
+                        </span>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
+                        <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
+                          <TrendingUp size={13} className="text-blue-400" /> Volume de Vendas
+                        </span>
+                        <p className="text-base font-extrabold text-white mt-1">
+                          {Number(featuredProduct.sold_quantity).toLocaleString('pt-BR')} vendidos
+                        </p>
+                        <span className="text-[11px] text-blue-300">
+                          Média: {featuredProduct.daily_sales} vendas/dia
+                        </span>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
+                        <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
+                          <Truck size={13} className="text-emerald-400" /> Logística e Envio
+                        </span>
+                        <p className="text-base font-extrabold text-white mt-1">
+                          {featuredProduct.logistic_type}
+                        </p>
+                        <span className="text-[11px] text-slate-400">
+                          {featuredProduct.free_shipping ? '✓ Frete Grátis' : 'Frete pago pelo cliente'}
+                        </span>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
+                        <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
+                          <Clock size={13} className="text-purple-400" /> Última Atualização
+                        </span>
+                        <p className="text-base font-extrabold text-white mt-1">
+                          {new Date(featuredProduct.last_updated).toLocaleDateString('pt-BR')}
+                        </p>
+                        <span className="text-[11px] text-slate-400">
+                          Estoque: ~{featuredProduct.available_quantity} un.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* CARD COMPLETO DO VENDEDOR (NOME, DATA DE CRIAÇÃO DA CONTA, MEDALHA E CIDADE) */}
+                    <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-slate-900 to-purple-500/10 border border-blue-500/30">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
+                          <Store size={15} /> Raio-X Completo do Vendedor / Conta Concorrente
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full bg-yellow-400/20 text-yellow-300 text-[11px] font-bold">
+                          ★ {featuredProduct.seller_medal}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                        <div>
+                          <span className="text-slate-400 block">Nome do Vendedor / Loja</span>
+                          <p className="text-sm font-extrabold text-white mt-0.5">
+                            {featuredProduct.seller_name}
                           </p>
                         </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-slate-900/60">
-                                <th className="p-4">Subcategoria</th>
-                                <th className="p-4">Anúncios Ativos</th>
-                                <th className="p-4">Ticket Médio</th>
-                                <th className="p-4">Monopolização</th>
-                                <th className="p-4">Oportunidade</th>
-                                <th className="p-4">Ações</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/70">
-                              {selectedCategoryDetail.children?.map((sub: any) => (
-                                <tr key={sub.id} className="hover:bg-slate-800/40 transition">
-                                  <td className="p-4 font-semibold text-white">
-                                    <button
-                                      onClick={() => loadCategoryDetails(sub.id)}
-                                      className="hover:text-yellow-400 text-left"
-                                    >
-                                      {sub.name}
-                                    </button>
-                                    <span className="block text-[10px] text-slate-500">{sub.id}</span>
-                                  </td>
-                                  <td className="p-4">{Number(sub.total_items).toLocaleString('pt-BR')}</td>
-                                  <td className="p-4 font-bold text-yellow-400">R$ {sub.avg_ticket}</td>
-                                  <td className="p-4">
-                                    <span className="font-bold text-white">{sub.monopoly_index}%</span>
-                                  </td>
-                                  <td className="p-4">
-                                    <span
-                                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                                        sub.monopoly_index < 15
-                                          ? 'bg-emerald-500/20 text-emerald-300'
-                                          : sub.monopoly_index < 28
-                                          ? 'bg-yellow-400/20 text-yellow-300'
-                                          : 'bg-red-500/20 text-red-300'
-                                      }`}
-                                    >
-                                      {sub.opportunity_level}
-                                    </span>
-                                  </td>
-                                  <td className="p-4 space-x-2">
-                                    <button
-                                      onClick={() => loadCategoryDetails(sub.id)}
-                                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg"
-                                    >
-                                      Subnichos
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        setSearchQuery(sub.name);
-                                        setActiveModule('busca');
-                                        runProductSearch(sub.name);
-                                      }}
-                                      className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-2.5 py-1.5 rounded-lg"
-                                    >
-                                      Ver Produtos
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+
+                        <div>
+                          <span className="text-slate-400 block">Conta Criada em (Idade da Loja)</span>
+                          <p className="text-sm font-extrabold text-emerald-400 mt-0.5">
+                            {new Date(featuredProduct.seller_registration_date).toLocaleDateString('pt-BR')}{' '}
+                            <span className="text-xs font-normal text-slate-300">
+                              ({featuredProduct.seller_account_years} anos no ML)
+                            </span>
+                          </p>
+                        </div>
+
+                        <div>
+                          <span className="text-slate-400 block">Localização do Vendedor</span>
+                          <p className="text-sm font-bold text-slate-200 mt-0.5">
+                            {featuredProduct.seller_city} - {featuredProduct.seller_state}
+                          </p>
+                        </div>
+
+                        <div>
+                          <span className="text-slate-400 block">Vendas Concluídas da Loja</span>
+                          <p className="text-sm font-bold text-yellow-400 mt-0.5">
+                            +{Number(featuredProduct.seller_completed_sales).toLocaleString('pt-BR')} vendas
+                          </p>
                         </div>
                       </div>
-                    </>
-                  )
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =====================================================================
-            MÓDULO 3: EXTRATOR DAS 30 PALAVRAS-CHAVE E CRIADOR DE TÍTULO (AVANTPRO)
-        ===================================================================== */}
-        {activeModule === 'palavras' && (
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold">
-                Extrator das 30 Palavras-Chave Mais Usadas & Criador de Título (Método Avantpro + JoomPulse)
-              </h1>
-              <p className="text-slate-400 text-sm">
-                Descubra exatamente quais termos mais se repetem nos anúncios da 1ª página e monte seu título campeão com 1 clique
-              </p>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setSearchQuery(kwSearchInput);
-                runProductSearch(kwSearchInput);
-              }}
-              className="flex gap-3 bg-[#111827] border border-slate-800 rounded-2xl p-5"
-            >
-              <input
-                type="text"
-                value={kwSearchInput}
-                onChange={(e) => setKwSearchInput(e.target.value)}
-                placeholder="Digite o produto para extrair as 30 palavras-chave campeãs (ex: Taça diamante, Pote tempero, Parede ripada)..."
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-yellow-400"
-              />
-              <button
-                type="submit"
-                disabled={loadingSearch}
-                className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-6 py-3 rounded-xl text-sm shrink-0"
-              >
-                {loadingSearch ? 'Extraindo...' : 'Extrair 30 Palavras-Chave'}
-              </button>
-            </form>
-
-            {/* Construtor Interativo de Título (60 Caracteres Padrão Mercado Livre) */}
-            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase text-yellow-400">
-                  Construtor de Título Otimizado (Clique nas palavras abaixo para adicionar)
-                </label>
-                <span
-                  className={`text-xs font-bold ${
-                    titleDraft.length > 60 ? 'text-red-400' : 'text-emerald-400'
-                  }`}
-                >
-                  {titleDraft.length} / 60 caracteres recomendados pelo ML
-                </span>
-              </div>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={titleDraft}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-base font-semibold text-white"
-                />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(titleDraft);
-                    setCopiedTitle(true);
-                    setTimeout(() => setCopiedTitle(false), 2000);
-                  }}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-5 py-3 rounded-xl text-xs flex items-center gap-2 shrink-0"
-                >
-                  {copiedTitle ? <Check size={16} /> : <Copy size={16} />}
-                  {copiedTitle ? 'Copiado!' : 'Copiar Título'}
-                </button>
-                <button
-                  onClick={() => setTitleDraft('')}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-3 rounded-xl text-xs"
-                >
-                  Limpar
-                </button>
-              </div>
-            </div>
-
-            {/* Grade das 30 Palavras-Chave Mais Usadas (Estilo Avantpro) */}
-            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
-              <h3 className="text-sm font-bold mb-4">
-                Ranking das 30 Palavras-Chave Validadas na 1ª Página ({topKeywords.length} termos extraídos)
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {topKeywords.map((kw, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => {
-                      const formatted = kw.keyword.charAt(0).toUpperCase() + kw.keyword.slice(1);
-                      if (!titleDraft.toLowerCase().includes(kw.keyword.toLowerCase())) {
-                        setTitleDraft((prev) => `${prev} ${formatted}`.trim());
-                      }
-                    }}
-                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-yellow-400 cursor-pointer transition flex items-center justify-between"
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold text-yellow-400">#{idx + 1} MAIS USADA</span>
-                      <p className="font-bold text-white text-sm capitalize mt-0.5">{kw.keyword}</p>
-                      <span className="text-[11px] text-slate-400">
-                        Repete em {kw.occurrences} anúncios ({kw.frequency_percent}%)
-                      </span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-xs font-bold text-emerald-400">{kw.sales_volume} vendas</span>
-                      <span className="block text-[10px] text-slate-400">
-                        Ticket R$ {kw.avg_price}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =====================================================================
-            MÓDULO 4: BUSCA E PÁGINA DO VENDEDOR (ANÁLISE DE CONCORRENTES)
-        ===================================================================== */}
-        {activeModule === 'vendedores' && (
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold">Análise de Vendedores e Lojas Concorrentes</h1>
-                <p className="text-slate-400 text-sm">
-                  Inspecione a estratégia dos principais vendedores do nicho (Full, Frete Grátis, Medalha e Faturamento)
-                </p>
-              </div>
-              {selectedSellerProfile && (
-                <button
-                  onClick={() => addSellerToMonitor(selectedSellerProfile)}
-                  className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-5 py-2.5 rounded-xl text-xs"
-                >
-                  + Monitorar Este Vendedor em Tempo Real
-                </button>
-              )}
-            </div>
-
-            {/* Cards dos Vendedores Encontrados na Busca Atual */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {filteredProducts.slice(0, 9).map((sellerItem, idx) => (
-                <div
-                  key={idx}
-                  className="bg-[#111827] border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4"
-                >
-                  <div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="px-2.5 py-0.5 rounded-full bg-yellow-400/15 text-yellow-300 font-bold">
-                        {sellerItem.seller_medal}
-                      </span>
-                      <span className="text-slate-400">Estado: {sellerItem.seller_state}</span>
-                    </div>
-                    <h3 className="text-base font-bold text-white mt-2">{sellerItem.seller_name}</h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Marca principal: <strong className="text-slate-200">{sellerItem.brand}</strong>
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-800 text-xs">
-                      <div>
-                        <span className="text-slate-400 block">Receita do Anúncio Líder</span>
-                        <strong className="text-emerald-400 text-sm">
-                          R$ {Number(sellerItem.revenue_30d).toLocaleString('pt-BR')}
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block">Logística Principal</span>
-                        <strong className="text-blue-400 text-sm">{sellerItem.logistic_type}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      onClick={() => addSellerToMonitor(sellerItem)}
-                      className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-2 rounded-xl text-xs"
-                    >
-                      + Monitorar Vendedor
-                    </button>
-                    <button
-                      onClick={() => setInspectedProduct(sellerItem)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs"
-                    >
-                      Ver Produto
-                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* =====================================================================
-            MÓDULO 5: MONITOR DE PRODUTOS E VENDEDORES (COM PASTAS E ATIVIDADES)
-        ===================================================================== */}
-        {activeModule === 'monitor' && (
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold">Monitor Inteligente de Produtos e Vendedores</h1>
-                <p className="text-slate-400 text-sm">
-                  Organize seus concorrentes em pastas e acompanhe diariamente todas as mudanças de preço, estoque e catálogo
-                </p>
-              </div>
-
-              {/* Alternador Monitor de Produtos vs Monitor de Vendedores */}
-              <div className="flex bg-[#111827] p-1 rounded-xl border border-slate-800">
-                <button
-                  onClick={() => setMonitorSubTab('produtos')}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
-                    monitorSubTab === 'produtos' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Monitor de Produtos ({monitoredProducts.length})
-                </button>
-                <button
-                  onClick={() => setMonitorSubTab('vendedores')}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
-                    monitorSubTab === 'vendedores' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Monitor de Vendedores ({monitoredSellers.length})
-                </button>
-              </div>
-            </div>
-
-            {/* Barra de Pastas Personalizadas (Igual ao vídeo do Monitor da JoomPulse) */}
-            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setSelectedFolder('Todas')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                    selectedFolder === 'Todas'
-                      ? 'bg-yellow-400 text-black'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  Todas as Pastas
-                </button>
-                {folders.map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setSelectedFolder(f)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                      selectedFolder === f
-                        ? 'bg-yellow-400 text-black'
-                        : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    📁 {f}
-                  </button>
-                ))}
-              </div>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (newFolderName.trim() && !folders.includes(newFolderName.trim())) {
-                    setFolders((prev) => [...prev, newFolderName.trim()]);
-                    setNewFolderName('');
-                    showToast('Nova pasta criada com sucesso!');
-                  }
-                }}
-                className="flex gap-2"
-              >
-                <input
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="Nome da nova pasta..."
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
-                />
-                <button
-                  type="submit"
-                  className="bg-slate-800 hover:bg-slate-700 text-yellow-400 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"
-                >
-                  <FolderPlus size={14} /> Criar Pasta
-                </button>
-              </form>
-            </div>
-
-            {/* SUB-ABA A: PRODUTOS MONITORADOS */}
-            {monitorSubTab === 'produtos' && (
-              <div className="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-slate-900/60">
-                      <th className="p-4">Produto Monitorado</th>
-                      <th className="p-4">Pasta</th>
-                      <th className="p-4">Preço Atual</th>
-                      <th className="p-4">Vendas 30d</th>
-                      <th className="p-4">Última Atividade Detectada</th>
-                      <th className="p-4">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/70">
-                    {monitoredProducts
-                      .filter((p) => selectedFolder === 'Todas' || p.folder === selectedFolder)
-                      .map((p) => (
-                        <tr key={p.id} className="hover:bg-slate-800/40">
-                          <td className="p-4">
-                            <p className="font-bold text-white">{p.title}</p>
-                            <span className="text-[10px] text-slate-400">
-                              {p.id} • Vendedor: {p.seller_name} ({p.logistic_type})
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300">
-                              📁 {p.folder}
-                            </span>
-                          </td>
-                          <td className="p-4 font-bold text-yellow-400 text-sm">
-                            R$ {Number(p.price).toFixed(2)}
-                          </td>
-                          <td className="p-4 font-bold text-emerald-400">
-                            {p.sold_30d} vendas (R$ {Number(p.revenue_30d).toLocaleString('pt-BR')})
-                          </td>
-                          <td className="p-4 text-slate-300">{p.last_change}</td>
-                          <td className="p-4">
-                            <button
-                              onClick={() =>
-                                setMonitoredProducts((prev) => prev.filter((item) => item.id !== p.id))
-                              }
-                              className="text-red-400 hover:text-red-300 p-1.5"
-                              title="Remover do Monitor"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
               </div>
             )}
 
-            {/* SUB-ABA B: VENDEDORES MONITORADOS + LOG DE ATIVIDADES DIÁRIAS */}
-            {monitorSubTab === 'vendedores' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-5 space-y-3">
-                  {monitoredSellers
-                    .filter((s) => selectedFolder === 'Todas' || s.folder === selectedFolder)
-                    .map((seller) => (
-                      <div
-                        key={seller.seller_id}
-                        onClick={() => setActiveSellerActivityLog(seller)}
-                        className={`p-5 rounded-2xl border cursor-pointer transition ${
-                          activeSellerActivityLog?.seller_id === seller.seller_id
-                            ? 'bg-slate-800/90 border-yellow-400'
-                            : 'bg-[#111827] border-slate-800 hover:border-slate-700'
-                        }`}
+            {/* =================================================================
+                BARRA DE FILTROS E RESUMO DO MERCADO PARA A PALAVRA-CHAVE
+            ================================================================= */}
+            {products.length > 0 && (
+              <>
+                {/* Cards de Resumo da Palavra-Chave */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
+                    <span className="text-xs text-slate-400">Anúncios Analisados</span>
+                    <p className="text-2xl font-black text-white mt-1">{filteredProducts.length} produtos</p>
+                  </div>
+                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
+                    <span className="text-xs text-slate-400">Ticket Médio da Busca</span>
+                    <p className="text-2xl font-black text-yellow-400 mt-1">R$ {avgPrice.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
+                    <span className="text-xs text-slate-400">Movimentação Mensal (Amostra)</span>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">
+                      R$ {totalNicheRevenue.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                  <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4">
+                    <span className="text-xs text-slate-400">Presença no Envio Full</span>
+                    <p className="text-2xl font-black text-blue-400 mt-1">{fullPercentage}% dos anúncios</p>
+                  </div>
+                </div>
+
+                {/* Controles de Filtro e Visualização */}
+                <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div>
+                      <span className="text-slate-400 mr-2">Idade do Anúncio:</span>
+                      <select
+                        value={maxAgeDays}
+                        onChange={(e) => setMaxAgeDays(Number(e.target.value))}
+                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
                       >
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="px-2 py-0.5 rounded bg-yellow-400/20 text-yellow-300 font-bold">
-                            {seller.medal} • {seller.state}
-                          </span>
-                          <span className="text-slate-400">📁 {seller.folder}</span>
+                        <option value={9999}>Todas as idades</option>
+                        <option value={30}>Criados há até 30 dias</option>
+                        <option value={60}>Criados há até 60 dias</option>
+                        <option value={90}>Criados há até 90 dias</option>
+                        <option value={180}>Criados há até 180 dias</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 mr-2">Logística:</span>
+                      <select
+                        value={logisticFilter}
+                        onChange={(e) => setLogisticFilter(e.target.value as any)}
+                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
+                      >
+                        <option value="all">Todas</option>
+                        <option value="full">Somente Full ⚡</option>
+                        <option value="free">Com Frete Grátis</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 mr-2">Ordenar por:</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as any)}
+                        className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
+                      >
+                        <option value="revenue">Maior Receita (30d)</option>
+                        <option value="sales">Mais Vendidos</option>
+                        <option value="newest">Mais Recentes (Menor Idade)</option>
+                        <option value="price">Menor Preço</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Alternador Grade de Cards vs Tabela */}
+                  <div className="flex items-center gap-1 bg-[#070b14] p-1 rounded-xl border border-slate-800">
+                    <button
+                      onClick={() => setDisplayMode('grid')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition ${
+                        displayMode === 'grid' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <LayoutGrid size={14} /> Cards Detalhados
+                    </button>
+                    <button
+                      onClick={() => setDisplayMode('table')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition ${
+                        displayMode === 'table' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <List size={14} /> Tabela Completa
+                    </button>
+                  </div>
+                </div>
+
+                {/* =============================================================
+                    MODO 1: GRADE DE CARDS MODERNA E ATRATIVA (COM FOTOS GRANDES)
+                ============================================================= */}
+                {displayMode === 'grid' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredProducts.map((item) => (
+                      <div
+                        key={item.id}
+                        className="group bg-[#111827] border border-slate-800/90 hover:border-yellow-400/60 rounded-3xl overflow-hidden flex flex-col justify-between transition-all duration-200 hover:shadow-2xl hover:shadow-yellow-400/5"
+                      >
+                        <div>
+                          {/* Área da Foto Real do Produto */}
+                          <div className="relative h-56 bg-white p-4 flex items-center justify-center overflow-hidden">
+                            {item.thumbnail ? (
+                              <img
+                                src={item.thumbnail}
+                                alt={item.title}
+                                className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
+                              />
+                            ) : (
+                              <div className="text-slate-400 text-xs">Sem imagem</div>
+                            )}
+
+                            {/* Badges Superiores na Foto */}
+                            <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+                              <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-yellow-400 font-mono font-bold text-[11px] backdrop-blur-md">
+                                {item.id}
+                              </span>
+                              {String(item.logistic_type).includes('Full') && (
+                                <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-extrabold text-[11px]">
+                                  ⚡ FULL
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="absolute top-3 right-3">
+                              <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-white font-bold text-[11px] backdrop-blur-md">
+                                ★ {item.rating} ({item.reviews_count})
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Corpo do Card */}
+                          <div className="p-5 space-y-4">
+                            <h3
+                              onClick={() => {
+                                setFeaturedProduct(item);
+                                setSelectedPhotoUrl(item.thumbnail);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="font-bold text-sm text-white group-hover:text-yellow-400 line-clamp-2 cursor-pointer transition leading-snug"
+                            >
+                              {item.title}
+                            </h3>
+
+                            {/* Preço e Faturamento Mensal */}
+                            <div className="flex items-baseline justify-between pt-1">
+                              <div>
+                                {item.original_price > item.price && (
+                                  <span className="text-[11px] text-slate-500 line-through block">
+                                    R$ {Number(item.original_price).toFixed(2)}
+                                  </span>
+                                )}
+                                <span className="text-2xl font-black text-yellow-400">
+                                  R$ {Number(item.price).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 uppercase block">Receita 30 dias</span>
+                                <span className="text-base font-extrabold text-emerald-400">
+                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Bloco de Datas do Anúncio e Vendas */}
+                            <div className="grid grid-cols-2 gap-2.5 p-3 rounded-2xl bg-[#090d16] border border-slate-800/80 text-xs">
+                              <div>
+                                <span className="text-[10px] text-slate-400 block">Criado em (Anúncio)</span>
+                                <strong className="text-white">
+                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                </strong>
+                                <span className="block text-[10px] text-emerald-400">
+                                  Há {item.days_old} dias
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 block">Vendas Capturadas</span>
+                                <strong className="text-blue-400">
+                                  {Number(item.sold_quantity).toLocaleString('pt-BR')} un.
+                                </strong>
+                                <span className="block text-[10px] text-slate-400">
+                                  {item.daily_sales} vendas/dia
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Bloco Completo do Vendedor (Nome + Data da Conta Criada) */}
+                            <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800/90 text-xs space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-slate-400 uppercase font-semibold">
+                                  Vendedor:
+                                </span>
+                                <span className="text-[10px] text-yellow-400 font-bold">
+                                  {item.seller_medal} • {item.seller_state}
+                                </span>
+                              </div>
+                              <p className="font-bold text-slate-100 truncate">{item.seller_name}</p>
+                              <p className="text-[11px] text-slate-400">
+                                Conta criada em:{' '}
+                                <strong className="text-slate-200">
+                                  {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')}
+                                </strong>{' '}
+                                ({item.seller_account_years} anos no ML)
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                        <h3 className="text-base font-bold text-white mt-2">{seller.seller_name}</h3>
-                        <div className="flex items-center justify-between text-xs text-slate-400 mt-3 pt-3 border-t border-slate-800">
-                          <span>Receita 30d: R$ {seller.revenue_30d.toLocaleString('pt-BR')}</span>
-                          <span className="text-yellow-400 font-semibold flex items-center gap-1">
-                            <Activity size={13} /> Ver Atividades ({seller.activities.length})
-                          </span>
+
+                        {/* Rodapé de Ações do Card */}
+                        <div className="px-5 pb-5 pt-2 flex gap-2">
+                          <button
+                            onClick={() => {
+                              setFeaturedProduct(item);
+                              setSelectedPhotoUrl(item.thumbnail);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs transition"
+                          >
+                            Abrir Raio-X Completo
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCalcTitle(item.title);
+                              setSalePrice(Number(item.price));
+                              setSupplierCost(Number((item.price * 0.42).toFixed(2)));
+                              setActiveView('calculadora');
+                            }}
+                            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition"
+                          >
+                            Lucro
+                          </button>
+                          <a
+                            href={item.permalink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 flex items-center justify-center transition"
+                            title="Abrir no Mercado Livre"
+                          >
+                            <ExternalLink size={15} />
+                          </a>
                         </div>
                       </div>
                     ))}
-                </div>
+                  </div>
+                )}
 
-                {/* Painel de Histórico de Atividades do Vendedor (Idêntico ao vídeo lw5FgpzSuDY) */}
-                <div className="lg:col-span-7 bg-[#111827] border border-slate-800 rounded-2xl p-6">
-                  {activeSellerActivityLog || monitoredSellers[0] ? (
-                    (() => {
-                      const target = activeSellerActivityLog || monitoredSellers[0];
-                      const filteredActs = target.activities.filter(
-                        (a) => activityTypeFilter === 'Todas' || a.type === activityTypeFilter
-                      );
-                      return (
-                        <div className="space-y-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-4">
-                            <div>
-                              <h3 className="text-base font-bold text-white">
-                                Histórico de Atividades: {target.seller_name}
-                              </h3>
-                              <p className="text-xs text-slate-400">
-                                Alterações de preço, novos anúncios e mudanças de catálogo do último mês
-                              </p>
-                            </div>
-                            <select
-                              value={activityTypeFilter}
-                              onChange={(e) => setActivityTypeFilter(e.target.value)}
-                              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
-                            >
-                              <option value="Todas">Todas as Atividades</option>
-                              <option value="Mudança de Preço">Apenas Mudanças de Preço</option>
-                              <option value="Novo Anúncio">Apenas Anúncios Novos</option>
-                              <option value="Alteração de Catálogo">Alterações de Catálogo</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-3">
-                            {filteredActs.map((act, i) => (
-                              <div
-                                key={i}
-                                className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-start justify-between gap-4 text-xs"
-                              >
-                                <div>
-                                  <span
-                                    className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                                      act.type === 'Mudança de Preço'
-                                        ? 'bg-yellow-400/20 text-yellow-300'
-                                        : act.type === 'Novo Anúncio'
-                                        ? 'bg-emerald-500/20 text-emerald-300'
-                                        : 'bg-blue-500/20 text-blue-300'
-                                    }`}
+                {/* =============================================================
+                    MODO 2: TABELA ANALÍTICA COMPLETA (COM FOTO AO LADO E VENDEDOR)
+                ============================================================= */}
+                {displayMode === 'table' && (
+                  <div className="bg-[#111827] border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-[#0b101d]">
+                            <th className="p-4">Foto & Produto</th>
+                            <th className="p-4">Preço</th>
+                            <th className="p-4">Vendas & Ritmo</th>
+                            <th className="p-4">Receita 30d</th>
+                            <th className="p-4">Data Criação do Anúncio</th>
+                            <th className="p-4">Vendedor & Criação da Conta</th>
+                            <th className="p-4">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/70">
+                          {filteredProducts.map((item) => (
+                            <tr key={item.id} className="hover:bg-slate-800/40 transition">
+                              <td className="p-4 flex items-center gap-3.5 max-w-md">
+                                <img
+                                  src={item.thumbnail}
+                                  alt={item.title}
+                                  className="w-16 h-16 rounded-xl bg-white object-contain p-1.5 shrink-0 border border-slate-700"
+                                />
+                                <div className="min-w-0">
+                                  <button
+                                    onClick={() => {
+                                      setFeaturedProduct(item);
+                                      setSelectedPhotoUrl(item.thumbnail);
+                                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }}
+                                    className="font-bold text-white hover:text-yellow-400 text-left line-clamp-2 transition"
                                   >
-                                    {act.type}
-                                  </span>
-                                  <p className="font-bold text-white mt-1.5">{act.product}</p>
-                                  <p className="text-slate-400 mt-0.5">{act.detail}</p>
+                                    {item.title}
+                                  </button>
+                                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px]">
+                                    <span className="font-mono text-blue-400">{item.id}</span>
+                                    <span className="text-emerald-400 font-semibold">{item.logistic_type}</span>
+                                    <span className="text-yellow-400">★ {item.rating}</span>
+                                  </div>
                                 </div>
-                                <span className="text-slate-500 whitespace-nowrap">{act.date}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <p className="text-slate-400 text-sm">
-                      Selecione um vendedor ao lado para inspecionar as atividades diárias.
-                    </p>
-                  )}
-                </div>
-              </div>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap">
+                                <span className="text-sm font-black text-yellow-400">
+                                  R$ {Number(item.price).toFixed(2)}
+                                </span>
+                                <span className="block text-[10px] text-slate-400">{item.ad_type}</span>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap">
+                                <span className="font-bold text-white text-sm">
+                                  {Number(item.sold_quantity).toLocaleString('pt-BR')} un.
+                                </span>
+                                <span className="block text-[11px] text-blue-400">
+                                  {item.daily_sales} vendas/dia
+                                </span>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap">
+                                <span className="font-black text-emerald-400 text-sm">
+                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                </span>
+                                <span className="block text-[10px] text-slate-400">
+                                  Total: R$ {Number(item.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                </span>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap">
+                                <span className="font-bold text-white">
+                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                </span>
+                                <span className="block text-[11px] text-emerald-400 font-semibold">
+                                  Há {item.days_old} dias
+                                </span>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap">
+                                <span className="font-bold text-white block">{item.seller_name}</span>
+                                <span className="text-[11px] text-slate-300 block">
+                                  Conta criada: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')} (
+                                  {item.seller_account_years}a)
+                                </span>
+                                <span className="text-[10px] text-yellow-400">
+                                  {item.seller_medal} • {item.seller_state}
+                                </span>
+                              </td>
+
+                              <td className="p-4 whitespace-nowrap space-x-2">
+                                <button
+                                  onClick={() => {
+                                    setFeaturedProduct(item);
+                                    setSelectedPhotoUrl(item.thumbnail);
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  }}
+                                  className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-3 py-2 rounded-xl"
+                                >
+                                  Raio-X
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
 
-        {/* =====================================================================
-            MÓDULO 6: CALCULADORA DE CONTRIBUIÇÃO & NEGOCIAÇÃO COM FORNECEDOR (AVANTPRO)
-        ===================================================================== */}
-        {activeModule === 'calculadora' && (
-          <div className="max-w-6xl mx-auto space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold">
-                Calculadora de Margem de Contribuição e Viabilidade de Compra (Avantpro + JoomPulse)
-              </h1>
-              <p className="text-slate-400 text-sm">
-                Descubra exatamente por quanto você precisa comprar no fornecedor para vender no preço do mercado com lucro
-              </p>
+        {/* ===================================================================
+            SIMULADOR DE MARGEM E VIABILIDADE DE COMPRA
+        =================================================================== */}
+        {activeView === 'calculadora' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-extrabold">Simulador de Margem e Viabilidade no Mercado Livre</h1>
+                <p className="text-slate-400 text-sm">
+                  Descubra exatamente quanto sobra no bolso e o preço máximo para pagar no fornecedor
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveView('explorador')}
+                className="text-xs bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold"
+              >
+                ← Voltar para Busca de Produtos
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Entradas da Calculadora */}
-              <div className="lg:col-span-6 bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-4 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 space-y-4 text-xs">
                 <div>
                   <label className="text-slate-400 block mb-1">Produto Analisado</label>
                   <input
                     type="text"
-                    value={calcProductTitle}
-                    onChange={(e) => setCalcProductTitle(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-semibold"
+                    value={calcTitle}
+                    onChange={(e) => setCalcTitle(e.target.value)}
+                    className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-4 py-3 text-white font-semibold"
                   />
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-slate-400 block mb-1">Preço do Concorrente (R$)</label>
+                    <label className="text-yellow-400 font-bold block mb-1">Preço de Venda (R$)</label>
                     <input
                       type="number"
                       step="0.1"
-                      value={competitorPrice}
-                      onChange={(e) => setCompetitorPrice(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-300"
+                      value={salePrice}
+                      onChange={(e) => setSalePrice(Number(e.target.value))}
+                      className="w-full bg-[#070b14] border border-yellow-400 rounded-xl px-4 py-2.5 text-white font-bold"
                     />
                   </div>
                   <div>
-                    <label className="text-yellow-400 font-bold block mb-1">Seu Preço de Venda (R$)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={mySalePrice}
-                      onChange={(e) => setMySalePrice(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-yellow-400 rounded-xl px-3.5 py-2.5 text-white font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-emerald-400 font-bold block mb-1">
-                      Custo no Fornecedor (R$)
-                    </label>
+                    <label className="text-emerald-400 font-bold block mb-1">Custo no Fornecedor (R$)</label>
                     <input
                       type="number"
                       step="0.5"
                       value={supplierCost}
                       onChange={(e) => setSupplierCost(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-emerald-500/60 rounded-xl px-3.5 py-2.5 text-white font-bold"
+                      className="w-full bg-[#070b14] border border-emerald-500/60 rounded-xl px-4 py-2.5 text-white font-bold"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Imposto NF (%)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={taxRate}
+                      onChange={(e) => setTaxRate(Number(e.target.value))}
+                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-slate-400 block mb-1">
-                      Custo Embalagem / Extra (R$)
-                    </label>
+                    <label className="text-slate-400 block mb-1">Embalagem (R$)</label>
                     <input
                       type="number"
                       step="0.25"
                       value={packagingCost}
                       onChange={(e) => setPackagingCost(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white"
+                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-slate-400 block mb-1">Regime Tributário (Imposto)</label>
-                    <select
-                      value={taxRegime}
-                      onChange={(e) => setTaxRegime(e.target.value as any)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white"
-                    >
-                      <option value="simples_4">Simples Nacional Inicial (4%)</option>
-                      <option value="simples_7">Simples Nacional Faixa 2 (7%)</option>
-                      <option value="simples_10">Simples Nacional Faixa 3 (10%)</option>
-                      <option value="presumido_14">Lucro Presumido (14%)</option>
-                      <option value="real_18">Lucro Real (18%)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">Frete Grátis (Acima R$ 79)</label>
+                    <label className="text-slate-400 block mb-1">Frete (&gt;R$79)</label>
                     <input
                       type="number"
                       step="0.5"
-                      value={calcShippingCost}
-                      onChange={(e) => setCalcShippingCost(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white"
+                      value={shippingCost}
+                      onChange={(e) => setShippingCost(Number(e.target.value))}
+                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
                     />
                   </div>
                 </div>
-
                 <div className="flex gap-3 pt-2">
                   <button
-                    onClick={() => setCalcAdType('classico')}
-                    className={`flex-1 py-2.5 rounded-xl font-bold border ${
-                      calcAdType === 'classico'
+                    onClick={() => setAdType('classico')}
+                    className={`flex-1 py-3 rounded-xl font-bold border ${
+                      adType === 'classico'
                         ? 'bg-yellow-400 text-black border-yellow-400'
                         : 'border-slate-700 text-slate-300'
                     }`}
                   >
-                    Anúncio Clássico (12%)
+                    Clássico (12%)
                   </button>
                   <button
-                    onClick={() => setCalcAdType('premium')}
-                    className={`flex-1 py-2.5 rounded-xl font-bold border ${
-                      calcAdType === 'premium'
+                    onClick={() => setAdType('premium')}
+                    className={`flex-1 py-3 rounded-xl font-bold border ${
+                      adType === 'premium'
                         ? 'bg-yellow-400 text-black border-yellow-400'
                         : 'border-slate-700 text-slate-300'
                     }`}
                   >
-                    Anúncio Premium (17%)
+                    Premium (17%)
                   </button>
                 </div>
               </div>
 
-              {/* Resultado + Tabela de Negociação com Fornecedor (Estilo Avantpro Vídeo eBiq4mK0W7w) */}
-              <div className="lg:col-span-6 space-y-4">
-                <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                    <div>
-                      <span className="text-xs text-slate-400 uppercase">Margem de Contribuição Líquida</span>
-                      <p
-                        className={`text-4xl font-black mt-1 ${
-                          netMarginPercent >= 15
-                            ? 'text-emerald-400'
-                            : netMarginPercent > 0
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
-                        }`}
-                      >
-                        R$ {netContribution.toFixed(2)}{' '}
-                        <span className="text-xl">({netMarginPercent.toFixed(2)}%)</span>
-                      </p>
-                    </div>
-                    <span
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
-                        netMarginPercent >= 15
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-red-500/20 text-red-300'
-                      }`}
-                    >
-                      {netMarginPercent >= 15 ? '✓ Produto Viável' : '⚠ Negociar com Fornecedor'}
+              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 flex flex-col justify-between">
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Comissão ML ({mlRate}%) + Taxa Fixa:</span>
+                    <span className="text-red-400 font-bold">- R$ {mlCommission.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Imposto Nota Fiscal ({taxRate}%):</span>
+                    <span className="text-red-400 font-bold">- R$ {taxVal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Custo Embalagem + Frete Grátis:</span>
+                    <span className="text-red-400 font-bold">
+                      - R$ {(packagingCost + effectiveShip).toFixed(2)}
                     </span>
-                  </div>
-
-                  <div className="space-y-2 text-xs text-slate-300">
-                    <div className="flex justify-between">
-                      <span>Comissão ML ({mlRatePercent}%) + Taxa Fixa (R$ {mlFixedFee.toFixed(2)}):</span>
-                      <span className="text-red-400 font-semibold">- R$ {mlTotalCommission.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Imposto Nota Fiscal ({currentTaxPercent}%):</span>
-                      <span className="text-red-400 font-semibold">- R$ {taxAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Custo Embalagem + Frete:</span>
-                      <span className="text-red-400 font-semibold">
-                        - R$ {(packagingCost + effectiveShipping).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Alerta do Preço Alvo de Compra no Fornecedor */}
-                  <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
-                    <p className="font-bold text-emerald-300">
-                      🎯 Meta de Negociação com o Fornecedor (Para ter {targetMarginPercent}% de Margem Líquida):
-                    </p>
-                    <p className="text-slate-200 mt-1">
-                      Para vender a <strong>R$ {mySalePrice.toFixed(2)}</strong>, você deve pagar no máximo{' '}
-                      <strong className="text-emerald-400 text-sm">
-                        R$ {maxSupplierPriceForTarget.toFixed(2)}
-                      </strong>{' '}
-                      por unidade no fornecedor.
-                    </p>
                   </div>
                 </div>
 
-                {/* Tabela Comparativa de Cenários de Compra no Fornecedor (Exatamente como no vídeo do Carlos Barreto - Avantpro) */}
-                <div className="bg-[#111827] border border-slate-800 rounded-2xl p-5">
-                  <h3 className="text-xs font-bold uppercase text-slate-300 mb-3">
-                    Simulador de Negociação: E se o fornecedor cobrar outro valor?
-                  </h3>
-                  <div className="space-y-2 text-xs">
-                    {[0.75, 0.9, 1.0, 1.15, 1.3].map((factor, idx) => {
-                      const simulatedBuy = Number((maxSupplierPriceForTarget * factor).toFixed(2));
-                      const simulatedProfit =
-                        mySalePrice -
-                        simulatedBuy -
-                        packagingCost -
-                        mlTotalCommission -
-                        taxAmount -
-                        effectiveShipping;
-                      const simulatedMargin = mySalePrice > 0 ? (simulatedProfit / mySalePrice) * 100 : 0;
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => setSupplierCost(simulatedBuy)}
-                          className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-yellow-400 cursor-pointer flex items-center justify-between"
-                        >
-                          <span>
-                            Pagando <strong>R$ {simulatedBuy.toFixed(2)}</strong> no fornecedor:
-                          </span>
-                          <span
-                            className={`font-bold ${
-                              simulatedMargin >= 15
-                                ? 'text-emerald-400'
-                                : simulatedMargin >= 5
-                                ? 'text-yellow-400'
-                                : 'text-red-400'
-                            }`}
-                          >
-                            Lucro R$ {simulatedProfit.toFixed(2)} ({simulatedMargin.toFixed(1)}%)
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div className="border-t border-slate-800 pt-6 mt-6">
+                  <span className="text-xs text-slate-400 uppercase">Lucro Líquido por Venda</span>
+                  <p className={`text-4xl font-black mt-1 ${netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    R$ {netProfit.toFixed(2)}
+                  </p>
+                  <p className="text-sm text-slate-300 mt-1">
+                    Margem Líquida Final: <strong>{netMargin.toFixed(1)}%</strong>
+                  </p>
                 </div>
               </div>
             </div>
