@@ -3,14 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+// Suas credenciais oficiais do DevCenter Mercado Livre
 const CLIENT_ID = process.env.ML_CLIENT_ID || '8353552938244269';
 const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || '1mDuwaABTfcuIFd93BKMlohHfUmsRggn';
 
-let cachedAppToken: string | null = null;
-let cachedUserToken: string | null = process.env.ML_ACCESS_TOKEN || null;
+let cachedToken: string | null = null;
 let tokenExpiry = 0;
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8500) {
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -20,672 +20,299 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-async function getValidToken(customToken?: string | null): Promise<string | null> {
-  if (customToken) return customToken;
-  if (cachedUserToken) return cachedUserToken;
-  if (cachedAppToken && Date.now() < tokenExpiry) return cachedAppToken;
+// 1. Gera o Access Token oficial na API do Mercado Livre (POST /oauth/token)
+async function getOfficialAccessToken(): Promise<{ token: string | null; error?: string }> {
+  if (cachedToken && Date.now() < tokenExpiry) {
+    return { token: cachedToken };
+  }
 
   try {
     const res = await fetchWithTimeout(
       'https://api.mercadolibre.com/oauth/token',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
         body: new URLSearchParams({
           grant_type: 'client_credentials',
           client_id: CLIENT_ID,
           client_secret: CLIENT_SECRET,
         }),
       },
-      4000
+      5000
     );
-    if (res.ok) {
-      const data = await res.json();
-      cachedAppToken = data.access_token;
+
+    const data = await res.json();
+    if (res.ok && data.access_token) {
+      cachedToken = data.access_token;
       tokenExpiry = Date.now() + (data.expires_in ? data.expires_in * 1000 - 60000 : 18000000);
-      return cachedAppToken;
+      return { token: cachedToken };
     }
-  } catch {
-    // Segue sem token
+    return { token: null, error: data.message || JSON.stringify(data) };
+  } catch (err: any) {
+    return { token: null, error: err?.message || 'Falha na conexão com oauth/token' };
   }
-  return null;
 }
 
-// Extrai o nome do produto a partir do slug do link do Mercado Livre
-function extractTitleFromUrlSlug(url: string): string {
+// Se o usuário colar um link do Mercado Livre, extrai o código de catálogo (/p/MLB...) ou o nome do produto do slug da URL
+async function parseInputQueryOrUrl(rawInput: string): Promise<{
+  catalogId: string | null;
+  searchQuery: string;
+  resolvedUrl: string;
+}> {
+  let target = rawInput.trim();
+
+  // Se for link encurtado meli.la, lê apenas o cabeçalho Location do primeiro redirecionamento
+  if (target.includes('meli.la') || target.includes('/sec/') || target.includes('/social/')) {
+    try {
+      const res = await fetchWithTimeout(target, { redirect: 'manual' }, 3500);
+      const loc = res.headers.get('location');
+      if (loc) target = loc;
+    } catch {
+      // Mantém original
+    }
+  }
+
+  // Verifica se já tem um ID de produto de catálogo explícito (/p/MLB12345678)
+  const catalogMatch = target.match(/\/p\/(MLB\d{6,14})/i);
+  if (catalogMatch) {
+    return {
+      catalogId: catalogMatch[1].toUpperCase(),
+      searchQuery: extractReadableSlug(target) || catalogMatch[1].toUpperCase(),
+      resolvedUrl: target,
+    };
+  }
+
+  // Se o usuário digitou um código MLB direto (ex: MLB19827364)
+  if (/^MLB-?\d{6,14}$/i.test(target)) {
+    const cleanId = target.replace('-', '').toUpperCase();
+    return {
+      catalogId: cleanId,
+      searchQuery: cleanId,
+      resolvedUrl: `https://www.mercadolivre.com.br/p/\${cleanId}`,
+    };
+  }
+
+  // Se for qualquer outro link do Mercado Livre (incluindo /up/MLBU... ou produto.mercadolivre.com.br)
+  if (target.startsWith('http')) {
+    const slugQuery = extractReadableSlug(target);
+    return {
+      catalogId: null,
+      searchQuery: slugQuery || target,
+      resolvedUrl: target,
+    };
+  }
+
+  return {
+    catalogId: null,
+    searchQuery: target,
+    resolvedUrl: '',
+  };
+}
+
+function extractReadableSlug(url: string): string {
   try {
-    const parsed = new URL(url);
-    const segments = parsed.pathname.split('/').filter(Boolean);
+    const u = new URL(url);
+    // Se for link de verificação com ?go=..., extrai a URL real de dentro do parâmetro go
+    const goParam = u.searchParams.get('go');
+    const pathUrl = goParam ? new URL(goParam).pathname : u.pathname;
+
+    const segments = pathUrl.split('/').filter(Boolean);
     for (const seg of segments) {
       if (
-        seg.length > 10 &&
+        seg.length > 8 &&
         seg.includes('-') &&
-        !/^(MLB|MLBU)/i.test(seg) &&
-        !['p', 'up', 'sec', 'social', 'gz', 'perfil'].includes(seg.toLowerCase())
+        !/^(MLB|MLBU)\d+/i.test(seg) &&
+        !['p', 'up', 'sec', 'social', 'gz'].includes(seg.toLowerCase())
       ) {
         return seg
           .replace(/^MLB-\d+-/i, '')
           .replace(/-_JM$/i, '')
           .replace(/-/g, ' ')
-          .replace(/\b\w/g, (l) => l.toUpperCase())
           .trim();
       }
     }
   } catch {
-    // Ignora erro de URL
+    // URL simples
   }
   return '';
 }
 
-function isBlockedTitle(title: string): boolean {
-  const clean = (title || '').trim().toLowerCase();
-  if (!clean || clean.length < 4) return true;
-  return [
-    'mercado livre',
-    'mercadolivre',
-    'olá! para continuar',
-    'acesse sua conta',
-    'digite o código',
-    'account verification',
-  ].some((w) => clean === w || clean.startsWith(w));
-}
-
-// Filtra EXCLUSIVAMENTE fotos reais de produtos do Mercado Livre (que contêm -MLB..._MMYYYY), ignorando banners como Meli+
-function extractVerifiedProductPhotos(text: string): string[] {
-  const regex =
-    /https:\/\/http2\.mlstatic\.com\/D_(?:N?Q_)?NP_[^\s)"'<>\\]*?-ML[A-Z]\d+_\d{6}[^\s)"'<>\\]*?\.(?:webp|jpg|png)/gi;
-  const matches = text.match(regex) || [];
-  const seenKeys = new Set<string>();
-  const list: string[] = [];
-
-  for (const raw of matches) {
-    const clean = raw.replace(/\\+/g, '');
-    const keyMatch = clean.match(/(\d{5,}-ML[A-Z]\d+_\d{6})/i);
-    const key = keyMatch ? keyMatch[1] : clean;
-    if (!seenKeys.has(key)) {
-      seenKeys.add(key);
-      list.push(clean.replace(/-[A-Z]\.(webp|jpg|png)$/i, '-O.$1'));
-    }
-  }
-  return list;
-}
-
-// Extrai a data real de criação embutida na assinatura da foto do Mercado Livre (_MMYYYY)
-function extractDateFromPhotoUrl(imgUrl: string): { dateCreated: string; daysOld: number } | null {
-  const m = imgUrl?.match(/_(\d{2})(20\d{2})-[A-Z]\./i);
+// Extrai o mês e ano reais do upload da foto no servidor do Mercado Livre (_MMYYYY-O.webp / .jpg)
+function extractPhotoUploadDate(photoUrl: string): string | null {
+  const m = photoUrl?.match(/_(\d{2})(20\d{2})-[A-Z]\./i);
   if (m) {
     const month = parseInt(m[1], 10);
     const year = parseInt(m[2], 10);
     if (month >= 1 && month <= 12 && year >= 2015 && year <= 2030) {
-      const created = new Date(Date.UTC(year, month - 1, 10, 12, 0, 0));
-      const daysOld = Math.max(1, Math.floor((Date.now() - created.getTime()) / 86400000));
-      return { dateCreated: created.toISOString(), daysOld };
+      return `${m[1]}/${m[2]}`;
     }
   }
   return null;
 }
 
-// Localiza páginas de catálogo abertas (/p/MLB...) e anúncios no Mercado Livre através de motores de busca (Yahoo BR / DuckDuckGo / Bing)
-async function findOpenMercadoLivreUrls(query: string): Promise<string[]> {
-  const cleanQuery = query
-    .replace(/[^\w\sÀ-ÿ]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 7)
-    .join(' ');
-
-  const foundUrls: string[] = [];
-  const addUrl = (u: string) => {
-    try {
-      const decoded = decodeURIComponent(u).replace(/&amp;/g, '&').split('#')[0];
-      if (
-        decoded.includes('mercadolivre.com.br') &&
-        !decoded.includes('/gz/') &&
-        !decoded.includes('/up/MLBU') &&
-        (decoded.includes('/p/MLB') || /MLB-?\d{8,14}/i.test(decoded))
-      ) {
-        if (!foundUrls.includes(decoded)) foundUrls.push(decoded);
-      }
-    } catch {
-      // Ignora URL malformada
-    }
-  };
-
-  const tasks = [
-    // 1. Yahoo Brasil focado em páginas /p/MLB (100% abertas sem bloqueio de login)
-    (async () => {
-      const yUrl = `https://br.search.yahoo.com/search?p=${encodeURIComponent(
-        `site:mercadolivre.com.br/p/MLB ${cleanQuery}`
-      )}`;
-      const res = await fetchWithTimeout(
-        yUrl,
-        {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        },
-        4500
-      );
-      if (res.ok) {
-        const html = await res.text();
-        for (const m of Array.from(html.matchAll(/RU=(https%3A%2F%2Fwww\.mercadolivre\.com\.br[^/]+)/gi))) {
-          addUrl(m[1]);
-        }
-        for (const m of Array.from(
-          html.matchAll(/https:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/[^\s"'<>]+/gi)
-        )) {
-          addUrl(m[0]);
-        }
-      }
-    })(),
-
-    // 2. DuckDuckGo HTML Search
-    (async () => {
-      const dUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(
-        `site:mercadolivre.com.br/p/MLB ${cleanQuery}`
-      )}`;
-      const res = await fetchWithTimeout(
-        dUrl,
-        {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        },
-        4500
-      );
-      if (res.ok) {
-        const html = await res.text();
-        for (const m of Array.from(html.matchAll(/uddg=(https%3A%2F%2F[^&"']+)/gi))) {
-          addUrl(m[1]);
-        }
-      }
-    })(),
-
-    // 3. Bing Search
-    (async () => {
-      const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(
-        `site:mercadolivre.com.br/p/MLB ${cleanQuery}`
-      )}`;
-      const res = await fetchWithTimeout(
-        bUrl,
-        {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        },
-        4500
-      );
-      if (res.ok) {
-        const html = await res.text();
-        for (const m of Array.from(
-          html.matchAll(/https:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/[^\s"'<>]+/gi)
-        )) {
-          addUrl(m[0]);
-        }
-      }
-    })(),
-  ];
-
-  await Promise.allSettled(tasks);
-
-  // Prioriza URLs /p/MLB... porque nunca sofrem bloqueio de verificação de conta
-  return foundUrls.sort((a, b) => (b.includes('/p/MLB') ? 1 : 0) - (a.includes('/p/MLB') ? 1 : 0));
-}
-
-// Lê uma página do Mercado Livre via Jina Reader
-async function fetchJinaMarkdown(targetUrl: string): Promise<{ content: string; title: string; finalUrl: string }> {
+// 2. Consulta a rota OFICIAL /users/{seller_id} para obter dados reais do vendedor
+async function fetchOfficialSeller(sellerId: number | string, authHeaders: Record<string, string>) {
+  if (!sellerId) return null;
   try {
     const res = await fetchWithTimeout(
-      `https://r.jina.ai/${targetUrl}`,
-      {
-        headers: {
-          Accept: 'application/json',
-          'X-Return-Format': 'markdown',
-        },
-      },
-      7500
-    );
-    if (res.ok) {
-      const json = await res.json();
-      let content: string = json?.data?.content || '';
-      let title: string = json?.data?.title || '';
-      let finalUrl: string = json?.data?.url || targetUrl;
+      `https://api.mercadolibre.com/users/${sellerId}`, { headers: authHeaders }, 4000 ); if (!res.ok) return null; const u = await res.json(); if (!u \vert{}\vert{} !u.id) return null;  return { id: u.id, nickname: u.nickname \vert{}\vert{} null, registration_date: u.registration_date \vert{}\vert{} null, city: u.address?.city \vert{}\vert{} null, state: u.address?.state \vert{}\vert{} null, user_type: u.user_type \vert{}\vert{} null, power_seller_status: u.seller_reputation?.power_seller_status \vert{}\vert{} null, level_id: u.seller_reputation?.level_id \vert{}\vert{} null, completed_transactions: u.seller_reputation?.transactions?.completed ?? null, canceled_transactions: u.seller_reputation?.transactions?.canceled ?? null, total_transactions: u.seller_reputation?.transactions?.total ?? null, ratings_positive: u.seller_reputation?.transactions?.ratings?.positive ?? null, permalink: u.permalink \vert{}\vert{} null, raw_user_json: u, }; } catch { return null; } }  // 3. Consulta as rotas OFICIAIS /products/{id}, /products/{id}/items e /users/{seller_id} async function hydrateCatalogProduct(productSummary: any, authHeaders: Record<string, string>) { const productId = productSummary.id;  // Executa em paralelo: Detalhes do Produto (/products/{id}) e Anúncios dos Vendedores (/products/{id}/items) const [prodDetailRes, prodItemsRes] = await Promise.allSettled([ fetchWithTimeout(`https://api.mercadolibre.com/products/${productId}`, { headers: authHeaders }, 4500),
+    fetchWithTimeout(`https://api.mercadolibre.com/products/${productId}/items?limit=10`, { headers: authHeaders }, 4500), ]);  let fullProduct: any = productSummary; if (prodDetailRes.status === 'fulfilled' && prodDetailRes.value.ok) { fullProduct = await prodDetailRes.value.json(); }  let itemsList: any[] = []; if (prodItemsRes.status === 'fulfilled' && prodItemsRes.value.ok) { const itemsJson = await prodItemsRes.value.json(); itemsList = Array.isArray(itemsJson?.results) ? itemsJson.results : Array.isArray(itemsJson) ? itemsJson : []; }  // Identifica o anúncio principal (Buy Box Winner ou o 1º item ativo de /products/{id}/items) const winnerItem = fullProduct?.buy_box_winner \vert{}\vert{} itemsList[0] \vert{}\vert{} null; const sellerId = winnerItem?.seller_id \vert{}\vert{} null;  // Busca os dados reais da conta do vendedor em /users/{seller_id} const sellerData = sellerId ? await fetchOfficialSeller(sellerId, authHeaders) : null;  // Fotos oficiais em alta resolução const pictures: string[] = (fullProduct?.pictures \vert{}\vert{} productSummary?.pictures \vert{}\vert{} []) .map((p: any) => p.url \vert{}\vert{} p.secure_url) .filter(Boolean);  // Atributos reais da ficha técnica (Marca, Modelo, Linha, etc.) const attributes = (fullProduct?.attributes \vert{}\vert{} productSummary?.attributes \vert{}\vert{} []).map((a: any) => ({ id: a.id, name: a.name, value: a.value_name, })); const brandAttr = attributes.find((a: any) => a.id === 'BRAND')?.value \vert{}\vert{} null; const modelAttr = attributes.find((a: any) => a.id === 'MODEL')?.value \vert{}\vert{} null;  // Data real de criação retornada pela API Oficial + Data de upload da 1ª foto const apiDateCreated = fullProduct?.date_created \vert{}\vert{} productSummary?.date_created \vert{}\vert{} null; const firstPhotoUploadMonthYear = pictures[0] ? extractPhotoUploadDate(pictures[0]) : null;  let daysOld: number \vert{} null = null; if (apiDateCreated) { daysOld = Math.max(1, Math.floor((Date.now() - new Date(apiDateCreated).getTime()) / 86400000)); }  // Preço real dos vendedores ativos nesse produto const prices = itemsList.map((it: any) => Number(it.price)).filter((p: number) => p > 0); const mainPrice = winnerItem?.price ?? (prices.length > 0 ? prices[0] : null); const minPrice = prices.length > 0 ? Math.min(...prices) : mainPrice; const maxPrice = prices.length > 0 ? Math.max(...prices) : mainPrice;  const permalink = fullProduct?.permalink \vert{}\vert{} winnerItem?.permalink \vert{}\vert{} `https://www.mercadolivre.com.br/p/${productId}`;
 
-      // Se for página intermediária (/sec/ ou /social/), avança até ao anúncio final
-      if (/\/(sec|social)\//i.test(finalUrl)) {
-        const inner = content.match(
-          /https:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/(?!sec\/|social\/|gz\/)[^\s)"'<>]+/i
-        );
-        if (inner) {
-          finalUrl = inner[0];
-          const deepRes = await fetchWithTimeout(
-            `https://r.jina.ai/${finalUrl}`,
-            { headers: { Accept: 'application/json' } },
-            6000
-          );
-          if (deepRes.ok) {
-            const deepJson = await deepRes.json();
-            if (deepJson?.data?.content) {
-              content = deepJson.data.content + '\n' + content;
-              title = deepJson.data.title || title;
-            }
-          }
-        }
-      }
-      return { content, title, finalUrl };
-    }
-  } catch {
-    // Ignora falha
-  }
-  return { content: '', title: '', finalUrl: targetUrl };
-}
-
-// Extrai o Produto Principal + Todos os Produtos Concorrentes da página lida pelo Jina
-function parseFullPageAndCompetitors(content: string, rawTitle: string, pageUrl: string) {
-  const allPhotos = extractVerifiedProductPhotos(content);
-  if (allPhotos.length === 0) return null;
-
-  // 1. Limpa título e extrai preço caso esteja cravado no título ("... - R$ 45,90")
-  let cleanTitle = (rawTitle || '')
-    .replace(/\s*\|\s*Mercado\s*Livre.*/i, '')
-    .replace(/\s*-\s*Mercado\s*Livre.*/i, '')
-    .trim();
-
-  let titlePrice = 0;
-  const tpMatch = cleanTitle.match(/\s+-\s+R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*$/i);
-  if (tpMatch) {
-    titlePrice = parseFloat(tpMatch[1].replace(/\./g, '').replace(',', '.'));
-    cleanTitle = cleanTitle.replace(/\s+-\s+R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*$/i, '').trim();
-  }
-
-  // Se o título ainda estiver vazio, pega o primeiro H1 (# Título) do markdown
-  if (isBlockedTitle(cleanTitle)) {
-    const h1Match = content.match(/^#\s+([^\n]+)/m);
-    cleanTitle = h1Match ? h1Match[1].trim() : extractTitleFromUrlSlug(pageUrl);
-  }
-
-  // 2. Extrai preços do produto principal (primeira metade da página antes dos carrosséis)
-  const mainSection = content.slice(0, 6500);
-  const mainPrices: number[] = [];
-  const priceRegex = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/g;
-  let pm;
-  while ((pm = priceRegex.exec(mainSection)) !== null && mainPrices.length < 10) {
-    const v = parseFloat(pm[1].replace(/\./g, '').replace(',', '.'));
-    if (v > 3 && v < 150000) mainPrices.push(v);
-  }
-
-  let currentPrice = titlePrice || mainPrices[0] || 0;
-  let originalPrice = 0;
-  if (titlePrice > 0) {
-    const higher = mainPrices.find((p) => p > titlePrice * 1.05 && p < titlePrice * 3.5);
-    if (higher) originalPrice = higher;
-  } else if (mainPrices.length >= 2 && mainPrices[0] > mainPrices[1] && mainPrices[1] > mainPrices[0] * 0.35) {
-    originalPrice = mainPrices[0];
-    currentPrice = mainPrices[1];
-  }
-
-  // 3. Vendas do produto principal ("Novo | +500 vendidos", "+10 mil vendidos")
-  const soldMatch = mainSection.match(/\+?\s*(\d+(?:[.,]\d+)?)\s*(mil\b)?\s*vendidos/i);
-  let soldQty = 0;
-  let soldLabel = '';
-  if (soldMatch) {
-    soldQty = Math.round(
-      parseFloat(soldMatch[1].replace('.', '').replace(',', '.')) * (soldMatch[2] ? 1000 : 1)
-    );
-    soldLabel = soldMatch[0].trim();
-  }
-
-  // 4. Nota (Estrelas) e Quantidade de Avaliações
-  const ratingMatch =
-    mainSection.match(/(\d[.,]\d)\s*(?:de 5|estrelas|\()\s*(\d+(?:\.\d+)?)?/i) ||
-    mainSection.match(/Opiniões do produto[\s\S]{0,120}?(\d[.,]\d)/i);
-  const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(',', '.')) : 4.8;
-
-  const revMatch =
-    mainSection.match(/\((\d+(?:\.\d+)?)\s*(?:avaliações|opiniões)?\)/i) ||
-    mainSection.match(/(\d+(?:\.\d+)?)\s*opiniões/i);
-  const reviewsCount = revMatch ? parseInt(revMatch[1].replace(/\./g, ''), 10) : Math.max(9, Math.round(soldQty * 0.08));
-
-  if (soldQty === 0 && reviewsCount > 0) {
-    soldQty = reviewsCount * 11;
-    soldLabel = `~${soldQty} vendidos (via ${reviewsCount} avaliações)`;
-  } else if (soldQty === 0) {
-    soldQty = 45;
-    soldLabel = '+45 vendidos';
-  }
-
-  // 5. Dados do Vendedor na Página ("Vendido por [Nome](https://www.mercadolivre.com.br/perfil/...)")
-  const sellerLinkMatch =
-    mainSection.match(/Vendido por\s*\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/i) ||
-    mainSection.match(/Loja oficial\s*\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/i);
-  const sellerTextMatch =
-    mainSection.match(/Vendido por\s*([^\n|[\]]{2,40})/i) ||
-    mainSection.match(/Loja oficial\s*([^\n|[\]]{2,40})/i);
-
-  const sellerName = sellerLinkMatch
-    ? sellerLinkMatch[1].trim()
-    : sellerTextMatch
-    ? sellerTextMatch[1].trim()
-    : 'Loja Verificada Mercado Livre';
-  const sellerProfileUrl = sellerLinkMatch ? sellerLinkMatch[2] : pageUrl;
-
-  const sellerSalesMatch = mainSection.match(/\+?\s*(\d+(?:[.,]\d+)?)\s*(mil\b)?\s*vendas\b/i);
-  let sellerCompletedSales = Math.max(650, soldQty * 12);
-  if (sellerSalesMatch) {
-    sellerCompletedSales = Math.round(
-      parseFloat(sellerSalesMatch[1].replace('.', '').replace(',', '.')) * (sellerSalesMatch[2] ? 1000 : 1)
-    );
-  }
-
-  const isOfficial = /Loja oficial/i.test(mainSection);
-  const isPlatinum = /MercadoLíder Platinum|Platinum/i.test(mainSection);
-  const sellerMedal = isOfficial
-    ? 'Loja Oficial'
-    : isPlatinum
-    ? 'MercadoLíder Platinum'
-    : 'MercadoLíder Gold';
-
-  // 6. Código MLB e Data de Criação pelas fotos reais do produto
-  const mainPhotos = allPhotos.slice(0, 5);
-  const mainPhotoDate = extractDateFromPhotoUrl(mainPhotos[0]);
-  const createdIso =
-    mainPhotoDate?.dateCreated || new Date(Date.now() - 48 * 86400000).toISOString();
-  const daysOld = mainPhotoDate?.daysOld || 48;
-
-  const mlbFromUrlOrPhoto =
-    pageUrl.match(/(MLB\d{8,14})/i)?.[1] ||
-    mainPhotos[0]?.match(/-(MLB\d{8,14})_/i)?.[1] ||
-    pageUrl.match(/(MLBU\d{8,14})/i)?.[1] ||
-    'MLB-CATÁLOGO';
-
-  const dailySales = Number(Math.max(0.3, soldQty / Math.max(3, daysOld)).toFixed(1));
-  const sold30d = Math.min(soldQty, Math.round(dailySales * 30));
-
-  // Data estimada de criação da conta do vendedor com base no histórico de vendas da loja
-  const estimatedAccountYears = sellerCompletedSales >= 5000 ? 6 : sellerCompletedSales >= 1000 ? 4 : 2;
-  const sellerRegDate = new Date(Date.now() - estimatedAccountYears * 365 * 86400000).toISOString();
-
-  const brandMatch = mainSection.match(/Marca[:\s*]+([^\n|]+)/i);
-
-  const mainProduct = {
-    id: mlbFromUrlOrPhoto.toUpperCase(),
-    title: cleanTitle,
-    price: currentPrice,
-    original_price: originalPrice,
-    discount_percent:
-      originalPrice > currentPrice && currentPrice > 0
-        ? Math.round(((originalPrice - currentPrice) / originalPrice) * 100)
-        : 0,
-    thumbnail: mainPhotos[0],
-    pictures: mainPhotos,
-    permalink: pageUrl,
-    sold_quantity: soldQty,
-    sold_label: soldLabel || `+${soldQty} vendidos`,
-    sold_30d: sold30d,
-    daily_sales: dailySales,
-    revenue_30d: Math.round(sold30d * currentPrice),
-    total_revenue: Math.round(soldQty * currentPrice),
-    date_created: createdIso,
-    date_source: 'Assinatura Original da Foto CDN ML',
-    last_updated: new Date().toISOString(),
+  return {
+    product_id: productId,
+    item_id: winnerItem?.item_id || null,
+    title: fullProduct?.name || productSummary?.name || 'Produto sem título na API',
+    status: fullProduct?.status || productSummary?.status || 'active',
+    domain_id: fullProduct?.domain_id || productSummary?.domain_id || null,
+    permalink,
+    thumbnail: pictures[0] || '',
+    pictures,
+    // Preços reais da API (/products/{id}/items)
+    price: mainPrice,
+    min_price: minPrice,
+    max_price: maxPrice,
+    original_price: winnerItem?.original_price || null,
+    currency_id: winnerItem?.currency_id || 'BRL',
+    active_sellers_count: itemsList.length,
+    // Datas reais da API
+    date_created: apiDateCreated,
     days_old: daysOld,
-    rating,
-    reviews_count: reviewsCount,
-    logistic_type: /Full/i.test(mainSection) ? 'Fulfillment (Full)' : 'Correios / Coleta',
-    free_shipping: /Frete\s*grátis|Chegará\s*grátis/i.test(mainSection) || currentPrice >= 79,
-    ad_type: /sem\s*juros/i.test(mainSection) ? 'Premium (~17%)' : 'Clássico (~12%)',
-    available_quantity: /Full/i.test(mainSection) ? 45 : 15,
-    brand: brandMatch ? brandMatch[1].replace(/\*/g, '').trim().slice(0, 30) : cleanTitle.split(' ')[0].toUpperCase(),
-    seller_id: null,
-    seller_name: sellerName,
-    seller_registration_date: sellerRegDate,
-    seller_account_years: estimatedAccountYears,
-    seller_medal: sellerMedal,
-    seller_city: 'São Paulo',
-    seller_state: 'SP',
-    seller_completed_sales: sellerCompletedSales,
-    seller_permalink: sellerProfileUrl,
+    first_photo_month_year: firstPhotoUploadMonthYear,
+    // Logística e modalidade reais do anúncio vencedor
+    condition: winnerItem?.condition || 'new',
+    listing_type_id: winnerItem?.listing_type_id || null,
+    logistic_type: winnerItem?.shipping?.logistic_type || null,
+    free_shipping: winnerItem?.shipping?.free_shipping ?? null,
+    warranty: winnerItem?.warranty || null,
+    // Vendas do anúncio (apenas se a API retornar em buy_box_winner, sem inventar!)
+    item_sold_quantity: winnerItem?.sold_quantity ?? null,
+    item_available_quantity: winnerItem?.available_quantity ?? null,
+    // Ficha técnica real
+    brand: brandAttr,
+    model: modelAttr,
+    attributes: attributes.slice(0, 10),
+    // Dados 100% reais do Vendedor vindos de /users/{seller_id}
+    seller: sellerData
+      ? {
+          id: sellerData.id,
+          nickname: sellerData.nickname,
+          registration_date: sellerData.registration_date,
+          account_age_years: sellerData.registration_date
+            ? Math.max(1, new Date().getFullYear() - new Date(sellerData.registration_date).getFullYear())
+            : null,
+          city: sellerData.city || winnerItem?.seller_address?.city?.name || null,
+          state: sellerData.state || winnerItem?.seller_address?.state?.id || null,
+          power_seller_status: sellerData.power_seller_status,
+          level_id: sellerData.level_id,
+          completed_transactions: sellerData.completed_transactions,
+          canceled_transactions: sellerData.canceled_transactions,
+          total_transactions: sellerData.total_transactions,
+          ratings_positive: sellerData.ratings_positive,
+          permalink: sellerData.permalink,
+        }
+      : sellerId
+      ? {
+          id: sellerId,
+          nickname: `ID Vendedor: ${sellerId}`, registration_date: null, account_age_years: null, city: winnerItem?.seller_address?.city?.name \vert{}\vert{} null, state: winnerItem?.seller_address?.state?.id \vert{}\vert{} null, power_seller_status: null, level_id: null, completed_transactions: null, canceled_transactions: null, total_transactions: null, ratings_positive: null, permalink: null, } : null, // Lista completa dos outros vendedores disputando este mesmo produto competing_offers: itemsList.map((offer: any) => ({ item_id: offer.item_id, seller_id: offer.seller_id, price: offer.price, condition: offer.condition, free_shipping: offer.shipping?.free_shipping ?? false, logistic_type: offer.shipping?.logistic_type \vert{}\vert{} 'padrão', listing_type_id: offer.listing_type_id, city: offer.seller_address?.city?.name \vert{}\vert{} null, state: offer.seller_address?.state?.id \vert{}\vert{} null, })), // JSON bruto original para auditoria pelo usuário raw_api_proof: { endpoint_product: `https://api.mercadolibre.com/products/${productId}`,
+      endpoint_items: `https://api.mercadolibre.com/products/${productId}/items`, endpoint_seller: sellerId ? `https://api.mercadolibre.com/users/${sellerId}` : null,
+      product_date_created: apiDateCreated,
+      winner_item: winnerItem,
+      seller_response: sellerData?.raw_user_json || null,
+    },
   };
-
-  // 7. Extrai todos os produtos concorrentes dos carrosséis da página (ancorados por foto real -MLB..._MMYYYY)
-  const competitors: any[] = [];
-  const imgCardRegex =
-    /!\[([^\]]*)\]\((https:\/\/http2\.mlstatic\.com\/D_(?:N?Q_)?NP_[^\s)"'<>\\]*?-ML[A-Z]\d+_\d{6}[^\s)"'<>\\]*?\.(?:webp|jpg|png))\)/gi;
-
-  let cardMatch;
-  const seenCompPhotos = new Set<string>([mainPhotos[0]]);
-
-  while ((cardMatch = imgCardRegex.exec(content)) !== null && competitors.length < 24) {
-    const altTitle = cardMatch[1]?.trim() || '';
-    const rawPhoto = cardMatch[2].replace(/-[A-Z]\.(webp|jpg|png)$/i, '-O.$1');
-
-    const photoKey = rawPhoto.match(/(\d{5,}-ML[A-Z]\d+_\d{6})/i)?.[1] || rawPhoto;
-    if (seenCompPhotos.has(photoKey)) continue;
-
-    // Analisa os 550 caracteres logo após a imagem para pegar preço, link e título
-    const afterText = content.slice(cardMatch.index, cardMatch.index + 650);
-    const linkInCard = afterText.match(
-      /https:\/\/(?:www\.|produto\.|click1\.)?mercadolivre\.com\.br\/[^\s)"'<>]+/i
-    )?.[0];
-    const titleFromLink = afterText.match(/\[([^\]]{10,140})\]\(https:\/\/[^\s)]+mercadolivre/i)?.[1];
-    const cardTitle = (altTitle.length >= 10 ? altTitle : titleFromLink || '').trim();
-
-    if (!cardTitle || isBlockedTitle(cardTitle)) continue;
-
-    const cardPrices = Array.from(afterText.matchAll(/R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/g)).map((m) =>
-      parseFloat(m[1].replace(/\./g, '').replace(',', '.'))
-    );
-    if (cardPrices.length === 0) continue;
-
-    seenCompPhotos.add(photoKey);
-
-    let cPrice = cardPrices[0];
-    let cOrig = 0;
-    if (cardPrices.length >= 2 && cardPrices[0] > cardPrices[1] && cardPrices[1] > cardPrices[0] * 0.35) {
-      cOrig = cardPrices[0];
-      cPrice = cardPrices[1];
-    }
-
-    const cPhotoDate = extractDateFromPhotoUrl(rawPhoto);
-    const cDaysOld = cPhotoDate?.daysOld || 35 + (competitors.length * 11) % 90;
-    const cCreated = cPhotoDate?.dateCreated || new Date(Date.now() - cDaysOld * 86400000).toISOString();
-    const cMlb =
-      rawPhoto.match(/-(MLB\d{8,14})_/i)?.[1] ||
-      linkInCard?.match(/(MLB\d{8,14})/i)?.[1] ||
-      `MLB${4100500 + competitors.length}`;
-
-    const cSold = Math.max(18, Math.round(1400 / Math.max(8, cDaysOld)) + (20 - competitors.length) * 6);
-    const cDaily = Number(Math.max(0.4, cSold / Math.max(4, cDaysOld)).toFixed(1));
-    const cSold30d = Math.min(cSold, Math.round(cDaily * 30));
-    const cSellerYears = 2 + (competitors.length % 6);
-
-    competitors.push({
-      id: cMlb.toUpperCase(),
-      title: cardTitle,
-      price: cPrice,
-      original_price: cOrig,
-      thumbnail: rawPhoto,
-      pictures: [rawPhoto],
-      permalink: linkInCard || pageUrl,
-      sold_quantity: cSold,
-      sold_label: `+${cSold} vendidos`,
-      sold_30d: cSold30d,
-      daily_sales: cDaily,
-      revenue_30d: Math.round(cSold30d * cPrice),
-      total_revenue: Math.round(cSold * cPrice),
-      date_created: cCreated,
-      date_source: 'Assinatura Foto CDN ML',
-      last_updated: new Date().toISOString(),
-      days_old: cDaysOld,
-      rating: Number((4.5 + (competitors.length % 5) * 0.1).toFixed(1)),
-      reviews_count: Math.max(6, Math.round(cSold * 0.09)),
-      logistic_type: /Full/i.test(afterText) ? 'Fulfillment (Full)' : 'Correios / Coleta',
-      free_shipping: /frete\s*grátis/i.test(afterText) || cPrice >= 79,
-      ad_type: /sem\s*juros/i.test(afterText) ? 'Premium (~17%)' : 'Clássico (~12%)',
-      available_quantity: 20,
-      brand: cardTitle.split(' ')[0].toUpperCase(),
-      seller_name: `${cardTitle.split(' ')[0]} Store #${competitors.length + 1}`,
-      seller_registration_date: new Date(Date.now() - cSellerYears * 365 * 86400000).toISOString(),
-      seller_account_years: cSellerYears,
-      seller_medal: competitors.length % 2 === 0 ? 'MercadoLíder Platinum' : 'MercadoLíder Gold',
-      seller_city: 'São Paulo',
-      seller_state: ['SP', 'MG', 'PR', 'SC', 'RJ'][competitors.length % 5],
-      seller_completed_sales: cSold * 15,
-    });
-  }
-
-  return { mainProduct, competitors };
 }
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const action = searchParams.get('action') || 'status';
-    const userPassedToken = searchParams.get('user_token') || null;
+    const rawQuery = (searchParams.get('q') || searchParams.get('input') || '').trim();
 
-    if (action === 'exchange_code') {
-      const code = searchParams.get('code') || '';
-      const redirectUri = searchParams.get('redirect_uri') || '';
-      const res = await fetchWithTimeout('https://api.mercadolibre.com/oauth/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          code,
-          redirect_uri: redirectUri,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.access_token) {
-        cachedUserToken = data.access_token;
-        return NextResponse.json({
-          ok: true,
-          access_token: data.access_token,
-          user_id: data.user_id,
-        });
-      }
-      return NextResponse.json({ ok: false, error: data.message || 'Erro OAuth' }, { status: 400 });
-    }
+    // 1. Autentica com suas credenciais oficiais
+    const auth = await getOfficialAccessToken();
+    if (!auth.token) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Falha ao autenticar suas credenciais no Mercado Livre: ${auth.error}`, }, { status: 401 } ); }  const authHeaders = { Authorization: `Bearer ${auth.token}`,
+      Accept: 'application/json',
+    };
 
-    const token = await getValidToken(userPassedToken);
-    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-
-    // =========================================================================
-    // BUSCA POR PALAVRA-CHAVE OU LINK (MOTOR UNIFICADO ANTI-BLOQUEIO)
-    // =========================================================================
-    if (action === 'search' || action === 'spy') {
-      const rawInput = (searchParams.get('q') || searchParams.get('input') || 'Coroa tiara de strass noiva').trim();
-      const isDirectLink = rawInput.startsWith('http') || /^MLB-?\d{8,14}$/i.test(rawInput);
-
-      let parsedResult: { mainProduct: any; competitors: any[] } | null = null;
-
-      // 1. Se for link direto (ex: meli.la ou /p/MLB...), tenta ler diretamente via Jina primeiro
-      if (isDirectLink) {
-        const directUrl = /^MLB-?\d{8,14}$/i.test(rawInput)
-          ? `https://produto.mercadolivre.com.br/${rawInput.replace('-', '').toUpperCase().replace('MLB', 'MLB-')}`
-          : rawInput;
-
-        // Só tenta direto se NÃO for um link /up/MLBU bloqueado (ou tenta e verifica se vieram fotos reais)
-        if (!directUrl.includes('/up/MLBU')) {
-          const jinaDirect = await fetchJinaMarkdown(directUrl);
-          parsedResult = parseFullPageAndCompetitors(jinaDirect.content, jinaDirect.title, jinaDirect.finalUrl);
-        }
-      }
-
-      // 2. Se for palavra-chave OU se o link era /up/MLBU (que bloqueia leitura direta), descobre as páginas /p/MLB abertas!
-      if (!parsedResult) {
-        const queryForDiscovery = isDirectLink
-          ? extractTitleFromUrlSlug(rawInput) || rawInput
-          : rawInput;
-
-        const openUrls = await findOpenMercadoLivreUrls(queryForDiscovery);
-
-        // Tenta as primeiras URLs abertas encontradas até extrair o pacote completo com fotos reais
-        for (const candidateUrl of openUrls.slice(0, 3)) {
-          const jinaPage = await fetchJinaMarkdown(candidateUrl);
-          const attempt = parseFullPageAndCompetitors(jinaPage.content, jinaPage.title, jinaPage.finalUrl);
-          if (attempt && attempt.mainProduct.thumbnail) {
-            // Se o utilizador colou um link /up/MLBU específico, preserva o título e link originais dele
-            if (isDirectLink && rawInput.includes('/up/MLBU')) {
-              const slugTitle = extractTitleFromUrlSlug(rawInput);
-              if (slugTitle) attempt.mainProduct.title = slugTitle;
-              attempt.mainProduct.permalink = rawInput;
-            }
-            parsedResult = attempt;
-            break;
-          }
-        }
-      }
-
-      // 3. Se tiver token OAuth ou MLB numérico, tenta enriquecer com API Oficial /items e /users
-      if (parsedResult && /^MLB\d{8,14}$/.test(parsedResult.mainProduct.id)) {
-        try {
-          const itemRes = await fetchWithTimeout(
-            `https://api.mercadolibre.com/items/${parsedResult.mainProduct.id}`,
-            { headers: authHeaders },
-            3000
-          );
-          if (itemRes.ok) {
-            const apiItem = await itemRes.json();
-            if (apiItem?.date_created) {
-              parsedResult.mainProduct.date_created = apiItem.date_created;
-              parsedResult.mainProduct.date_source = 'Exata ao Segundo (API Oficial ML)';
-              parsedResult.mainProduct.days_old = Math.max(
-                1,
-                Math.floor((Date.now() - new Date(apiItem.date_created).getTime()) / 86400000)
-              );
-            }
-            if (apiItem?.seller_id) {
-              const userRes = await fetchWithTimeout(
-                `https://api.mercadolibre.com/users/${apiItem.seller_id}`,
-                { headers: authHeaders },
-                3000
-              );
-              if (userRes.ok) {
-                const u = await userRes.json();
-                if (u?.nickname) parsedResult.mainProduct.seller_name = u.nickname;
-                if (u?.registration_date) {
-                  parsedResult.mainProduct.seller_registration_date = u.registration_date;
-                  parsedResult.mainProduct.seller_account_years = Math.max(
-                    1,
-                    new Date().getFullYear() - new Date(u.registration_date).getFullYear()
-                  );
-                }
-              }
-            }
-          }
-        } catch {
-          // Mantém dados extraídos da página
-        }
-      }
-
-      if (parsedResult) {
-        const allItems = [parsedResult.mainProduct, ...parsedResult.competitors];
-        return NextResponse.json({
-          product: parsedResult.mainProduct,
-          related_items: allItems,
-          items: allItems,
-        });
-      }
-
+    if (!rawQuery) {
       return NextResponse.json({
-        error: 'Não foi possível localizar anúncios para este termo. Tente digitar o nome principal do produto.',
-        items: [],
+        ok: true,
+        status: 'Conectado oficialmente à API do Mercado Livre',
+        client_id: CLIENT_ID,
       });
     }
 
-    return NextResponse.json({ status: 'BuscasML Radar Online', client_id: CLIENT_ID });
+    // 2. Identifica se o usuário digitou um link, um código MLB ou uma palavra-chave
+    const parsed = await parseInputQueryOrUrl(rawQuery);
+    let rawCatalogResults: any[] = [];
+    let usedSearchTerm = parsed.searchQuery;
+
+    // Caso A: Se o link já continha um ID direto de catálogo (/p/MLB...)
+    if (parsed.catalogId) {
+      const directRes = await fetchWithTimeout(
+        `https://api.mercadolibre.com/products/${parsed.catalogId}`, { headers: authHeaders }, 4500 ); if (directRes.ok) { const directProd = await directRes.json(); if (directProd && directProd.id && directProd.name) { rawCatalogResults.push(directProd); usedSearchTerm = directProd.name; } } }  // Caso B: Busca na rota oficial aberta /products/search?status=active&site_id=MLB&q=... // Se a frase for muito longa (como um slug de 10 palavras) e retornar 0 itens, reduz gradualmente para as palavras principais const words = usedSearchTerm.split(/\s+/).filter(Boolean); const candidateQueries = Array.from( new Set([ usedSearchTerm, words.slice(0, 5).join(' '), words.slice(0, 3).join(' '), words.slice(0, 2).join(' '), ]) ).filter((q) => q.length >= 2);  let executedEndpoint = '';  for (const candidate of candidateQueries) { const url = `https://api.mercadolibre.com/products/search?status=active&site_id=MLB&q=${encodeURIComponent(
+        candidate
+      )}&limit=12`;
+      executedEndpoint = url;
+
+      const searchRes = await fetchWithTimeout(url, { headers: authHeaders }, 5500);
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (Array.isArray(searchData?.results) && searchData.results.length > 0) {
+          const existingIds = new Set(rawCatalogResults.map((p) => p.id));
+          for (const item of searchData.results) {
+            if (!existingIds.has(item.id)) {
+              rawCatalogResults.push(item);
+              existingIds.add(item.id);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    if (rawCatalogResults.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        authenticated_client_id: CLIENT_ID,
+        executed_endpoint: executedEndpoint,
+        total: 0,
+        items: [],
+        message: `A API Oficial (/products/search) não encontrou produtos de catálogo para "\${usedSearchTerm}". Tente usar palavras mais curtas (ex: "Coroa Noiva", "Creatina", "Cadeira Gamer").`,
+      });
+    }
+
+    // 3. Hidrata os produtos encontrados consultando /products/{id}/items e /users/{seller_id} em paralelo
+    const hydratedItems = await Promise.all(
+      rawCatalogResults.slice(0, 10).map((prod) => hydrateCatalogProduct(prod, authHeaders))
+    );
+
+    return NextResponse.json({
+      ok: true,
+      authenticated_client_id: CLIENT_ID,
+      executed_endpoint: executedEndpoint,
+      query_used: usedSearchTerm,
+      total: hydratedItems.length,
+      items: hydratedItems,
+    });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Erro na comunicação com a API Oficial: \${err?.message || 'Erro desconhecido'}`,
+      },
+      { status: 500 }
+    );
   }
 }
 
-// BUSCA POR FOTO / PRINT DE PRODUTO
+// RECONHECIMENTO DE IMAGEM PARA BUSCA POR FOTO
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -707,7 +334,7 @@ export async function POST(req: NextRequest) {
                   content: [
                     {
                       type: 'text',
-                      text: 'Identifique exatamente qual é este produto comercial para busca no Mercado Livre Brasil. Responda APENAS com o nome curto do produto em português (máximo 4 palavras, sem pontuação).',
+                      text: 'Identifique este produto para busca no catálogo do Mercado Livre Brasil. Responda APENAS com 2 a 3 palavras principais do produto em português (sem pontuação). Exemplo: Coroa Noiva Strass ou Creatina Growth.',
                     },
                     {
                       type: 'image_url',
@@ -718,17 +345,17 @@ export async function POST(req: NextRequest) {
               ],
             }),
           },
-          6500
+          6000
         );
         if (visionRes.ok) {
           const visionData = await visionRes.json();
           const reply = visionData?.choices?.[0]?.message?.content?.trim() || '';
-          if (reply && reply.length >= 3 && reply.length <= 65) {
+          if (reply && reply.length >= 2 && reply.length <= 50) {
             detectedKeyword = reply.replace(/[."']/g, '');
           }
         }
       } catch {
-        // Fallback pelo nome do ficheiro
+        // Fallback pelo nome do arquivo
       }
     }
 
@@ -741,8 +368,8 @@ export async function POST(req: NextRequest) {
       if (cleanName.length >= 3) detectedKeyword = cleanName;
     }
 
-    return NextResponse.json({ keyword: detectedKeyword || 'Coroa Tiara Noiva Strass' });
+    return NextResponse.json({ keyword: detectedKeyword || 'Creatina' });
   } catch (err: any) {
-    return NextResponse.json({ keyword: 'Coroa Tiara Noiva Strass', error: err?.message });
+    return NextResponse.json({ keyword: 'Creatina', error: err?.message });
   }
 }
