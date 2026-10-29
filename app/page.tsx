@@ -901,3 +901,62 @@ export default function BuscasMLOfficialPlatform() {
                       step="0.25"
                       value={packagingCost}
                       onChange={(e) => setPackagingCost(Number(e.target.value))}
+                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">Frete (Acima de 79)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={shippingCost}
+                      onChange={(e) => setShippingCost(Number(e.target.value))}
+                      className="w-full bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2.5 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-6 flex flex-col justify-between">
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Comissão ML ({mlRate}%) + Taxa Fixa:</span>
+                    <span className="text-red-400 font-bold">
+                      - {BRL} {mlCommission.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Imposto Nota Fiscal ({taxRate}%):</span>
+                    <span className="text-red-400 font-bold">
+                      - {BRL} {taxVal.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Custo Embalagem + Frete:</span>
+                    <span className="text-red-400 font-bold">
+                      - {BRL} {(numPack + effectiveShip).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-800 pt-6 mt-6">
+                  <span className="text-xs text-slate-400 uppercase">Lucro Líquido por Venda</span>
+                  <p
+                    className={
+                      'text-4xl font-black mt-1 ' + (netProfit >= 0 ? 'text-emerald-400' : 'text-red-400')
+                    }
+                  >
+                    {BRL} {netProfit.toFixed(2)}
+                  </p>
+                  <p className="text-sm text-slate-300 mt-1">
+                    Margem Líquida Final: <strong>{netMargin.toFixed(1)}%</strong>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
