@@ -13,6 +13,12 @@ import {
   DollarSign,
   Sparkles,
   Image as ImageIcon,
+  Star,
+  Award,
+  BarChart3,
+  ShieldCheck,
+  Clock,
+  Tag,
 } from 'lucide-react';
 
 export default function BuscasMLApp() {
@@ -22,6 +28,7 @@ export default function BuscasMLApp() {
   const [spyInput, setSpyInput] = useState('');
   const [loadingSpy, setLoadingSpy] = useState(false);
   const [spyResult, setSpyResult] = useState<any>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<string>('');
   const [spyError, setSpyError] = useState('');
 
   // Estados de Categorias e Tendências
@@ -37,7 +44,6 @@ export default function BuscasMLApp() {
   const [shippingCost, setShippingCost] = useState(18.9);
   const [adType, setAdType] = useState<'classico' | 'premium'>('premium');
 
-  // Carrega categorias ao abrir a aba de tendências
   useEffect(() => {
     if (activeTab === 'tendencias' && categories.length === 0) {
       fetch('/api/ml?action=categories')
@@ -62,8 +68,8 @@ export default function BuscasMLApp() {
 
   const handleSpySearch = async (e?: React.FormEvent, customQuery?: string) => {
     if (e) e.preventDefault();
-    const queryToUse = customQuery || spyInput;
-    if (!queryToUse.trim()) return;
+    const queryToUse = (customQuery || spyInput).trim();
+    if (!queryToUse) return;
 
     setLoadingSpy(true);
     setSpyError('');
@@ -72,35 +78,78 @@ export default function BuscasMLApp() {
     try {
       const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(queryToUse)}`);
       const data = await res.json();
-      if (!res.ok || data.error) {
-        setSpyError(data.error || 'Erro ao consultar anúncio.');
-      } else {
+
+      if (res.ok && data && !data.error) {
         setSpyResult(data);
+        setSelectedPhoto(data.thumbnail || data.pictures?.[0] || '');
+        setLoadingSpy(false);
+        return;
       }
-    } catch {
-      setSpyError('Falha de comunicação com o servidor.');
+      setSpyError(data?.error || 'Não foi possível ler este anúncio.');
+    } catch (err: any) {
+      setSpyError(`Falha ao consultar anúncio: ${err?.message || 'Tente novamente'}`);
     } finally {
       setLoadingSpy(false);
     }
   };
 
-  // Cálculo de Idade do Anúncio e Média Diária
-  const calculateMetrics = (item: any) => {
-    if (!item?.date_created) {
-      return { daysOld: null, dailySales: '—', formattedDate: 'Estimada via Catálogo' };
+  // Cálculo de Métricas Avançadas (Estilo JoomPulse & Avantpro)
+  const calculateProMetrics = (item: any) => {
+    const price = Number(item?.price || 0);
+    const sold = Number(item?.sold_quantity || 0);
+    const grossRevenue = price * sold;
+
+    // Idade e Datas
+    let diffDays = 30;
+    let formattedCreated = 'Mês Atual (Recente)';
+    if (item?.date_created) {
+      const created = new Date(item.date_created);
+      const now = new Date();
+      diffDays = Math.max(1, Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)));
+      formattedCreated = created.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
     }
-    const created = new Date(item.date_created);
-    const now = new Date();
-    const diffDays = Math.max(1, Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)));
-    const daily = item.sold_quantity ? (item.sold_quantity / diffDays).toFixed(2) : '0.00';
+
+    const dailySales = sold > 0 ? sold / diffDays : 0;
+    const dailyRevenue = dailySales * price;
+    const monthlyRevenue = dailyRevenue * 30;
+
+    // Simulação de Taxa do Mercado Livre do Concorrente
+    const isPremium = String(item?.ad_type || '').toLowerCase().includes('premium');
+    const feePercent = isPremium ? 17 : 12;
+    const fixedFee = price > 0 && price < 79 ? 6.25 : 0;
+    const estimatedShipping = price >= 79 ? 19.9 : 0;
+    const mlTotalFee = (price * feePercent) / 100 + fixedFee;
+    const sellerNetReceive = Math.max(0, price - mlTotalFee - estimatedShipping);
+
+    // Termômetro de Saúde do Anúncio (Score Avantpro 0-100)
+    let healthScore = 50;
+    if ((item?.title || '').length >= 45) healthScore += 15;
+    if ((item?.pictures?.length || 0) >= 3) healthScore += 10;
+    if (String(item?.shipping_logistic || '').includes('Full')) healthScore += 15;
+    if (item?.free_shipping) healthScore += 5;
+    if (item?.discount_percent > 0) healthScore += 5;
+    healthScore = Math.min(100, healthScore);
+
     return {
-      daysOld: `${diffDays} dias`,
-      dailySales: `${daily} / dia`,
-      formattedDate: created.toLocaleDateString('pt-BR'),
+      grossRevenue,
+      diffDays,
+      formattedCreated,
+      dailySales: dailySales.toFixed(1),
+      dailyRevenue,
+      monthlyRevenue,
+      feePercent,
+      fixedFee,
+      mlTotalFee,
+      sellerNetReceive,
+      healthScore,
     };
   };
 
-  // Cálculos da Calculadora de Lucro
+  // Cálculos da aba Calculadora
   const mlFeePercent = adType === 'classico' ? 12 : 17;
   const fixedFee = salePrice < 79 ? 6.25 : 0;
   const mlCommission = (salePrice * mlFeePercent) / 100 + fixedFee;
@@ -112,15 +161,18 @@ export default function BuscasMLApp() {
   return (
     <div className="flex min-h-screen bg-[#0b0f19] text-slate-100">
       {/* MENU LATERAL */}
-      <aside className="w-64 bg-[#111827] border-r border-slate-800 p-5 flex flex-col justify-between">
+      <aside className="w-64 bg-[#111827] border-r border-slate-800 p-5 flex flex-col justify-between shrink-0">
         <div>
           <div className="flex items-center gap-2 mb-8">
             <div className="w-8 h-8 rounded-lg bg-yellow-400 flex items-center justify-center text-black font-black">
               B
             </div>
-            <span className="text-xl font-bold tracking-tight">
-              Buscas<span className="text-yellow-400">ML</span>
-            </span>
+            <div>
+              <span className="text-xl font-bold tracking-tight">
+                Buscas<span className="text-yellow-400">ML</span>
+              </span>
+              <span className="block text-[10px] text-slate-400 uppercase tracking-widest">Pro Analytics</span>
+            </div>
           </div>
 
           <nav className="space-y-2">
@@ -143,7 +195,7 @@ export default function BuscasMLApp() {
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <Search size={18} /> Espião de Anúncios
+              <Search size={18} /> Espião Raio-X Pro
             </button>
 
             <button
@@ -170,50 +222,56 @@ export default function BuscasMLApp() {
           </nav>
         </div>
 
-        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
-          <p className="font-semibold text-emerald-400">● API Mercado Livre Ativa</p>
-          <p className="mt-1 truncate">App ID: 8353552938244269</p>
+        <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400 space-y-1">
+          <p className="font-semibold text-emerald-400 flex items-center gap-1.5">
+            <ShieldCheck size={14} /> Motor JoomPulse + Avantpro
+          </p>
+          <p className="truncate text-[11px]">App ID: 8353552938244269</p>
         </div>
       </aside>
 
       {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 p-8 overflow-y-auto">
-        {/* ABA 1: ESPIÃO DE ANÚNCIOS */}
+        {/* ABA 1: ESPIÃO DE ANÚNCIOS PRO */}
         {activeTab === 'espiao' && (
-          <div className="max-w-5xl mx-auto">
-            <h1 className="text-3xl font-bold mb-1">Espião de Anúncios (Raio-X)</h1>
-            <p className="text-slate-400 mb-6">
-              Cole qualquer link do Mercado Livre (normal, meli.la, catálogo) ou digite o nome do produto
-            </p>
+          <div className="max-w-6xl mx-auto">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h1 className="text-3xl font-bold">Espião de Anúncios (Raio-X Profundo)</h1>
+                <p className="text-slate-400 text-sm mt-1">
+                  Cole qualquer link do Mercado Livre (normal, meli.la, catálogo) ou código MLB para extrair vendas, faturamento e data de criação
+                </p>
+              </div>
+            </div>
 
-            <form onSubmit={handleSpySearch} className="flex gap-3 mb-6">
+            <form onSubmit={handleSpySearch} className="flex gap-3 mb-4">
               <input
                 type="text"
                 value={spyInput}
                 onChange={(e) => setSpyInput(e.target.value)}
-                placeholder="Cole o link do anúncio, código MLB ou nome do produto (ex: Cadeira Gamer)..."
+                placeholder="Ex: https://meli.la/1GUtykq ou link completo do produto..."
                 className="flex-1 bg-[#111827] border border-slate-700 rounded-xl px-4 py-3.5 text-white focus:outline-none focus:border-yellow-400"
               />
               <button
                 type="submit"
                 disabled={loadingSpy}
-                className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-6 py-3.5 rounded-xl flex items-center gap-2 transition"
+                className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-7 py-3.5 rounded-xl flex items-center gap-2 transition shrink-0"
               >
                 <Search size={18} />
-                {loadingSpy ? 'Analisando...' : 'Raio-X'}
+                {loadingSpy ? 'Extraindo...' : 'Raio-X'}
               </button>
             </form>
 
-            {/* Upload de Foto / Print que extrai o nome e pesquisa */}
-            <label className="flex items-center justify-between p-4 mb-8 rounded-xl border border-dashed border-slate-700 bg-[#111827]/60 hover:border-yellow-400/60 cursor-pointer transition">
+            {/* Busca por Foto ou Print */}
+            <label className="flex items-center justify-between p-3.5 mb-8 rounded-xl border border-dashed border-slate-700 bg-[#111827]/60 hover:border-yellow-400/60 cursor-pointer transition">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400">
-                  <ImageIcon size={22} />
+                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+                  <ImageIcon size={20} />
                 </div>
                 <div>
                   <p className="font-semibold text-sm">Buscar por Foto ou Print de Produto</p>
                   <p className="text-xs text-slate-400">
-                    Envie a foto de um produto para localizar anúncios equivalentes no Mercado Livre
+                    Envie a imagem de um produto para localizar anúncios equivalentes no Mercado Livre
                   </p>
                 </div>
               </div>
@@ -240,85 +298,248 @@ export default function BuscasMLApp() {
             )}
 
             {spyResult && (() => {
-              const metrics = calculateMetrics(spyResult);
+              const pro = calculateProMetrics(spyResult);
               return (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Card da Foto */}
-                  <div className="bg-[#111827] border border-slate-800 rounded-2xl p-5 flex flex-col items-center">
-                    {spyResult.thumbnail ? (
-                      <img
-                        src={spyResult.thumbnail}
-                        alt={spyResult.title}
-                        className="w-full h-64 object-contain rounded-xl bg-white p-2 mb-4"
-                      />
-                    ) : (
-                      <div className="w-full h-64 rounded-xl bg-slate-800 flex items-center justify-center mb-4">
-                        Sem imagem
+                <div className="space-y-6">
+                  {/* BLOCO SUPERIOR: FOTO REAL + CABEÇALHO + KPIS PRINCIPAIS */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Coluna da Galeria de Fotos Reais do Produto */}
+                    <div className="lg:col-span-4 bg-[#111827] border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+                      <div>
+                        <div className="w-full h-72 rounded-xl bg-white p-4 flex items-center justify-center mb-3 overflow-hidden">
+                          {selectedPhoto || spyResult.thumbnail ? (
+                            <img
+                              src={selectedPhoto || spyResult.thumbnail}
+                              alt={spyResult.title}
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          ) : (
+                            <span className="text-slate-400 text-sm">Sem foto disponível</span>
+                          )}
+                        </div>
+
+                        {/* Miniaturas das outras fotos do anúncio */}
+                        {spyResult.pictures?.length > 1 && (
+                          <div className="flex gap-2 overflow-x-auto pb-2">
+                            {spyResult.pictures.map((pic: string, i: number) => (
+                              <button
+                                key={i}
+                                onClick={() => setSelectedPhoto(pic)}
+                                className={`w-14 h-14 rounded-lg bg-white p-1 border-2 shrink-0 ${
+                                  selectedPhoto === pic ? 'border-yellow-400' : 'border-transparent opacity-70 hover:opacity-100'
+                                }`}
+                              >
+                                <img src={pic} alt="" className="w-full h-full object-contain" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    <a
-                      href={spyResult.permalink}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm text-blue-400 hover:underline flex items-center gap-1"
-                    >
-                      Abrir anúncio no Mercado Livre <ExternalLink size={14} />
-                    </a>
+
+                      <div className="pt-4 border-t border-slate-800 mt-4 flex items-center justify-between">
+                        <a
+                          href={spyResult.permalink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm text-yellow-400 hover:underline font-medium flex items-center gap-1.5"
+                        >
+                          Ver anúncio no Mercado Livre <ExternalLink size={14} />
+                        </a>
+                        <button
+                          onClick={() => {
+                            setSalePrice(Number(spyResult.price || 100));
+                            setProductCost(Number(((spyResult.price || 100) * 0.35).toFixed(2)));
+                            setActiveTab('calculadora');
+                          }}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200 transition"
+                        >
+                          Simular Lucro →
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Coluna Direita: Dados do Produto e KPIs JoomPulse / Avantpro */}
+                    <div className="lg:col-span-8 space-y-4">
+                      {/* Card Principal de Preço e Identificação */}
+                      <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                            {spyResult.source}
+                          </span>
+                          <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
+                            {spyResult.id}
+                          </span>
+                          <span className="text-xs px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                            {spyResult.ad_type}
+                          </span>
+                          {spyResult.rating > 0 && (
+                            <span className="text-xs px-2.5 py-1 rounded-full bg-yellow-400/10 text-yellow-300 flex items-center gap-1">
+                              <Star size={12} className="fill-yellow-400 text-yellow-400" />
+                              {spyResult.rating} ({spyResult.reviews_count} opiniões)
+                            </span>
+                          )}
+                        </div>
+
+                        <h2 className="text-xl font-bold text-white leading-snug">{spyResult.title}</h2>
+
+                        <div className="mt-4 flex flex-wrap items-baseline gap-4">
+                          <div>
+                            {spyResult.original_price > spyResult.price && (
+                              <p className="text-sm text-slate-400 line-through">
+                                De R$ {Number(spyResult.original_price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-3">
+                              <p className="text-4xl font-black text-yellow-400">
+                                R$ {Number(spyResult.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </p>
+                              {spyResult.discount_percent > 0 && (
+                                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300">
+                                  {spyResult.discount_percent}% OFF
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="ml-auto bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-2.5 text-right">
+                            <p className="text-[11px] text-slate-400 uppercase">Faturamento Bruto Acumulado</p>
+                            <p className="text-xl font-black text-emerald-400">
+                              R$ {pro.grossRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Grade de 6 Indicadores JoomPulse / Avantpro */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase">Volume de Vendas</p>
+                          <p className="text-2xl font-black text-blue-400 mt-1">
+                            {Number(spyResult.sold_quantity).toLocaleString('pt-BR')}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{spyResult.sold_label}</p>
+                        </div>
+
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase">Velocidade de Vendas</p>
+                          <p className="text-2xl font-black text-emerald-400 mt-1">{pro.dailySales} / dia</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            ~R$ {pro.dailyRevenue.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}/dia
+                          </p>
+                        </div>
+
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase">Receita Mensal Est.</p>
+                          <p className="text-2xl font-black text-yellow-400 mt-1">
+                            R$ {pro.monthlyRevenue.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Projeção de 30 dias</p>
+                        </div>
+
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
+                            <Calendar size={13} className="text-yellow-400" /> Data de Criação
+                          </p>
+                          <p className="text-lg font-bold text-white mt-1">{pro.formattedCreated}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Há {pro.diffDays} dias ({spyResult.date_source})
+                          </p>
+                        </div>
+
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
+                            <Truck size={13} className="text-blue-400" /> Logística e Frete
+                          </p>
+                          <p className="text-lg font-bold text-white mt-1">{spyResult.shipping_logistic}</p>
+                          <p className="text-[11px] text-emerald-400 mt-0.5">
+                            {spyResult.free_shipping ? '✓ Frete Grátis Ativo' : 'Frete por conta do comprador'}
+                          </p>
+                        </div>
+
+                        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
+                          <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
+                            <Award size={13} className="text-purple-400" /> Saúde do Anúncio
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <p className="text-lg font-black text-white">{pro.healthScore}/100</p>
+                            <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-yellow-400 to-emerald-400"
+                                style={{ width: `${pro.healthScore}%` }}
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1">Marca: {spyResult.brand}</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Card de Métricas */}
-                  <div className="md:col-span-2 space-y-4">
+                  {/* BLOCO DO MEIO: RAIO-X FINANCEIRO DO VENDEDOR (ESTILO AVANTPRO) */}
+                  <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-base font-bold flex items-center gap-2 mb-4">
+                      <DollarSign size={18} className="text-yellow-400" />
+                      Raio-X Financeiro deste Anúncio (Quanto sobra para o concorrente por venda)
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
+                      <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+                        <span className="text-xs text-slate-400">Preço Cobrado</span>
+                        <p className="text-lg font-bold text-white mt-0.5">R$ {Number(spyResult.price).toFixed(2)}</p>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+                        <span className="text-xs text-slate-400">
+                          Tarifa ML ({pro.feePercent}% {pro.fixedFee > 0 ? '+ R$ 6,25 fixo' : ''})
+                        </span>
+                        <p className="text-lg font-bold text-red-400 mt-0.5">- R$ {pro.mlTotalFee.toFixed(2)}</p>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+                        <span className="text-xs text-slate-400">Vendedor / Loja</span>
+                        <p className="text-sm font-bold text-slate-200 mt-1 truncate">{spyResult.seller_id}</p>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                        <span className="text-xs text-emerald-300">Repasse Líquido do ML</span>
+                        <p className="text-lg font-black text-emerald-400 mt-0.5">
+                          R$ {pro.sellerNetReceive.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOCO INFERIOR: CONCORRENTES DIRETOS NO MERCADO LIVRE */}
+                  {spyResult.competitors?.length > 0 && (
                     <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
-                      <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        Fonte: {spyResult.source}
-                      </span>
-                      <p className="text-xs text-slate-400 mt-3">{spyResult.id}</p>
-                      <h2 className="text-xl font-bold mt-1">{spyResult.title}</h2>
-                      <p className="text-3xl font-black text-yellow-400 mt-3">
-                        R$ {Number(spyResult.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase">Vendas Capturadas</p>
-                        <p className="text-2xl font-bold text-blue-400 mt-1">{spyResult.sold_quantity}</p>
-                      </div>
-
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase">Média Vendas/Dia</p>
-                        <p className="text-2xl font-bold text-emerald-400 mt-1">{metrics.dailySales}</p>
-                      </div>
-
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase">Idade do Anúncio</p>
-                        <p className="text-2xl font-bold text-white mt-1">{metrics.daysOld || 'Recente'}</p>
-                      </div>
-
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
-                          <Calendar size={13} /> Criado em
-                        </p>
-                        <p className="text-lg font-semibold mt-1">{metrics.formattedDate}</p>
-                      </div>
-
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
-                          <Truck size={13} /> Logística
-                        </p>
-                        <p className="text-lg font-semibold mt-1 capitalize">
-                          {spyResult.shipping_logistic} {spyResult.free_shipping ? '• Grátis' : ''}
-                        </p>
-                      </div>
-
-                      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase flex items-center gap-1">
-                          <Package size={13} /> Estoque / Catálogo
-                        </p>
-                        <p className="text-lg font-semibold mt-1">{spyResult.available_quantity} un.</p>
+                      <h3 className="text-base font-bold flex items-center gap-2 mb-4">
+                        <BarChart3 size={18} className="text-blue-400" />
+                        Concorrentes Diretos Encontrados no Nicho
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        {spyResult.competitors.map((comp: any, i: number) => (
+                          <div
+                            key={i}
+                            onClick={() => {
+                              setSpyInput(comp.permalink || comp.id);
+                              handleSpySearch(undefined, comp.permalink || comp.id);
+                            }}
+                            className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-yellow-400 cursor-pointer transition flex items-center gap-3"
+                          >
+                            {comp.thumbnail && (
+                              <img
+                                src={comp.thumbnail}
+                                alt={comp.title}
+                                className="w-14 h-14 rounded-lg bg-white object-contain p-1 shrink-0"
+                              />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-slate-200 line-clamp-2">{comp.title}</p>
+                              <p className="text-sm font-bold text-yellow-400 mt-1">
+                                R$ {Number(comp.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })()}
@@ -484,17 +705,17 @@ export default function BuscasMLApp() {
         {/* ABA 4: DASHBOARD GERAL */}
         {activeTab === 'dashboard' && (
           <div className="max-w-5xl mx-auto">
-            <h1 className="text-3xl font-bold mb-2">Bem-vindo ao BuscasML</h1>
-            <p className="text-slate-400 mb-8">Sua central de inteligência para encontrar produtos campeões.</p>
+            <h1 className="text-3xl font-bold mb-2">Central de Inteligência BuscasML</h1>
+            <p className="text-slate-400 mb-8">Ferramentas inspiradas na JoomPulse e Avantpro para análise do Mercado Livre.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div
                 onClick={() => setActiveTab('espiao')}
                 className="bg-[#111827] border border-slate-800 hover:border-yellow-400 p-6 rounded-2xl cursor-pointer transition"
               >
                 <Search className="text-yellow-400 mb-3" size={28} />
-                <h3 className="font-bold text-lg">Espionar Concorrente</h3>
+                <h3 className="font-bold text-lg">Espionar Anúncio</h3>
                 <p className="text-sm text-slate-400 mt-1">
-                  Veja data de criação, vendas e preço de qualquer anúncio.
+                  Veja faturamento bruto, vendas/dia, data de criação e repasse líquido.
                 </p>
               </div>
               <div
@@ -504,7 +725,7 @@ export default function BuscasMLApp() {
                 <TrendingUp className="text-blue-400 mb-3" size={28} />
                 <h3 className="font-bold text-lg">Explorar Tendências</h3>
                 <p className="text-sm text-slate-400 mt-1">
-                  Veja o que os brasileiros estão digitando na barra de busca hoje.
+                  Veja as palavras mais buscadas em cada categoria do Mercado Livre.
                 </p>
               </div>
               <div
