@@ -16,16 +16,25 @@ const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const USER_TTL_MS = 10 * 60 * 1000;
 const CURRENT_YEAR = new Date().getFullYear();
+const MARKER_SOURCE = 'Marcador público da página';
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const VISION_MODEL = process.env.ANTHROPIC_VISION_MODEL || 'claude-haiku-5-5';
 
-/** Foto real de produto: exige D_NQ_NP_ e o padrão -MLB..._MMYYYY-X.ext (descarta banners promocionais). */
+/** Foto real de produto: exige D_NQ_NP_ e o padrão -MLB..._MMYYYY-X.ext. Banners promocionais não casam. */
 const PHOTO_RE = /D_NQ_NP_.*?-MLB\d+_(\d{2})(\d{4})-[A-Za-z]\.(?:webp|jpe?g|png)/i;
+const DATE_RE = /-MLB\d+_(\d{2})(\d{4})-[A-Za-z]\.(?:webp|jpe?g|png)/i;
 
 const LISTING_LABEL: Record<string, string> = { gold_special: 'Clássico', gold_pro: 'Premium' };
 const MEDAL_LABEL: Record<string, string> = { platinum: 'Platinum', gold: 'Gold', silver: 'Prata' };
+const ML_HOST_RE = /(^|\.)(mercadolivre\.com\.br|mercadolivre\.com|mercadolibre\.com\.br|meli\.la)$/i;
+
+/* =============================================================================
+ * TIPOS
+ * ============================================================================= */
 
 type AnyObj = Record<string, any>;
 type MLResponse = { ok: boolean; status: number; data: any };
-
 type Photo = { url: string; photoId: string; month: number; year: number };
 
 type SellerInfo = {
@@ -130,6 +139,27 @@ type Dossier = {
   raw: AnyObj;
 };
 
+type Analysis =
+  | { mode: 'keyword'; query: string; products: ProductSummary[]; note: string | null }
+  | { mode: 'dossier'; dossier: Dossier };
+
+type MLRef =
+  | { kind: 'keyword'; q: string }
+  | { kind: 'code'; code: string }
+  | { kind: 'url'; url: string };
+
+type PageFetch = { ok: boolean; status: number; finalUrl: string; html: string };
+type Identified = { query: string; confidence: string; reason: string };
+type OAuthBody = { action?: unknown; code?: unknown; redirectUri?: unknown; refreshToken?: unknown };
+type ComposeInput = {
+  product: AnyObj | null;
+  item: AnyObj | null;
+  winner: AnyObj | null;
+  seller: SellerInfo | null;
+  productId: string | null;
+  itemId: string | null;
+};
+
 /* =============================================================================
  * ERROS E RESPOSTAS
  * ============================================================================= */
@@ -143,11 +173,11 @@ class HttpError extends Error {
   }
 }
 
-function json(data: AnyObj, status = 200) {
+function json(data: AnyObj, status = 200): NextResponse {
   return NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function errorResponse(e: unknown) {
+function errorResponse(e: unknown): NextResponse {
   if (e instanceof HttpError) return json({ ok: false, error: e.message }, e.status);
   return json({ ok: false, error: e instanceof Error ? e.message : 'Erro interno.' }, 500);
 }
@@ -163,6 +193,10 @@ function num(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v : null;
 }
 
 function pad2(n: number): string {
@@ -203,7 +237,7 @@ function listOf(data: any): AnyObj[] {
   return [];
 }
 
-const priceAsc = (a: AnyObj, b: AnyObj) =>
+const priceAsc = (a: AnyObj, b: AnyObj): number =>
   (num(a.price) ?? Number.MAX_SAFE_INTEGER) - (num(b.price) ?? Number.MAX_SAFE_INTEGER);
 
 function listingLabel(id: unknown): string | null {
@@ -211,9 +245,9 @@ function listingLabel(id: unknown): string | null {
 }
 
 function attr(obj: AnyObj | null | undefined, id: string): string | null {
-  const list: AnyObj[] = Array.isArray(obj?.attributes) ? obj?.attributes : [];
+  const list: AnyObj[] = Array.isArray(obj?.attributes) ? obj.attributes : [];
   const hit = list.find((a) => a?.id === id);
-  return typeof hit?.value_name === 'string' ? hit.value_name : null;
+  return str(hit?.value_name);
 }
 
 function urlsOf(pictures: AnyObj[]): string[] {
@@ -230,7 +264,7 @@ function toHD(url: string): string {
     .replace(/-[A-Za-z]\.(?:webp|jpe?g|png)$/i, '-O.webp');
 }
 
-/** Mantém apenas fotos reais de produto e extrai a data de upload do padrão _MMYYYY. */
+/** Mantém apenas fotos reais de produto (D_NQ_NP_ + padrão _MMYYYY). */
 function extractPhotos(urls: string[]): Photo[] {
   const seen = new Set<string>();
   const out: Photo[] = [];
@@ -257,14 +291,38 @@ function earliestPhoto(photos: Photo[]): Photo | null {
   return photos.reduce((a, b) => (b.year * 12 + b.month < a.year * 12 + a.month ? b : a));
 }
 
+function dedupePhotos(list: Photo[]): Photo[] {
+  const seen = new Set<string>();
+  const out: Photo[] = [];
+  for (const p of list) {
+    if (seen.has(p.photoId)) continue;
+    seen.add(p.photoId);
+    out.push(p);
+  }
+  return out;
+}
+
 function createdSourceLabel(item: AnyObj | null, product: AnyObj | null): string {
-  if (item?.date_created) return 'API Oficial (anúncio)';
-  if (product?.date_created) return 'API Oficial (catálogo)';
+  if (str(item?.date_created)) return 'API Oficial (anúncio)';
+  if (str(product?.date_created)) return 'API Oficial (catálogo)';
   return 'Oculto no anúncio';
 }
 
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      out[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return out;
+}
+
 /* =============================================================================
- * TOKENS OAUTH
+ * TOKENS DE APLICAÇÃO (client_credentials)
  * ============================================================================= */
 
 let appToken: { value: string; expiresAt: number } | null = null;
@@ -287,7 +345,6 @@ async function tokenRequest(params: Record<string, string>): Promise<AnyObj> {
   return data;
 }
 
-/** Token de aplicação (client_credentials), com cache em memória até perto da expiração. */
 async function getAppToken(): Promise<string | null> {
   if (!CLIENT_SECRET) return null;
   if (appToken && appToken.expiresAt > Date.now() + 60_000) return appToken.value;
@@ -353,7 +410,7 @@ async function mlFetch(path: string, bearer: string | null = null): Promise<MLRe
 
 async function fetchItem(itemId: string, bearer: string | null): Promise<AnyObj | null> {
   const r = await mlFetch(`/items/${itemId}`, bearer);
-  return r.ok ? (r.data as AnyObj) : null;
+  return r.ok && r.data && typeof r.data === 'object' ? (r.data as AnyObj) : null;
 }
 
 /* =============================================================================
@@ -365,16 +422,17 @@ const userCache = new Map<number, { at: number; raw: AnyObj | null }>();
 function toSeller(u: AnyObj | null): SellerInfo | null {
   if (!u) return null;
   const rep: AnyObj = u.seller_reputation ?? {};
-  const power = typeof rep.power_seller_status === 'string' ? rep.power_seller_status : null;
+  const power = str(rep.power_seller_status);
   const addr: AnyObj = u.address ?? {};
-  const reg = typeof u.registration_date === 'string' ? u.registration_date : null;
+  const reg = str(u.registration_date);
+  const state = str(addr.state)?.replace(/^BR-/i, '') ?? null;
   return {
     id: num(u.id),
-    nickname: typeof u.nickname === 'string' ? u.nickname : null,
+    nickname: str(u.nickname),
     registrationDate: reg,
     accountYears: yearsSince(reg),
-    city: typeof addr.city === 'string' ? addr.city : null,
-    state: typeof addr.state === 'string' ? addr.state : null,
+    city: str(addr.city),
+    state,
     medal: power ? MEDAL_LABEL[power] ?? power : 'Sem medalha',
     completedSales: num(rep.transactions?.completed),
   };
@@ -391,7 +449,7 @@ async function sellerData(
     raw = hit.raw;
   } else {
     const r = await mlFetch(`/users/${id}`, bearer);
-    raw = r.ok ? (r.data as AnyObj) : null;
+    raw = r.ok && r.data && typeof r.data === 'object' ? (r.data as AnyObj) : null;
     userCache.set(id, { at: Date.now(), raw });
   }
   return { info: toSeller(raw), raw };
@@ -429,26 +487,23 @@ async function competitorRows(list: AnyObj[], bearer: string | null): Promise<Co
  * RESUMO DE PRODUTO (listagens)
  * ============================================================================= */
 
-type ComposeInput = {
-  product: AnyObj | null;
-  item: AnyObj | null;
-  winner: AnyObj | null;
-  seller: SellerInfo | null;
-  productId: string | null;
-  itemId: string | null;
-};
-
 function composeSummary(c: ComposeInput): ProductSummary {
-  const { product: p, item, winner } = c;
+  const p = c.product;
+  const item = c.item;
+  const winner = c.winner;
   const sh: AnyObj = item?.shipping ?? winner?.shipping ?? {};
-  const pictures: AnyObj[] = (p?.pictures?.length ? p.pictures : item?.pictures) ?? [];
+  const productPics: unknown = p?.pictures;
+  const itemPics: unknown = item?.pictures;
+  const picList: unknown =
+    Array.isArray(productPics) && productPics.length > 0 ? productPics : itemPics;
+  const pictures: AnyObj[] = Array.isArray(picList) ? picList : [];
   const photos = extractPhotos(urlsOf(pictures));
   const first = earliestPhoto(photos);
-  const createdAt: string | null = item?.date_created ?? p?.date_created ?? null;
+  const createdAt = str(item?.date_created) ?? str(p?.date_created);
   return {
     productId: c.productId,
     itemId: c.itemId,
-    title: p?.name ?? item?.title ?? 'Sem título',
+    title: str(p?.name) ?? str(item?.title) ?? 'Sem título',
     brand: attr(p, 'BRAND') ?? attr(item, 'BRAND'),
     model: attr(p, 'MODEL') ?? attr(item, 'MODEL'),
     image: photos[0]?.url ?? null,
@@ -462,7 +517,7 @@ function composeSummary(c: ComposeInput): ProductSummary {
     daysOnAir: daysSince(createdAt),
     firstPhotoDate: first ? `${pad2(first.month)}/${first.year}` : null,
     seller: c.seller,
-    permalink: item?.permalink ?? null,
+    permalink: str(item?.permalink),
   };
 }
 
@@ -471,17 +526,16 @@ async function summaryFromProduct(
   bearer: string | null,
 ): Promise<ProductSummary | null> {
   const pr = await mlFetch(`/products/${productId}`, bearer);
-  if (!pr.ok) return null;
+  if (!pr.ok || !pr.data || typeof pr.data !== 'object') return null;
   const product = pr.data as AnyObj;
-  const winner: AnyObj | null = product.buy_box_winner ?? null;
-  const wid = winner?.item_id;
-  let itemId: string | null = typeof wid === 'string' ? wid : null;
+  const winner = (product.buy_box_winner as AnyObj | null) ?? null;
+  const winnerId: unknown = winner?.item_id;
+  let itemId: string | null = typeof winnerId === 'string' ? winnerId : null;
   if (!itemId) {
     // Sem buy box: usa a oferta mais barata do catálogo.
     const its = await mlFetch(`/products/${productId}/items`, bearer);
     const cheapest = [...listOf(its.data)].sort(priceAsc)[0];
-    const cid = cheapest?.item_id;
-    itemId = typeof cid === 'string' ? cid : null;
+    itemId = str(cheapest?.item_id);
   }
   const item = itemId ? await fetchItem(itemId, bearer) : null;
   const sellerId = num(winner?.seller_id) ?? num(item?.seller_id);
@@ -492,14 +546,13 @@ async function summaryFromProduct(
 async function summaryFromItem(itemId: string, bearer: string | null): Promise<ProductSummary | null> {
   const item = await fetchItem(itemId, bearer);
   if (!item) return null;
-  const cpid = item.catalog_product_id;
   const { info } = await sellerData(num(item.seller_id), bearer);
   return composeSummary({
     product: null,
     item,
     winner: null,
     seller: info,
-    productId: typeof cpid === 'string' ? cpid : null,
+    productId: str(item.catalog_product_id),
     itemId,
   });
 }
@@ -517,12 +570,12 @@ async function searchCatalog(
     bearer,
   );
   const results: AnyObj[] = Array.isArray(r.data?.results) ? r.data.results : [];
-  const productIds = results.map((x) => x?.id).filter((x): x is string => typeof x === 'string');
+  const productIds = results.map((x) => str(x?.id)).filter((x): x is string => x !== null);
   if (productIds.length > 0) return { productIds, itemIds: [], note: null };
 
   const f = await mlFetch(`/sites/MLB/search?q=${encodeURIComponent(q)}&limit=12`, bearer);
   const fr: AnyObj[] = Array.isArray(f.data?.results) ? f.data.results : [];
-  const itemIds = fr.map((x) => x?.id).filter((x): x is string => typeof x === 'string');
+  const itemIds = fr.map((x) => str(x?.id)).filter((x): x is string => x !== null);
   if (f.ok && itemIds.length > 0) {
     return {
       productIds: [],
@@ -539,33 +592,32 @@ async function searchCatalog(
         : null,
   };
 }
+
+async function keywordResults(
+  q: string,
+  bearer: string | null,
+): Promise<{ products: ProductSummary[]; note: string | null }> {
+  const found = await searchCatalog(q, bearer);
+  const fromProducts = await mapLimit(found.productIds, 4, (pid) => summaryFromProduct(pid, bearer));
+  const fromItems = await mapLimit(found.itemIds, 4, (iid) => summaryFromItem(iid, bearer));
+  const products = [...fromProducts, ...fromItems].filter((p): p is ProductSummary => p !== null);
+  return { products, note: found.note };
+}
+
 /* =============================================================================
  * ENTRADA: palavra-chave, código MLB ou link
  * ============================================================================= */
-
-type MLRef =
-  | { kind: 'keyword'; q: string }
-  | { kind: 'code'; code: string }
-  | { kind: 'url'; url: string };
-
-type PageFetch = { ok: boolean; status: number; finalUrl: string; html: string };
-
-type Analysis =
-  | { mode: 'keyword'; query: string; products: ProductSummary[]; note: string | null }
-  | { mode: 'dossier'; dossier: Dossier };
-
-const ML_HOST_RE = /(^|\.)(mercadolivre\.com\.br|mercadolivre\.com|mercadolibre\.com\.br|meli\.la)$/i;
 
 function classifyInput(raw: string): MLRef {
   const input = raw.trim();
   if (input === '') {
     throw new HttpError(400, 'Informe uma palavra-chave, um código MLB ou um link do Mercado Livre.');
   }
+  const code = input.match(/^MLB-?(\d{6,})$/i);
+  if (code) return { kind: 'code', code: `MLB${code[1]}` };
   if (/^MLBU/i.test(input)) {
     throw new HttpError(400, 'Para códigos MLBU, cole o link completo do anúncio (/up/MLBU...).');
   }
-  const code = input.match(/^MLB-?(\d{6,})$/i);
-  if (code) return { kind: 'code', code: `MLB${code[1]}` };
 
   const looksLikeUrl =
     !/\s/.test(input) &&
@@ -795,10 +847,7 @@ function scrapeFromHtml(html: string): Scraped {
 
   const product = findProductNode(ldJsonBlocks(html));
   const offer = offerOf(product);
-  const sellerObj = offer?.seller;
-  const ldSeller = typeof sellerObj?.name === 'string' ? sellerObj.name : null;
-  const ldTitle = typeof product?.name === 'string' ? product.name : null;
-  s.title = cleanTitle(ldTitle ?? metaContent(html, 'og:title'));
+  s.title = cleanTitle(str(product?.name) ?? metaContent(html, 'og:title'));
 
   const px = htmlPrices(html);
   s.price = num(offer?.price) ?? num(metaContent(html, 'product:price:amount')) ?? px.current;
@@ -810,7 +859,7 @@ function scrapeFromHtml(html: string): Scraped {
 
   const sellerHtml = html.match(/Vendido por[\s\S]{0,200}?>([^<>]{2,60})</i);
   const htmlSeller = sellerHtml ? decodeEntities(sellerHtml[1]).trim() : '';
-  s.sellerName = ldSeller ?? (htmlSeller !== '' ? htmlSeller : null);
+  s.sellerName = str(offer?.seller?.name) ?? (htmlSeller !== '' ? htmlSeller : null);
 
   applyTextMarkers(s, visibleText(html));
 
@@ -848,17 +897,6 @@ function scrapeFromMarkdown(md: string): Scraped {
   applyTextMarkers(s, visibleText(md));
   s.photos = extractPhotos(imageUrlsIn(md));
   return s;
-}
-
-function dedupePhotos(list: Photo[]): Photo[] {
-  const seen = new Set<string>();
-  const out: Photo[] = [];
-  for (const p of list) {
-    if (seen.has(p.photoId)) continue;
-    seen.add(p.photoId);
-    out.push(p);
-  }
-  return out;
 }
 
 function mergeScraped(base: Scraped, extra: Scraped): Scraped {
@@ -901,8 +939,8 @@ async function loadBundle(
   bearer: string | null,
 ): Promise<Bundle> {
   const itemFirst = itemIdIn ? await fetchItem(itemIdIn, bearer) : null;
-  const catalogRaw = itemFirst?.catalog_product_id;
-  const productId = productIdIn ?? (typeof catalogRaw === 'string' ? catalogRaw : null);
+  const catalogRaw: unknown = itemFirst?.catalog_product_id;
+  const productId = productIdIn ?? str(catalogRaw);
 
   let product: AnyObj | null = null;
   let winner: AnyObj | null = null;
@@ -918,14 +956,11 @@ async function loadBundle(
     competitorsRaw = listOf(offers.data);
   }
 
-  const winnerIdRaw = winner?.item_id;
-  const cheapestIdRaw = [...competitorsRaw].sort(priceAsc)[0]?.item_id;
+  const winnerId: unknown = winner?.item_id;
+  const cheapest = [...competitorsRaw].sort(priceAsc)[0];
+  const cheapestId: unknown = cheapest?.item_id;
   const fallbackId =
-    typeof winnerIdRaw === 'string'
-      ? winnerIdRaw
-      : typeof cheapestIdRaw === 'string'
-        ? cheapestIdRaw
-        : null;
+    typeof winnerId === 'string' ? winnerId : typeof cheapestId === 'string' ? cheapestId : null;
   const resolvedItemId = itemIdIn ?? fallbackId;
   const item = itemIdIn ? itemFirst : resolvedItemId ? await fetchItem(resolvedItemId, bearer) : null;
 
@@ -959,16 +994,16 @@ function buildDossier(
   pageUrl: string | null,
   baseNotes: string[],
 ): Dossier {
-  const product: AnyObj | null = b.product;
-  const item: AnyObj | null = b.item;
-  const winner: AnyObj | null = b.winner;
+  const product = b.product;
+  const item = b.item;
+  const winner = b.winner;
   const sh: AnyObj = item?.shipping ?? winner?.shipping ?? {};
   const notes: string[] = [...baseNotes];
 
   const hasApi = item !== null || product !== null;
   const origin = hasApi ? (pub ? 'API Oficial + Página pública' : 'API Oficial') : 'Página pública';
 
-  // Fotos: somente imagens reais de produto (D_NQ_NP_ + padrão _MMYYYY), convertidas para -O.webp.
+  // Fotos: somente imagens reais de produto, convertidas para -O.webp.
   const productPics: unknown = product?.pictures;
   const itemPics: unknown = item?.pictures;
   const apiPictures: AnyObj[] =
@@ -980,7 +1015,7 @@ function buildDossier(
   const photos = dedupePhotos([...extractPhotos(urlsOf(apiPictures)), ...(pub ? pub.photos : [])]);
   const first = earliestPhoto(photos);
 
-  // Preço: prioriza o anúncio analisado; o buy box vence só se o anúncio não tiver preço.
+  // Preço: anúncio analisado primeiro; buy box só se o anúncio não tiver preço.
   const itemPrice = num(item?.price);
   const winnerPrice = num(winner?.price);
   const price = itemPrice ?? winnerPrice ?? (pub ? pub.price : null);
@@ -1002,7 +1037,7 @@ function buildDossier(
   } else if (pub && pub.soldMarker) {
     soldValue = pub.soldMin;
     soldLabel = pub.soldMarker;
-    soldSource = 'Marcador público da página';
+    soldSource = MARKER_SOURCE;
     notes.push(`O marcador "${pub.soldMarker}" é um piso mínimo, não o total exato de vendas.`);
   } else {
     soldValue = null;
@@ -1014,16 +1049,14 @@ function buildDossier(
   const ratingAverage = num(reviewsObj?.rating_average) ?? (pub ? pub.rating : null);
   const ratingCount = num(reviewsObj?.paging?.total) ?? (pub ? pub.reviewsCount : null);
 
-  const logisticRaw = sh.logistic_type;
-  const logisticType = typeof logisticRaw === 'string' ? logisticRaw : null;
+  const logisticType = str(sh.logistic_type);
   const fulfillment = logisticType === 'fulfillment';
   const freeShipping = sh.free_shipping === true;
 
-  const createdRaw = item?.date_created;
-  const createdAt = typeof createdRaw === 'string' ? createdRaw : null;
+  const createdAt = str(item?.date_created);
   const createdSource = createdAt ? 'API Oficial (anúncio)' : 'Oculto no anúncio';
   const daysOnAir = daysSince(createdAt);
-  if (!createdAt && typeof product?.date_created === 'string') {
+  if (!createdAt && str(product?.date_created)) {
     notes.push('A data do catálogo está disponível, mas a data de criação deste anúncio está oculta.');
   }
 
@@ -1036,20 +1069,10 @@ function buildDossier(
     notes.push('Idade da conta, cidade e medalha do vendedor exigem a API de usuários; exibindo apenas o nome da página.');
   }
 
-  const productName = product?.name;
-  const itemTitle = item?.title;
-  const title: string =
-    typeof productName === 'string'
-      ? productName
-      : typeof itemTitle === 'string'
-        ? itemTitle
-        : (pub?.title ?? 'Sem título');
-
-  const permalinkRaw = item?.permalink;
-  const permalink = typeof permalinkRaw === 'string' ? permalinkRaw : pageUrl;
-
-  const curRaw = item?.currency_id ?? winner?.currency_id;
-  const currency = typeof curRaw === 'string' ? curRaw : 'BRL';
+  const title =
+    str(product?.name) ?? str(item?.title) ?? (pub && pub.title) ?? 'Sem título';
+  const permalink = str(item?.permalink) ?? pageUrl;
+  const currency = str(item?.currency_id) ?? str(winner?.currency_id) ?? 'BRL';
 
   if (!item) {
     notes.push('O anúncio individual não retornou dados pela API; alguns campos vêm do catálogo ou da página pública.');
@@ -1125,30 +1148,6 @@ function buildDossier(
  * ANÁLISE: palavra-chave, código MLB e link
  * ============================================================================= */
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array<R>(items.length);
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      out[index] = await fn(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
-  return out;
-}
-
-async function keywordResults(
-  q: string,
-  bearer: string | null,
-): Promise<{ products: ProductSummary[]; note: string | null }> {
-  const found = await searchCatalog(q, bearer);
-  const fromProducts = await mapLimit(found.productIds, 4, (pid) => summaryFromProduct(pid, bearer));
-  const fromItems = await mapLimit(found.itemIds, 4, (iid) => summaryFromItem(iid, bearer));
-  const products = [...fromProducts, ...fromItems].filter((p): p is ProductSummary => p !== null);
-  return { products, note: found.note };
-}
-
 async function analyzeUrl(url: string, bearer: string | null): Promise<Analysis> {
   const notes: string[] = [];
   const page = await fetchPage(url);
@@ -1203,18 +1202,12 @@ async function analyzeInput(input: string, bearer: string | null): Promise<Analy
 
   return analyzeUrl(ref.url, bearer);
 }
+
 /* =============================================================================
  * OAUTH 2.0: authorization_code e refresh_token
  * O client_secret fica somente no servidor. Os tokens do usuário vão ao navegador
  * (localStorage) e voltam nas requisições pelo cabeçalho x-ml-user-token.
  * ============================================================================= */
-
-type OAuthBody = {
-  action?: unknown;
-  code?: unknown;
-  redirectUri?: unknown;
-  refreshToken?: unknown;
-};
 
 function assertRedirectUri(value: string): void {
   let parsed: URL;
@@ -1232,10 +1225,10 @@ function toTokenPayload(data: AnyObj) {
   const expiresIn = num(data.expires_in) ?? 21600;
   return {
     accessToken: String(data.access_token),
-    refreshToken: typeof data.refresh_token === 'string' ? data.refresh_token : null,
+    refreshToken: str(data.refresh_token),
     expiresAt: Date.now() + expiresIn * 1000,
     userId: num(data.user_id),
-    scope: typeof data.scope === 'string' ? data.scope : null,
+    scope: str(data.scope),
   };
 }
 
@@ -1290,9 +1283,6 @@ async function handleOAuth(req: NextRequest): Promise<NextResponse> {
  * Exige ANTHROPIC_API_KEY. Sem ela, retorna erro claro em vez de um palpite.
  * ============================================================================= */
 
-const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-
 const PHOTO_PROMPT = [
   'Você identifica produtos para pesquisa no Mercado Livre Brasil.',
   'Olhe a imagem e descreva o produto principal como uma busca curta em português (de 2 a 6 palavras), incluindo marca e modelo somente se estiverem visíveis ou escritos na imagem.',
@@ -1302,10 +1292,8 @@ const PHOTO_PROMPT = [
   '{"query": "...", "confidence": "alta | média | baixa", "reason": "frase curta explicando o que foi visto"}',
 ].join('\n');
 
-type Identified = { query: string; confidence: string; reason: string };
-
 function isUploadedFile(v: FormDataEntryValue | null): v is File {
-  return typeof v === 'object' && v !== null && typeof (v as Blob).arrayBuffer === 'function';
+  return v !== null && typeof v !== 'string';
 }
 
 async function identifyPhoto(file: File): Promise<Identified> {
@@ -1335,7 +1323,7 @@ async function identifyPhoto(file: File): Promise<Identified> {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_VISION_MODEL || 'claude-haiku-5-5',
+      model: VISION_MODEL,
       max_tokens: 300,
       messages: [
         {
@@ -1355,8 +1343,8 @@ async function identifyPhoto(file: File): Promise<Identified> {
 
   const body = (await res.json().catch(() => ({}))) as AnyObj;
   if (!res.ok) {
-    const detail = body.error?.message ?? 'HTTP ' + res.status;
-    throw new HttpError(502, 'Falha na identificação da imagem: ' + detail);
+    const detail = body.error?.message ?? `HTTP ${res.status}`;
+    throw new HttpError(502, `Falha na identificação da imagem: ${detail}`);
   }
 
   const blocks: AnyObj[] = Array.isArray(body.content) ? body.content : [];
@@ -1428,16 +1416,16 @@ async function systemStatus(): Promise<AnyObj> {
     secretConfigured: CLIENT_SECRET !== '',
     appTokenActive: app !== null,
     photoSearchConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
-    visionModel: process.env.ANTHROPIC_VISION_MODEL || 'claude-haiku-5-5',
+    visionModel: VISION_MODEL,
   };
 }
 
 /* =============================================================================
  * HANDLERS HTTP
- * GET  /api/ml?q=...                  busca por palavra-chave, código MLB ou link
- * GET  /api/ml?action=status          diagnóstico das configurações
+ * GET  /api/ml?q=...                   busca por palavra-chave, código MLB ou link
+ * GET  /api/ml?action=status           diagnóstico das configurações
  * POST /api/ml (multipart, campo image) identifica o produto na foto e pesquisa
- * POST /api/ml (JSON)                 OAuth: { action: "exchange" | "refresh", ... }
+ * POST /api/ml (JSON)                  OAuth: { action: "exchange" | "refresh", ... }
  * ============================================================================= */
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
