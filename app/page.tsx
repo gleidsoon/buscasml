@@ -11,35 +11,39 @@ import {
   LayoutGrid,
   List,
   Clock,
-  TrendingUp,
   Calculator,
   X,
   Store,
   RefreshCw,
-  KeyRound,
+  ShieldCheck,
+  Code2,
+  Users,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 
-export default function BuscasMLModernPlatform() {
+export default function BuscasMLOfficialPlatform() {
   const [activeView, setActiveView] = useState<'explorador' | 'calculadora'>('explorador');
   const [displayMode, setDisplayMode] = useState<'grid' | 'table'>('grid');
 
-  const [searchInput, setSearchInput] = useState('Coroa tiara de strass para noiva debutante');
+  const [searchInput, setSearchInput] = useState('Coroa tiara strass noiva');
   const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState('');
+  const [apiInfo, setApiInfo] = useState<{
+    endpoint?: string;
+    query_used?: string;
+    client_id?: string;
+    message?: string;
+    error?: string;
+  }>({});
+
   const [products, setProducts] = useState<any[]>([]);
-  const [featuredProduct, setFeaturedProduct] = useState<any>(null);
-  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string>('');
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<string>('');
+  const [rawJsonModalProduct, setRawJsonModalProduct] = useState<any>(null);
 
-  const [userAccessToken, setUserAccessToken] = useState<string | null>(null);
-  const [showOauthModal, setShowOauthModal] = useState(false);
-
+  // Busca por Foto
   const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
-  const [detectedPhotoTerm, setDetectedPhotoTerm] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [maxAgeDays, setMaxAgeDays] = useState<number>(9999);
-  const [logisticFilter, setLogisticFilter] = useState<'all' | 'full' | 'free'>('all');
-  const [sortBy, setSortBy] = useState<'revenue' | 'sales' | 'newest' | 'price'>('revenue');
 
   // Simulador de Margem
   const [calcTitle, setCalcTitle] = useState('Produto Selecionado');
@@ -50,62 +54,53 @@ export default function BuscasMLModernPlatform() {
   const [shippingCost, setShippingCost] = useState<number>(18.9);
   const [adType, setAdType] = useState<'classico' | 'premium'>('premium');
 
-  useEffect(() => {
-    const savedToken = localStorage.getItem('buscasml_oauth_token');
-    if (savedToken) setUserAccessToken(savedToken);
-
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (code) {
-      const redirectUri = window.location.origin;
-      fetch(
-        `/api/ml?action=exchange_code&code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`
-      )
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.ok && data.access_token) {
-            localStorage.setItem('buscasml_oauth_token', data.access_token);
-            setUserAccessToken(data.access_token);
-            window.history.replaceState({}, '', window.location.pathname);
-          }
-        });
-    }
-  }, []);
-
-  const handleUnifiedSearch = async (e?: React.FormEvent, overrideQuery?: string) => {
+  const executeOfficialSearch = async (e?: React.FormEvent, customInput?: string) => {
     if (e) e.preventDefault();
-    const raw = (overrideQuery ?? searchInput).trim();
-    if (!raw) return;
+    const q = (customInput ?? searchInput).trim();
+    if (!q) return;
 
     setLoading(true);
-    setStatusText('Extraindo fotos reais HD, preços, data de criação e dados do vendedor...');
+    setApiInfo({});
 
     try {
-      const tokenParam = userAccessToken ? `&user_token=${encodeURIComponent(userAccessToken)}` : '';
-      const res = await fetch(`/api/ml?action=spy&input=${encodeURIComponent(raw)}${tokenParam}`);
+      const res = await fetch(`/api/ml?q=${encodeURIComponent(q)}`);
       const data = await res.json();
 
-      if (data?.product) {
-        setFeaturedProduct(data.product);
-        setSelectedPhotoUrl(data.product.thumbnail || data.product.pictures?.[0] || '');
+      if (!res.ok || data.ok === false) {
+        setApiInfo({ error: data.error || 'Erro ao consultar a API Oficial do Mercado Livre.' });
+        setProducts([]);
+        setSelectedProduct(null);
+      } else {
+        setApiInfo({
+          endpoint: data.executed_endpoint,
+          query_used: data.query_used,
+          client_id: data.authenticated_client_id,
+          message: data.message,
+        });
+
+        const list = Array.isArray(data.items) ? data.items : [];
+        setProducts(list);
+
+        if (list.length > 0) {
+          setSelectedProduct(list[0]);
+          setSelectedPhoto(list[0].thumbnail || list[0].pictures?.[0] || '');
+        } else {
+          setSelectedProduct(null);
+        }
       }
-      if (Array.isArray(data?.items) && data.items.length > 0) {
-        setProducts(data.items);
-      }
+    } catch (err: any) {
+      setApiInfo({ error: `Falha de rede: ${err?.message || 'Verifique sua conexão'}` });
     } finally {
       setLoading(false);
-      setStatusText('');
     }
   };
 
-  const handleImageFile = async (file: File) => {
+  const handlePhotoUpload = async (file: File) => {
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result as string;
       setUploadedPreview(base64);
       setLoading(true);
-      setStatusText('Analisando a imagem para identificar o produto no Mercado Livre...');
-
       try {
         const res = await fetch('/api/ml', {
           method: 'POST',
@@ -113,52 +108,21 @@ export default function BuscasMLModernPlatform() {
           body: JSON.stringify({ imageBase64: base64, filename: file.name }),
         });
         const data = await res.json();
-        const keyword = data.keyword || 'Coroa Tiara Noiva Strass';
-        setDetectedPhotoTerm(keyword);
-        setSearchInput(keyword);
-        await handleUnifiedSearch(undefined, keyword);
+        const term = data.keyword || 'Coroa Noiva';
+        setSearchInput(term);
+        await executeOfficialSearch(undefined, term);
       } finally {
         setLoading(false);
-        setStatusText('');
       }
     };
     reader.readAsDataURL(file);
   };
 
   useEffect(() => {
-    const handlePaste = (evt: ClipboardEvent) => {
-      const items = evt.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const file = items[i].getAsFile();
-          if (file) handleImageFile(file);
-          break;
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
+    executeOfficialSearch(undefined, 'Coroa tiara strass noiva');
   }, []);
 
-  useEffect(() => {
-    handleUnifiedSearch(undefined, 'Coroa tiara de strass para noiva debutante');
-  }, []);
-
-  const filteredProducts = products
-    .filter((item) => {
-      if (maxAgeDays < 9999 && item.days_old && item.days_old > maxAgeDays) return false;
-      if (logisticFilter === 'full' && !String(item.logistic_type).toLowerCase().includes('full')) return false;
-      if (logisticFilter === 'free' && !item.free_shipping) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'revenue') return (b.revenue_30d || 0) - (a.revenue_30d || 0);
-      if (sortBy === 'sales') return (b.sold_quantity || 0) - (a.sold_quantity || 0);
-      if (sortBy === 'newest') return (a.days_old || 999) - (b.days_old || 999);
-      return (a.price || 0) - (b.price || 0);
-    });
-
+  // Cálculos do Simulador de Lucro
   const mlRate = adType === 'classico' ? 12 : 17;
   const fixedFee = salePrice > 0 && salePrice < 79 ? 6.25 : 0;
   const effectiveShip = salePrice >= 79 ? shippingCost : 0;
@@ -170,18 +134,18 @@ export default function BuscasMLModernPlatform() {
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100">
       {/* BARRA SUPERIOR */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/90 border-b border-slate-800/80">
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/90 border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-300 via-yellow-400 to-amber-500 flex items-center justify-center text-black font-black text-xl">
+            <div className="w-10 h-10 rounded-xl bg-yellow-400 flex items-center justify-center text-black font-black text-xl">
               B
             </div>
             <div>
-              <span className="text-lg font-extrabold tracking-tight text-white">
+              <span className="text-lg font-extrabold text-white">
                 Buscas<span className="text-yellow-400">ML</span>
               </span>
-              <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-yellow-400/15 text-yellow-300 border border-yellow-400/30">
-                Pro Radar
+              <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                100% API Oficial ML (Zero Chute)
               </span>
             </div>
           </div>
@@ -193,7 +157,7 @@ export default function BuscasMLModernPlatform() {
                 activeView === 'explorador' ? 'bg-yellow-400 text-black' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Search size={15} /> Busca & Raio-X de Produtos
+              <Search size={15} /> Busca & Raio-X Oficial
             </button>
             <button
               onClick={() => setActiveView('calculadora')}
@@ -205,45 +169,37 @@ export default function BuscasMLModernPlatform() {
             </button>
           </div>
 
-          <button
-            onClick={() => setShowOauthModal(true)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
-              userAccessToken
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-yellow-400'
-            }`}
-          >
-            <KeyRound size={14} />
-            {userAccessToken ? 'OAuth ML Ativo ✓' : 'Conectar OAuth ML'}
-          </button>
+          <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 font-mono">
+            <ShieldCheck size={15} className="text-emerald-400" />
+            App ID: {apiInfo.client_id || '8353552938244269'}
+          </div>
         </div>
       </header>
 
-      {/* MODAL OAUTH */}
-      {showOauthModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-slate-700 rounded-3xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-extrabold text-white">Conectar OAuth Oficial do Mercado Livre</h3>
-              <button onClick={() => setShowOauthModal(false)} className="text-slate-400 hover:text-white">
+      {/* MODAL DE AUDITORIA: EXIBE O JSON PURO RETORNADO PELA API DO MERCADO LIVRE */}
+      {rawJsonModalProduct && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-3xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <Code2 size={18} className="text-yellow-400" />
+                  Prova Real: JSON Oficial Retornado pelo Servidor do Mercado Livre
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Dados brutos entregues pelas rotas /products/{rawJsonModalProduct.product_id}, /items e /users
+                </p>
+              </div>
+              <button
+                onClick={() => setRawJsonModalProduct(null)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+              >
                 <X size={18} />
               </button>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Adicione a URL abaixo nas <strong>URIs de redirect</strong> do seu aplicativo no painel do Mercado Livre e
-              clique em Autorizar:
-            </p>
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs text-yellow-400 select-all">
-              {typeof window !== 'undefined' ? window.location.origin : 'https://buscasml.vercel.app'}
-            </div>
-            <a
-              href={`https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=8353552938244269&redirect_uri=${encodeURIComponent(
-                typeof window !== 'undefined' ? window.location.origin : ''
-              )}`}
-              className="block w-full py-3 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs text-center"
-            >
-              Autorizar com Minha Conta do Mercado Livre →
-            </a>
+            <pre className="flex-1 overflow-auto p-4 rounded-2xl bg-[#070b14] border border-slate-800 text-[11px] text-emerald-300 font-mono">
+              {JSON.stringify(rawJsonModalProduct.raw_api_proof, null, 2)}
+            </pre>
           </div>
         </div>
       )}
@@ -251,25 +207,25 @@ export default function BuscasMLModernPlatform() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeView === 'explorador' && (
           <div className="space-y-8">
-            {/* BARRA DE PESQUISA */}
-            <div className="rounded-3xl bg-gradient-to-b from-[#111827] to-[#0c1220] border border-slate-800/90 p-6 sm:p-8 shadow-2xl">
+            {/* BARRA DE BUSCA UNIFICADA */}
+            <div className="rounded-3xl bg-gradient-to-b from-[#111827] to-[#0c1220] border border-slate-800 p-6 sm:p-8 shadow-2xl">
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-                Pesquisa Inteligente de Produtos e Concorrentes
+                Busca Oficial de Produtos, Preços e Vendedores
               </h1>
               <p className="text-slate-400 text-sm mt-1 mb-6">
-                Digite uma <strong>palavra-chave</strong>, cole <strong>qualquer link do Mercado Livre</strong> (incluindo{' '}
-                <code>/up/MLBU...</code>, <code>/p/MLB...</code> ou <code>meli.la</code>) ou envie uma{' '}
-                <strong>foto / print (`Ctrl+V`)</strong>.
+                Conectado diretamente às rotas oficiais <code>/products/search</code>,{' '}
+                <code>/products/&#123;id&#125;/items</code> e <code>/users/&#123;seller_id&#125;</code> usando suas
+                credenciais. Zero dados inventados.
               </p>
 
-              <form onSubmit={handleUnifiedSearch} className="flex flex-col sm:flex-row gap-3">
+              <form onSubmit={executeOfficialSearch} className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
                   <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Cole o link do anúncio ou digite o nome do produto..."
+                    placeholder="Digite o nome do produto ou cole qualquer link do Mercado Livre..."
                     className="w-full pl-12 pr-4 py-4 rounded-2xl bg-[#070b14] border border-slate-700 text-white text-sm sm:text-base focus:outline-none focus:border-yellow-400"
                   />
                 </div>
@@ -289,7 +245,7 @@ export default function BuscasMLModernPlatform() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleImageFile(file);
+                    if (file) handlePhotoUpload(file);
                   }}
                 />
 
@@ -299,103 +255,118 @@ export default function BuscasMLModernPlatform() {
                   className="px-8 py-4 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shrink-0"
                 >
                   {loading ? <RefreshCw size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                  {loading ? 'Analisando...' : 'Analisar Agora'}
+                  {loading ? 'Consultando API...' : 'Consultar API ML'}
                 </button>
               </form>
 
-              {uploadedPreview && (
-                <div className="mt-4 p-3 rounded-2xl bg-slate-900 border border-yellow-400/30 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img src={uploadedPreview} alt="" className="w-12 h-12 rounded-xl object-cover bg-white p-0.5" />
-                    <div className="text-xs">
-                      <span className="text-yellow-400 font-bold uppercase block">Busca por Foto Ativa</span>
-                      <span>Produto identificado: <strong>{detectedPhotoTerm || searchInput}</strong></span>
-                    </div>
-                  </div>
-                  <button onClick={() => setUploadedPreview(null)} className="text-slate-400 hover:text-white">
-                    <X size={16} />
-                  </button>
-                </div>
-              )}
-
+              {/* Atalhos Rápidos */}
               <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400">Testar agora:</span>
+                <span className="text-slate-400">Testar na API agora:</span>
                 {[
-                  'Coroa tiara de strass para noiva debutante',
-                  'Pote para tempero hermético',
+                  'Coroa tiara strass noiva',
                   'Creatina Growth 250g',
+                  'Pote hermético tempero',
                   'Jogo 6 taças diamante',
                   'Cadeira gamer reclinável',
-                ].map((sample) => (
+                  'Parafusadeira Vonder',
+                ].map((term) => (
                   <button
-                    key={sample}
+                    key={term}
                     onClick={() => {
-                      setSearchInput(sample);
-                      handleUnifiedSearch(undefined, sample);
+                      setSearchInput(term);
+                      executeOfficialSearch(undefined, term);
                     }}
                     className="px-3 py-1.5 rounded-xl bg-[#070b14] hover:bg-slate-800 border border-slate-800 text-slate-300 transition"
                   >
-                    {sample}
+                    {term}
                   </button>
                 ))}
               </div>
 
-              {loading && statusText && (
-                <div className="mt-5 p-4 rounded-2xl bg-yellow-400/10 border border-yellow-400/30 text-yellow-300 text-xs sm:text-sm font-medium flex items-center gap-3">
-                  <RefreshCw size={18} className="animate-spin shrink-0" />
-                  {statusText}
+              {/* Barra de Transparência da Rota Executada */}
+              {apiInfo.endpoint && (
+                <div className="mt-4 p-3 rounded-xl bg-[#070b14] border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+                  <span className="truncate">
+                    <strong className="text-emerald-400">● 200 OK:</strong> {apiInfo.endpoint}
+                  </span>
+                  <span className="text-yellow-400">Termo processado: &quot;{apiInfo.query_used}&quot;</span>
+                </div>
+              )}
+
+              {apiInfo.error && (
+                <div className="mt-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiInfo.error}
+                </div>
+              )}
+
+              {apiInfo.message && products.length === 0 && (
+                <div className="mt-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+                  {apiInfo.message}
                 </div>
               )}
             </div>
 
-            {/* DOSSIÊ RAIO-X COMPLETO DO PRODUTO EM DESTAQUE */}
-            {featuredProduct && (
+            {/* =================================================================
+                DOSSIÊ RAIO-X OFICIAL DO PRODUTO SELECIONADO
+            ================================================================= */}
+            {selectedProduct && (
               <div className="rounded-3xl bg-[#111827] border-2 border-yellow-400/60 p-6 sm:p-8 shadow-2xl space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <span className="px-3 py-1 rounded-full bg-yellow-400 text-black font-extrabold text-xs uppercase">
-                      Dossiê Raio-X Completo
+                      Raio-X Oficial da API
                     </span>
                     <span className="px-3 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono text-xs">
-                      {featuredProduct.id}
+                      Catálogo: {selectedProduct.product_id}
                     </span>
-                    <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
-                      Fonte: {featuredProduct.date_source}
-                    </span>
+                    {selectedProduct.item_id && (
+                      <span className="px-3 py-1 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono text-xs">
+                        Anúncio Vencedor: {selectedProduct.item_id}
+                      </span>
+                    )}
                   </div>
 
-                  <button
-                    onClick={() => setFeaturedProduct(null)}
-                    className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl"
-                  >
-                    <X size={15} /> Ocultar Destaque
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setRawJsonModalProduct(selectedProduct)}
+                      className="flex items-center gap-1.5 text-xs bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 px-3.5 py-2 rounded-xl font-bold transition"
+                    >
+                      <Code2 size={15} /> Ver JSON Puro da API
+                    </button>
+                    <button
+                      onClick={() => setSelectedProduct(null)}
+                      className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  {/* Galeria de Fotos Reais */}
+                  {/* Galeria de Fotos Reais da API */}
                   <div className="lg:col-span-4 flex flex-col justify-between bg-[#0b101d] border border-slate-800 rounded-2xl p-5">
                     <div>
                       <div className="w-full h-72 rounded-xl bg-white p-4 flex items-center justify-center overflow-hidden">
-                        {selectedPhotoUrl || featuredProduct.thumbnail ? (
+                        {selectedPhoto || selectedProduct.thumbnail ? (
                           <img
-                            src={selectedPhotoUrl || featuredProduct.thumbnail}
-                            alt={featuredProduct.title}
+                            src={selectedPhoto || selectedProduct.thumbnail}
+                            alt={selectedProduct.title}
                             className="max-h-full max-w-full object-contain"
                           />
                         ) : (
-                          <span className="text-slate-400 text-xs">Carregando imagem...</span>
+                          <span className="text-slate-400 text-xs">Sem imagem na API</span>
                         )}
                       </div>
 
-                      {featuredProduct.pictures?.length > 1 && (
+                      {selectedProduct.pictures?.length > 1 && (
                         <div className="flex gap-2 overflow-x-auto pt-3 pb-1">
-                          {featuredProduct.pictures.map((pic: string, i: number) => (
+                          {selectedProduct.pictures.map((pic: string, i: number) => (
                             <button
                               key={i}
-                              onClick={() => setSelectedPhotoUrl(pic)}
+                              onClick={() => setSelectedPhoto(pic)}
                               className={`w-14 h-14 rounded-lg bg-white p-1 border-2 shrink-0 ${
-                                (selectedPhotoUrl || featuredProduct.thumbnail) === pic
+                                (selectedPhoto || selectedProduct.thumbnail) === pic
                                   ? 'border-yellow-400'
                                   : 'border-transparent opacity-60 hover:opacity-100'
                               }`}
@@ -409,211 +380,249 @@ export default function BuscasMLModernPlatform() {
 
                     <div className="pt-4 mt-4 border-t border-slate-800 flex items-center justify-between gap-2">
                       <a
-                        href={featuredProduct.permalink}
+                        href={selectedProduct.permalink}
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs font-bold text-yellow-400 hover:underline flex items-center gap-1.5"
                       >
-                        Abrir Anúncio no ML <ExternalLink size={14} />
+                        Abrir Página no ML <ExternalLink size={14} />
                       </a>
-                      <button
-                        onClick={() => {
-                          setCalcTitle(featuredProduct.title);
-                          setSalePrice(Number(featuredProduct.price || 89.9));
-                          setSupplierCost(Number(((featuredProduct.price || 89.9) * 0.4).toFixed(2)));
-                          setActiveView('calculadora');
-                        }}
-                        className="text-xs bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-3.5 py-2 rounded-xl"
-                      >
-                        Simular Margem →
-                      </button>
+                      {selectedProduct.price && (
+                        <button
+                          onClick={() => {
+                            setCalcTitle(selectedProduct.title);
+                            setSalePrice(Number(selectedProduct.price));
+                            setSupplierCost(Number((selectedProduct.price * 0.45).toFixed(2)));
+                            setActiveView('calculadora');
+                          }}
+                          className="text-xs bg-emerald-500 hover:bg-emerald-400 text-black font-bold px-3.5 py-2 rounded-xl"
+                        >
+                          Simular Margem →
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Métricas do Produto e do Vendedor */}
+                  {/* Dados Reais do Produto e do Vendedor */}
                   <div className="lg:col-span-8 space-y-5">
                     <div>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-1">
                         <span>
-                          Marca: <strong className="text-white">{featuredProduct.brand}</strong>
+                          Marca Oficial:{' '}
+                          <strong className="text-white">{selectedProduct.brand || 'Não informada'}</strong>
                         </span>
+                        {selectedProduct.model && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              Modelo: <strong className="text-white">{selectedProduct.model}</strong>
+                            </span>
+                          </>
+                        )}
                         <span>•</span>
                         <span>
-                          Modalidade: <strong className="text-purple-300">{featuredProduct.ad_type}</strong>
-                        </span>
-                        <span>•</span>
-                        <span className="text-yellow-400 font-bold">
-                          ★ {featuredProduct.rating} ({featuredProduct.reviews_count} opiniões)
+                          Vendedores no Catálogo:{' '}
+                          <strong className="text-yellow-400">{selectedProduct.active_sellers_count}</strong>
                         </span>
                       </div>
                       <h2 className="text-xl sm:text-2xl font-extrabold text-white leading-snug">
-                        {featuredProduct.title}
+                        {selectedProduct.title}
                       </h2>
                     </div>
 
+                    {/* Preço Real do Vencedor + Faixa de Preço dos Concorrentes */}
                     <div className="p-5 rounded-2xl bg-[#0b101d] border border-slate-800 flex flex-wrap items-center justify-between gap-6">
                       <div>
-                        {featuredProduct.original_price > featuredProduct.price && (
-                          <span className="text-xs text-slate-400 line-through block">
-                            De: R$ {Number(featuredProduct.original_price).toFixed(2)}
-                          </span>
-                        )}
-                        <div className="flex items-center gap-3">
-                          <span className="text-3xl sm:text-4xl font-black text-yellow-400">
-                            R$ {Number(featuredProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                          {featuredProduct.discount_percent > 0 && (
-                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-xs">
-                              -{featuredProduct.discount_percent}% OFF
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-[11px] text-slate-400 uppercase block">
+                          Preço Atual (Buy Box / 1ª Oferta da API)
+                        </span>
+                        <span className="text-3xl sm:text-4xl font-black text-yellow-400">
+                          {selectedProduct.price !== null
+                            ? `R$ ${Number(selectedProduct.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                            : 'Sem ofertas ativas no catálogo'}
+                        </span>
                       </div>
 
-                      <div className="flex gap-6">
-                        <div>
-                          <span className="text-[11px] text-slate-400 uppercase block">Receita 30 dias Est.</span>
-                          <span className="text-xl font-black text-emerald-400">
-                            R$ {Number(featuredProduct.revenue_30d).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                          </span>
+                      {selectedProduct.min_price !== null && (
+                        <div className="flex gap-6">
+                          <div>
+                            <span className="text-[11px] text-slate-400 uppercase block">Menor Preço na API</span>
+                            <span className="text-lg font-extrabold text-emerald-400">
+                              R$ {Number(selectedProduct.min_price).toFixed(2)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-slate-400 uppercase block">Maior Preço na API</span>
+                            <span className="text-lg font-extrabold text-blue-400">
+                              R$ {Number(selectedProduct.max_price).toFixed(2)}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[11px] text-slate-400 uppercase block">Faturamento Acumulado</span>
-                          <span className="text-xl font-black text-blue-400">
-                            R$ {Number(featuredProduct.total_revenue).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                          </span>
-                        </div>
-                      </div>
+                      )}
                     </div>
 
+                    {/* 4 Blocos de Datas e Logística Reais */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
-                          <Calendar size={13} className="text-yellow-400" /> Criação do Anúncio
+                          <Calendar size={13} className="text-yellow-400" /> Data Criação (API)
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          {new Date(featuredProduct.date_created).toLocaleDateString('pt-BR')}
+                          {selectedProduct.date_created
+                            ? new Date(selectedProduct.date_created).toLocaleDateString('pt-BR')
+                            : 'Não informada'}
                         </p>
                         <span className="text-[11px] text-emerald-400">
-                          Há {featuredProduct.days_old} dias no ar
+                          {selectedProduct.days_old
+                            ? `Há ${selectedProduct.days_old} dias no ML`
+                            : selectedProduct.first_photo_month_year
+                            ? `Foto de ${selectedProduct.first_photo_month_year}`
+                            : 'Campo date_created'}
                         </span>
                       </div>
 
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
-                          <TrendingUp size={13} className="text-blue-400" /> Volume de Vendas
+                          <Clock size={13} className="text-blue-400" /> Upload da 1ª Foto
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          +{Number(featuredProduct.sold_quantity).toLocaleString('pt-BR')} vendidos
+                          {selectedProduct.first_photo_month_year || 'Padrão CDN'}
                         </p>
-                        <span className="text-[11px] text-blue-300">
-                          Média: {featuredProduct.daily_sales} vendas/dia
-                        </span>
+                        <span className="text-[11px] text-slate-400">Assinatura arquivo ML</span>
                       </div>
 
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
-                          <Truck size={13} className="text-emerald-400" /> Logística e Envio
+                          <Truck size={13} className="text-emerald-400" /> Logística Real
                         </span>
-                        <p className="text-base font-extrabold text-white mt-1">
-                          {featuredProduct.logistic_type}
+                        <p className="text-base font-extrabold text-white mt-1 capitalize">
+                          {selectedProduct.logistic_type === 'fulfillment'
+                            ? 'Fulfillment (Full)'
+                            : selectedProduct.logistic_type || 'Não informada'}
                         </p>
                         <span className="text-[11px] text-slate-400">
-                          {featuredProduct.free_shipping ? '✓ Frete Grátis' : 'Frete pago pelo cliente'}
+                          {selectedProduct.free_shipping === true
+                            ? '✓ Frete Grátis'
+                            : selectedProduct.free_shipping === false
+                            ? 'Frete pago pelo comprador'
+                            : 'Conforme região'}
                         </span>
                       </div>
 
                       <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800">
                         <span className="text-[11px] text-slate-400 uppercase flex items-center gap-1">
-                          <Clock size={13} className="text-purple-400" /> Estoque Estimado
+                          <Users size={13} className="text-purple-400" /> Modalidade Anúncio
                         </span>
                         <p className="text-base font-extrabold text-white mt-1">
-                          ~{featuredProduct.available_quantity} unidades
+                          {selectedProduct.listing_type_id === 'gold_pro'
+                            ? 'Premium (gold_pro)'
+                            : selectedProduct.listing_type_id === 'gold_special'
+                            ? 'Clássico (gold_special)'
+                            : selectedProduct.listing_type_id || 'Catálogo ML'}
                         </p>
-                        <span className="text-[11px] text-slate-400">Anúncio Ativo</span>
-                      </div>
-                    </div>
-
-                    {/* RAIO-X COMPLETO DO VENDEDOR */}
-                    <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-slate-900 to-purple-500/10 border border-blue-500/30">
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
-                          <Store size={15} /> Dados do Vendedor / Conta Concorrente
-                        </h3>
-                        <span className="px-2.5 py-0.5 rounded-full bg-yellow-400/20 text-yellow-300 text-[11px] font-bold">
-                          ★ {featuredProduct.seller_medal}
+                        <span className="text-[11px] text-slate-400">
+                          {selectedProduct.warranty || 'Garantia padrão'}
                         </span>
                       </div>
+                    </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
-                        <div>
-                          <span className="text-slate-400 block">Nome do Vendedor / Loja</span>
-                          <p className="text-sm font-extrabold text-white mt-0.5">
-                            {featuredProduct.seller_name}
-                          </p>
+                    {/* DADOS REAIS DO VENDEDOR (VINDOS DE GET /users/{seller_id}) */}
+                    {selectedProduct.seller ? (
+                      <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-slate-900 to-purple-500/10 border border-blue-500/30">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
+                            <Store size={15} /> Vendedor Oficial Retornado por GET /users/{selectedProduct.seller.id}
+                          </h3>
+                          {selectedProduct.seller.power_seller_status && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-yellow-400/20 text-yellow-300 text-[11px] font-bold uppercase">
+                              ★ MercadoLíder {selectedProduct.seller.power_seller_status}
+                            </span>
+                          )}
                         </div>
 
-                        <div>
-                          <span className="text-slate-400 block">Conta Criada em (Idade Loja)</span>
-                          <p className="text-sm font-extrabold text-emerald-400 mt-0.5">
-                            {new Date(featuredProduct.seller_registration_date).toLocaleDateString('pt-BR')} (
-                            {featuredProduct.seller_account_years} anos)
-                          </p>
-                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                          <div>
+                            <span className="text-slate-400 block">Nickname (Nome da Loja)</span>
+                            <p className="text-sm font-extrabold text-white mt-0.5">
+                              {selectedProduct.seller.nickname || `ID ${selectedProduct.seller.id}`}
+                            </p>
+                          </div>
 
-                        <div>
-                          <span className="text-slate-400 block">Localização</span>
-                          <p className="text-sm font-bold text-slate-200 mt-0.5">
-                            {featuredProduct.seller_city} - {featuredProduct.seller_state}
-                          </p>
-                        </div>
+                          <div>
+                            <span className="text-slate-400 block">Data de Criação da Conta ML</span>
+                            <p className="text-sm font-extrabold text-emerald-400 mt-0.5">
+                              {selectedProduct.seller.registration_date
+                                ? `${new Date(selectedProduct.seller.registration_date).toLocaleDateString('pt-BR')} (${selectedProduct.seller.account_age_years} anos)`
+                                : 'Não informada pela API'}
+                            </p>
+                          </div>
 
-                        <div>
-                          <span className="text-slate-400 block">Vendas Concluídas da Loja</span>
-                          <p className="text-sm font-bold text-yellow-400 mt-0.5">
-                            +{Number(featuredProduct.seller_completed_sales).toLocaleString('pt-BR')} vendas
-                          </p>
+                          <div>
+                            <span className="text-slate-400 block">Localização Registrada</span>
+                            <p className="text-sm font-bold text-slate-200 mt-0.5">
+                              {selectedProduct.seller.city || selectedProduct.seller.state
+                                ? `${selectedProduct.seller.city || ''} ${selectedProduct.seller.state || ''}`
+                                : 'Brasil'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-400 block">Vendas Concluídas da Loja</span>
+                            <p className="text-sm font-extrabold text-yellow-400 mt-0.5">
+                              {selectedProduct.seller.completed_transactions !== null
+                                ? `${Number(selectedProduct.seller.completed_transactions).toLocaleString('pt-BR')} vendas`
+                                : 'Não informada'}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
+                        Este produto de catálogo não possui um vendedor ativo listado em `/products/{selectedProduct.product_id}/items` no momento.
+                      </div>
+                    )}
+
+                    {/* TABELA DE VENDEDORES DISPUTANDO ESTE MESMO PRODUTO (/products/{id}/items) */}
+                    {selectedProduct.competing_offers?.length > 1 && (
+                      <div className="p-4 rounded-2xl bg-[#0b101d] border border-slate-800 space-y-2">
+                        <p className="text-xs font-bold text-slate-300">
+                          Outras ofertas reais ativas para este produto (`GET /products/{selectedProduct.product_id}/items`):
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {selectedProduct.competing_offers.slice(0, 6).map((off: any, i: number) => (
+                            <div
+                              key={i}
+                              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between"
+                            >
+                              <div>
+                                <span className="font-mono text-blue-400">{off.item_id}</span>
+                                <span className="block text-[10px] text-slate-400">
+                                  Seller ID: {off.seller_id} • {off.logistic_type}
+                                </span>
+                              </div>
+                              <span className="font-extrabold text-yellow-400">
+                                R$ {Number(off.price).toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* LISTA DE PRODUTOS E CONCORRENTES COM FOTOS REAIS */}
-            {filteredProducts.length > 0 && (
+            {/* =================================================================
+                LISTA DE TODOS OS PRODUTOS RETORNADOS POR /products/search
+            ================================================================= */}
+            {products.length > 0 && (
               <>
-                <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="font-bold text-white">
-                      {filteredProducts.length} anúncios encontrados com fotos verificadas
-                    </span>
-                    <select
-                      value={maxAgeDays}
-                      onChange={(e) => setMaxAgeDays(Number(e.target.value))}
-                      className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
-                    >
-                      <option value={9999}>Todas as idades</option>
-                      <option value={30}>Criados há até 30 dias</option>
-                      <option value={60}>Criados há até 60 dias</option>
-                      <option value={90}>Criados há até 90 dias</option>
-                      <option value={180}>Criados há até 180 dias</option>
-                    </select>
-
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as any)}
-                      className="bg-[#070b14] border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold"
-                    >
-                      <option value="revenue">Maior Receita (30d)</option>
-                      <option value="sales">Mais Vendidos</option>
-                      <option value="newest">Mais Recentes (Menor Idade)</option>
-                      <option value="price">Menor Preço</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1 bg-[#070b14] p-1 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-extrabold text-white">
+                    Produtos Encontrados na API Oficial ({products.length} resultados)
+                  </h3>
+                  <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-xl border border-slate-800 text-xs">
                     <button
                       onClick={() => setDisplayMode('grid')}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold ${
@@ -628,28 +637,32 @@ export default function BuscasMLModernPlatform() {
                         displayMode === 'table' ? 'bg-yellow-400 text-black' : 'text-slate-400'
                       }`}
                     >
-                      <List size={14} /> Tabela com Fotos
+                      <List size={14} /> Tabela
                     </button>
                   </div>
                 </div>
 
                 {displayMode === 'grid' ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredProducts.map((item, idx) => (
+                    {products.map((item) => (
                       <div
-                        key={`${item.id}-${idx}`}
+                        key={item.product_id}
                         className="group bg-[#111827] border border-slate-800 hover:border-yellow-400/60 rounded-3xl overflow-hidden flex flex-col justify-between transition"
                       >
                         <div>
                           <div className="relative h-56 bg-white p-4 flex items-center justify-center overflow-hidden">
-                            <img
-                              src={item.thumbnail}
-                              alt={item.title}
-                              className="max-h-full max-w-full object-contain group-hover:scale-105 transition"
-                            />
+                            {item.thumbnail ? (
+                              <img
+                                src={item.thumbnail}
+                                alt={item.title}
+                                className="max-h-full max-w-full object-contain group-hover:scale-105 transition"
+                              />
+                            ) : (
+                              <span className="text-slate-400 text-xs">Sem imagem na API</span>
+                            )}
                             <div className="absolute top-3 left-3 flex gap-1.5">
                               <span className="px-2.5 py-1 rounded-lg bg-slate-950/85 text-yellow-400 font-mono font-bold text-[11px]">
-                                {item.id}
+                                {item.product_id}
                               </span>
                             </div>
                           </div>
@@ -657,8 +670,8 @@ export default function BuscasMLModernPlatform() {
                           <div className="p-5 space-y-3">
                             <h3
                               onClick={() => {
-                                setFeaturedProduct(item);
-                                setSelectedPhotoUrl(item.thumbnail);
+                                setSelectedProduct(item);
+                                setSelectedPhoto(item.thumbnail || '');
                                 window.scrollTo({ top: 0, behavior: 'smooth' });
                               }}
                               className="font-bold text-sm text-white group-hover:text-yellow-400 line-clamp-2 cursor-pointer"
@@ -668,38 +681,53 @@ export default function BuscasMLModernPlatform() {
 
                             <div className="flex items-baseline justify-between">
                               <span className="text-2xl font-black text-yellow-400">
-                                R$ {Number(item.price || 0).toFixed(2)}
+                                {item.price !== null ? `R$ ${Number(item.price).toFixed(2)}` : 'Sob consulta'}
                               </span>
-                              <div className="text-right">
-                                <span className="text-[10px] text-slate-400 uppercase block">Receita 30d</span>
-                                <span className="text-sm font-extrabold text-emerald-400">
-                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR')}
-                                </span>
-                              </div>
+                              <span className="text-xs text-slate-400">
+                                {item.active_sellers_count} oferta(s) na API
+                              </span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-[#090d16] border border-slate-800 text-xs">
                               <div>
-                                <span className="text-[10px] text-slate-400 block">Criação do Anúncio</span>
+                                <span className="text-[10px] text-slate-400 block">Data Criação (API)</span>
                                 <strong className="text-white">
-                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                  {item.date_created
+                                    ? new Date(item.date_created).toLocaleDateString('pt-BR')
+                                    : item.first_photo_month_year || 'N/D'}
                                 </strong>
-                                <span className="block text-[10px] text-emerald-400">Há {item.days_old} dias</span>
+                                {item.days_old && (
+                                  <span className="block text-[10px] text-emerald-400">Há {item.days_old} dias</span>
+                                )}
                               </div>
                               <div>
-                                <span className="text-[10px] text-slate-400 block">Vendas Capturadas</span>
-                                <strong className="text-blue-400">+{item.sold_quantity} un.</strong>
-                                <span className="block text-[10px] text-slate-400">{item.daily_sales}/dia</span>
+                                <span className="text-[10px] text-slate-400 block">Marca Oficial</span>
+                                <strong className="text-blue-400 truncate block">
+                                  {item.brand || 'Não informada'}
+                                </strong>
+                                <span className="block text-[10px] text-slate-400">
+                                  {item.logistic_type === 'fulfillment' ? '⚡ Full' : 'Envio ML'}
+                                </span>
                               </div>
                             </div>
 
                             <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs">
-                              <span className="text-[10px] text-slate-400 block">Vendedor:</span>
-                              <p className="font-bold text-slate-100 truncate">{item.seller_name}</p>
-                              <p className="text-[11px] text-emerald-400 mt-0.5">
-                                Conta criada: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')} (
-                                {item.seller_account_years} anos)
+                              <span className="text-[10px] text-slate-400 block">Vendedor Vencedor (API /users):</span>
+                              <p className="font-bold text-slate-100 truncate">
+                                {item.seller?.nickname || 'Sem vendedor listado'}
                               </p>
+                              {item.seller?.registration_date && (
+                                <p className="text-[11px] text-emerald-400 mt-0.5">
+                                  Conta criada: {new Date(item.seller.registration_date).toLocaleDateString('pt-BR')} (
+                                  {item.seller.account_age_years} anos)
+                                </p>
+                              )}
+                              {item.seller?.completed_transactions !== null &&
+                                item.seller?.completed_transactions !== undefined && (
+                                  <p className="text-[11px] text-yellow-400">
+                                    Vendas da loja: {Number(item.seller.completed_transactions).toLocaleString('pt-BR')}
+                                  </p>
+                                )}
                             </div>
                           </div>
                         </div>
@@ -707,22 +735,21 @@ export default function BuscasMLModernPlatform() {
                         <div className="px-5 pb-5 pt-2 flex gap-2">
                           <button
                             onClick={() => {
-                              setFeaturedProduct(item);
-                              setSelectedPhotoUrl(item.thumbnail);
+                              setSelectedProduct(item);
+                              setSelectedPhoto(item.thumbnail || '');
                               window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
                             className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs"
                           >
-                            Ver no Dossiê Raio-X
+                            Abrir Raio-X
                           </button>
-                          <a
-                            href={item.permalink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 flex items-center justify-center"
+                          <button
+                            onClick={() => setRawJsonModalProduct(item)}
+                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold text-xs"
+                            title="Ver JSON Oficial da API"
                           >
-                            <ExternalLink size={15} />
-                          </a>
+                            JSON
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -733,60 +760,77 @@ export default function BuscasMLModernPlatform() {
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-[#0b101d]">
-                            <th className="p-4">Foto & Produto</th>
-                            <th className="p-4">Preço</th>
-                            <th className="p-4">Vendas & Receita</th>
-                            <th className="p-4">Criação do Anúncio</th>
-                            <th className="p-4">Vendedor & Conta</th>
-                            <th className="p-4">Ação</th>
+                            <th className="p-4">Foto & Produto (API)</th>
+                            <th className="p-4">Preço Real</th>
+                            <th className="p-4">Criação (date_created)</th>
+                            <th className="p-4">Vendedor (/users)</th>
+                            <th className="p-4">Vendas da Loja</th>
+                            <th className="p-4">Auditoria</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/70">
-                          {filteredProducts.map((item, idx) => (
-                            <tr key={`${item.id}-${idx}`} className="hover:bg-slate-800/40">
+                          {products.map((item) => (
+                            <tr key={item.product_id} className="hover:bg-slate-800/40">
                               <td className="p-4 flex items-center gap-3.5 max-w-md">
-                                <img
-                                  src={item.thumbnail}
-                                  alt={item.title}
-                                  className="w-16 h-16 rounded-xl bg-white object-contain p-1 shrink-0"
-                                />
+                                {item.thumbnail && (
+                                  <img
+                                    src={item.thumbnail}
+                                    alt={item.title}
+                                    className="w-14 h-14 rounded-xl bg-white object-contain p-1 shrink-0"
+                                  />
+                                )}
                                 <div>
                                   <p className="font-bold text-white line-clamp-2">{item.title}</p>
-                                  <span className="font-mono text-[11px] text-blue-400">{item.id}</span>
+                                  <span className="font-mono text-[11px] text-blue-400">
+                                    {item.product_id} {item.item_id ? `• ${item.item_id}` : ''}
+                                  </span>
                                 </div>
                               </td>
                               <td className="p-4 font-black text-yellow-400 text-sm whitespace-nowrap">
-                                R$ {Number(item.price || 0).toFixed(2)}
-                              </td>
-                              <td className="p-4 whitespace-nowrap">
-                                <span className="font-bold text-white block">+{item.sold_quantity} un.</span>
-                                <span className="text-[11px] text-emerald-400 font-bold">
-                                  R$ {Number(item.revenue_30d).toLocaleString('pt-BR')}/mês
-                                </span>
+                                {item.price !== null ? `R$ ${Number(item.price).toFixed(2)}` : 'N/D'}
                               </td>
                               <td className="p-4 whitespace-nowrap">
                                 <span className="font-bold text-white block">
-                                  {new Date(item.date_created).toLocaleDateString('pt-BR')}
+                                  {item.date_created
+                                    ? new Date(item.date_created).toLocaleDateString('pt-BR')
+                                    : 'N/D'}
                                 </span>
-                                <span className="text-[11px] text-emerald-400">Há {item.days_old} dias</span>
+                                {item.days_old && (
+                                  <span className="text-[11px] text-emerald-400">Há {item.days_old} dias</span>
+                                )}
                               </td>
                               <td className="p-4 whitespace-nowrap">
-                                <span className="font-bold text-white block">{item.seller_name}</span>
-                                <span className="text-[11px] text-slate-400">
-                                  Conta: {new Date(item.seller_registration_date).toLocaleDateString('pt-BR')} (
-                                  {item.seller_account_years}a)
+                                <span className="font-bold text-white block">
+                                  {item.seller?.nickname || 'N/D'}
                                 </span>
+                                {item.seller?.registration_date && (
+                                  <span className="text-[11px] text-slate-400">
+                                    Conta criada: {new Date(item.seller.registration_date).toLocaleDateString('pt-BR')}
+                                  </span>
+                                )}
                               </td>
-                              <td className="p-4 whitespace-nowrap">
+                              <td className="p-4 font-bold text-emerald-400 whitespace-nowrap">
+                                {item.seller?.completed_transactions !== null &&
+                                item.seller?.completed_transactions !== undefined
+                                  ? `${Number(item.seller.completed_transactions).toLocaleString('pt-BR')} vendas`
+                                  : 'N/D'}
+                              </td>
+                              <td className="p-4 whitespace-nowrap space-x-2">
                                 <button
                                   onClick={() => {
-                                    setFeaturedProduct(item);
-                                    setSelectedPhotoUrl(item.thumbnail);
+                                    setSelectedProduct(item);
+                                    setSelectedPhoto(item.thumbnail || '');
                                     window.scrollTo({ top: 0, behavior: 'smooth' });
                                   }}
-                                  className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-3 py-2 rounded-xl"
+                                  className="bg-yellow-400 text-black font-bold px-3 py-1.5 rounded-xl"
                                 >
                                   Raio-X
+                                </button>
+                                <button
+                                  onClick={() => setRawJsonModalProduct(item)}
+                                  className="bg-slate-800 text-emerald-400 font-bold px-3 py-1.5 rounded-xl"
+                                >
+                                  JSON
                                 </button>
                               </td>
                             </tr>
