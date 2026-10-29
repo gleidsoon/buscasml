@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: #070b14;
+  --card: #111827;
+  --accent-yellow: #facc15;
+  --accent-green: #10b981;
+  --accent-blue: #3b82f6;
+}
+
+html {
+  background-color: var(--background);
+}
+
+body {
+  background-color: var(--background);
+  color: #f1f5f9;
+}
+
+::selection {
+  background: rgba(250, 204, 21, 0.35);
+}
