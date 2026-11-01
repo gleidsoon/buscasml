@@ -31,8 +31,8 @@ export const maxDuration = 60;
  * ============================================================================= */
 
 const ML_API = 'https://api.mercadolibre.com';
-const CLIENT_ID = process.env.ML_CLIENT_ID || '6668334499142604';
-const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || 'GfGlDe8sHgNhcBtJPqOMU3n7fisOiNb8';
+const CLIENT_ID = process.env.ML_CLIENT_ID || '8353552938244269';
+const CLIENT_SECRET = process.env.ML_CLIENT_SECRET || '1mDuwaABTfcuIFd93BKMlohHfUmsRggn';
 const USER_TOKEN_HEADER = 'x-ml-user-token';
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
