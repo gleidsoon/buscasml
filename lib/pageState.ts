@@ -17,6 +17,8 @@ export type PolyItem = {
   originalPrice: number | null;
   soldQuantity: number | null;
   soldText: string | null;
+  rating: number | null;
+  reviewsCount: number | null;
   permalink: string | null;
   image: string | null;
   isFull: boolean;
@@ -313,56 +315,361 @@ export function parseStockText(text: string | null): number | null {
   return m[2] ? n * 1000 : n;
 }
 
+const SOLD_REGEX = /\+?([\d.,]+)\s*(mil|m)?\s*vendidos?/i;
+
 function soldTextIn(text: string | null): string | null {
   if (!text) return null;
-  return text.match(/\+?\s*\d[\d.,]*\s*(?:mil\s*)?vendid[oa]s?/i)?.[0].trim() ?? null;
+  const m = text.match(SOLD_REGEX);
+  return m ? m[0].trim() : null;
 }
 
-/* ---------- polycards (busca e listas) ---------- */
+function soldCountFromMatch(text: string | null): number | null {
+  if (!text) return null;
+  const m = text.match(SOLD_REGEX);
+  if (!m) return null;
+  const raw = m[1].trim();
+  const mult = m[2] ? 1000 : 1;
+  const normalized =
+    mult > 1
+      ? raw.replace(/\./g, '').replace(',', '.')
+      : raw.replace(/\./g, '').replace(/,.*$/, '');
+  const n = Number(normalized);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * mult) : null;
+}
+
+/** Normaliza qualquer URL ou ID de imagem do ML para https://http2.mlstatic.com/D_NQ_NP_${id}-O.webp */
+export function normalizeMlImageUrl(rawUrlOrId: string | null | undefined): string | null {
+  const s = str(rawUrlOrId);
+  if (!s || /^data:/i.test(s)) return null;
+  // Caso seja apenas o ID (ex.: "963201-MLB78912345_092024" ou "615190-MLA99501602606_112025")
+  if (/^(?:2X_)?\d+-[A-Z]{2,4}\d+_\d{6}$/i.test(s)) {
+    const cleanId = s.replace(/^2X_/i, '');
+    return `https://http2.mlstatic.com/D_NQ_NP_${cleanId}-O.webp`;
+  }
+  const idMatch = s.match(/D_NQ_NP_(?:2X_)?(\d+-[A-Z]{2,4}\d+_\d{4,6})/i);
+  if (idMatch) {
+    return `https://http2.mlstatic.com/D_NQ_NP_${idMatch[1]}-O.webp`;
+  }
+  if (/mlstatic\.com/i.test(s)) {
+    return s
+      .replace(/^http:\/\//i, 'https://')
+      .split('?')[0]
+      .replace(/-[A-Za-z]{1,2}\.(?:webp|jpe?g|png)$/i, '-O.webp');
+  }
+  return null;
+}
+
+/** Extrai o código MLB se estiver presente na URL da imagem ou link. */
+function mlbFromImageOrUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const fromCatalog = url.match(/\/p\/(MLB\d{6,})/i);
+  if (fromCatalog) return fromCatalog[1].toUpperCase();
+  const fromLink = url.match(/MLB-?(\d{8,})/i);
+  if (fromLink) return `MLB${fromLink[1]}`;
+  return null;
+}
+
+/** Extrai foto de tags <img> lendo src, data-src e srcset (incluindo .poly-component__picture e .ui-search-result-image__element). */
+export function extractHtmlImage(block: string): string | null {
+  const imgTags = [...block.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
+  // Prioriza imagens com as classes de card da busca (.poly-component__picture e .ui-search-result-image__element)
+  const prioritized = [
+    ...imgTags.filter((tag) => /poly-component__picture|ui-search-result-image__element/i.test(tag)),
+    ...imgTags,
+  ];
+  for (const tag of prioritized) {
+    for (const attrName of ['data-src', 'src', 'srcset', 'data-srcset']) {
+      const m = tag.match(new RegExp(`\\b${attrName}=["']([^"']+)["']`, 'i'));
+      if (!m) continue;
+      const rawVal = decode(m[1].trim());
+      // Em srcset pode haver "https://... 1x, https://... 2x"
+      const parts = rawVal
+        .split(',')
+        .map((p) => p.trim().split(/\s+/)[0])
+        .filter(Boolean);
+      for (const candidate of parts.reverse()) {
+        if (/^data:|gif$|placeholder|blank/i.test(candidate)) continue;
+        const norm = normalizeMlImageUrl(candidate);
+        if (norm) return norm;
+      }
+    }
+  }
+  const anyMlStatic = block.match(/https?:\/\/http2\.mlstatic\.com\/D_NQ_NP_[^\s"'<>()\\]+/i);
+  return anyMlStatic ? normalizeMlImageUrl(anyMlStatic[0]) : null;
+}
+
+/** Converte fração + centavos de um bloco .andes-money-amount em número. */
+function parseAndesMoneyBlock(fragment: string): number | null {
+  const withoutStrike = fragment.replace(
+    /<(s|del)\b[^>]*>[\s\S]*?<\/\1>|<span[^>]*andes-money-amount--previous[\s\S]*?<\/span>/gi,
+    ' ',
+  );
+  // 1) .poly-price__current .andes-money-amount__fraction
+  // 2) .poly-component__price .andes-money-amount__fraction
+  // 3) .andes-money-amount__fraction
+  const scopePatterns = [
+    /class=["'][^"']*poly-price__current[^"']*["'][^>]*>([\s\S]{0,1200})/i,
+    /class=["'][^"']*poly-component__price[^"']*["'][^>]*>([\s\S]{0,1500})/i,
+  ];
+  for (const pat of scopePatterns) {
+    const sm = withoutStrike.match(pat);
+    if (sm) {
+      const v = extractFractionAndCents(sm[1]);
+      if (v !== null) return v;
+    }
+  }
+  return extractFractionAndCents(withoutStrike);
+}
+
+function extractFractionAndCents(scope: string): number | null {
+  const fracMatch = scope.match(/andes-money-amount__fraction[^>]*>\s*([\d.]+)\s*</i);
+  if (!fracMatch) return null;
+  const whole = Number(fracMatch[1].replace(/\./g, '').trim());
+  if (!Number.isFinite(whole) || whole <= 0) return null;
+  const afterFrac = scope.slice((fracMatch.index ?? 0) + fracMatch[0].length, (fracMatch.index ?? 0) + fracMatch[0].length + 350);
+  const centsMatch = afterFrac.match(/andes-money-amount__cents[^>]*>\s*(\d{1,2})\s*</i);
+  const cents = centsMatch ? Number(centsMatch[1].padEnd(2, '0')) / 100 : 0;
+  return Math.round((whole + cents) * 100) / 100;
+}
+
+function parseOriginalAndesPrice(fragment: string): number | null {
+  const prevMatch =
+    fragment.match(/<(?:s|del)\b[^>]*andes-money-amount[^>]*>([\s\S]{0,800}?)<\/(?:s|del)>/i) ??
+    fragment.match(/class=["'][^"']*andes-money-amount--previous[^"']*["'][^>]*>([\s\S]{0,800})/i);
+  if (!prevMatch) return null;
+  return extractFractionAndCents(prevMatch[1]);
+}
+
+/* ---------- polycards (busca e listas: JSON e HTML) ---------- */
 
 function polyFromResult(r: AnyObj): PolyItem | null {
   const poly = obj(r.polycard) ?? r;
   const meta = obj(poly.metadata) ?? {};
-  const id = normalizeMlb(meta.id ?? r.id);
-  if (!id) return null;
   const components: AnyObj[] = Array.isArray(poly.components) ? poly.components : [];
   const comp = (type: string): AnyObj | null => obj(components.find((c) => obj(c)?.type === type)) ?? null;
-  const title = str(comp('title')?.title?.text) ?? str(r.title);
-  const priceComp = obj(comp('price')?.price) ?? {};
-  const price = num(at(priceComp, 'current_price.value')) ?? num(r.price);
-  const originalPrice = num(at(priceComp, 'previous_price.value')) ?? num(r.original_price);
-  const tracks = obj(meta.tracks) ?? {};
-  const soldQuantity = num(tracks.sold_quantity) ?? num(r.sold_quantity);
-  const reviews = obj(comp('review_compacted')) ?? {};
-  const values: AnyObj[] = Array.isArray(at(reviews, 'review_compacted.values'))
-    ? (at(reviews, 'review_compacted.values') as AnyObj[])
-    : [];
-  const soldLabel =
-    str(obj(values.find((v) => obj(v)?.key === 'label2'))?.label?.text) ??
-    str(obj(values[3])?.label?.text) ??
-    null;
-  const pictures: AnyObj[] = Array.isArray(at(poly, 'pictures.pictures')) ? (at(poly, 'pictures.pictures') as AnyObj[]) : [];
-  const picId = str(pictures[0]?.id);
-  const url = str(meta.url);
+
+  // Foto: polycard.pictures.pictures[0].id ou componente pictures ou thumbnail
+  const pictures: AnyObj[] = Array.isArray(at(poly, 'pictures.pictures'))
+    ? (at(poly, 'pictures.pictures') as AnyObj[])
+    : Array.isArray(at(comp('pictures'), 'pictures.pictures'))
+      ? (at(comp('pictures'), 'pictures.pictures') as AnyObj[])
+      : Array.isArray(poly.pictures)
+        ? (poly.pictures as AnyObj[])
+        : [];
+  const picId = str(pictures[0]?.id) ?? str(at(poly, 'pictures.id'));
+  const picUrl = str(pictures[0]?.url) ?? str(pictures[0]?.secure_url) ?? str(r.thumbnail) ?? str(r.secure_thumbnail);
+  const image = picId
+    ? `https://http2.mlstatic.com/D_NQ_NP_${picId.replace(/^2X_/i, '')}-O.webp`
+    : normalizeMlImageUrl(picUrl);
+
+  const rawUrl = str(meta.url) ?? str(r.permalink);
+  const urlParams = str(meta.url_params) ?? '';
+  const fullUrl = rawUrl
+    ? `${rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`}${urlParams}`
+    : null;
+
+  const productId =
+    normalizeMlb(meta.product_id) ??
+    normalizeMlb(r.catalog_product_id) ??
+    (fullUrl?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ?? null);
+
+  const id =
+    normalizeMlb(meta.id ?? r.id ?? r.item_id) ??
+    mlbFromImageOrUrl(fullUrl) ??
+    mlbFromImageOrUrl(image) ??
+    productId;
+  if (!id) return null;
+
+  const title =
+    str(comp('title')?.title?.text) ??
+    str(at(poly, 'title.text')) ??
+    str(r.title) ??
+    str(r.name);
+
+  // Preço: polycard.components (type === "price" -> price.current_price.value)
+  const priceComp = obj(comp('price')?.price) ?? obj(poly.price) ?? {};
+  const price =
+    num(at(priceComp, 'current_price.value')) ??
+    num(at(priceComp, 'price.value')) ??
+    num(priceComp.value) ??
+    num(r.price) ??
+    num(at(r, 'buy_box_winner.price'));
+  const originalPrice =
+    num(at(priceComp, 'previous_price.value')) ??
+    num(at(priceComp, 'original_price.value')) ??
+    num(r.original_price);
+
+  // Vendas e Avaliações: polycard.components (review_compacted.values -> label2 ou "vendido") + tracks.sold_quantity
+  const tracks = obj(meta.tracks) ?? obj(at(poly, 'tracks')) ?? {};
+  const melidataTrack = obj(at(tracks, 'melidata_track.event_data')) ?? {};
+  const exactTrackSold =
+    num(tracks.sold_quantity) ??
+    num(melidataTrack.sold_quantity) ??
+    num(r.sold_quantity);
+
+  const reviewComp = obj(comp('review_compacted')?.review_compacted) ?? obj(comp('review_compacted')) ?? {};
+  const values: AnyObj[] = Array.isArray(reviewComp.values) ? (reviewComp.values as AnyObj[]) : [];
+
+  let soldLabel: string | null = null;
+  let rating: number | null = num(at(r, 'reviews.rating_average')) ?? num(reviewComp.rating);
+  let reviewsCount: number | null = num(at(r, 'reviews.total')) ?? num(reviewComp.total);
+
+  const label2 = str(obj(values.find((v) => obj(v)?.key === 'label2'))?.label?.text);
+  if (label2 && SOLD_REGEX.test(label2)) {
+    soldLabel = label2;
+  }
+  for (const val of values) {
+    const vObj = obj(val);
+    const txt = str(vObj?.label?.text) ?? str(vObj?.text);
+    if (!txt) continue;
+    if (!soldLabel && SOLD_REGEX.test(txt)) {
+      soldLabel = txt;
+    } else if (rating === null && /^\d[.,]\d$/.test(txt)) {
+      rating = Number(txt.replace(',', '.'));
+    } else if (reviewsCount === null && /^\(?\+?\d[\d.]*\s*(?:mil)?\)?$/i.test(txt)) {
+      const clean = txt.replace(/[()]/g, '').trim();
+      const isMil = /mil/i.test(clean);
+      const n = Number(clean.replace(/[^\d]/g, ''));
+      if (Number.isFinite(n) && n > 0) reviewsCount = isMil ? n * 1000 : n;
+    }
+  }
+
+  // Também varre outros componentes de texto/frases por "+X vendidos"
+  if (!soldLabel) {
+    const dumped = JSON.stringify(components);
+    soldLabel = soldTextIn(dumped);
+  }
+
+  const soldText = soldTextIn(soldLabel);
+  const soldQuantity = exactTrackSold ?? soldCountFromMatch(soldText);
+
   return {
     id,
     title,
     price,
     originalPrice,
     soldQuantity,
-    soldText: soldTextIn(soldLabel),
-    permalink: url ? (url.startsWith('http') ? url : `https://${url}`) : str(r.permalink),
-    image: picId ? `https://http2.mlstatic.com/D_NQ_NP_${picId}-O.webp` : str(r.thumbnail),
-    isFull: JSON.stringify(comp('shipping') ?? {}).toLowerCase().includes('full'),
-    isSponsored: components.some((c) => obj(c)?.type === 'ads_promotions'),
-    productId: normalizeMlb(meta.product_id),
+    soldText,
+    rating,
+    reviewsCount,
+    permalink: fullUrl,
+    image,
+    isFull: JSON.stringify(comp('shipping') ?? r.shipping ?? {}).toLowerCase().includes('full'),
+    isSponsored: components.some((c) => obj(c)?.type === 'ads_promotions') || Boolean(r.is_pad),
+    productId,
   };
 }
 
 export function readPolycards(state: AnyObj | null): PolyItem[] {
-  const results = state?.results;
-  if (!Array.isArray(results)) return [];
-  return results.map((r) => (obj(r) ? polyFromResult(r as AnyObj) : null)).filter((x): x is PolyItem => x !== null);
+  if (!state) return [];
+  const candidates: unknown[] = [
+    state.results,
+    at(state, 'search.results'),
+    at(state, 'pageState.initialState.results'),
+    findDeep(state, 'polycard', 15_000) ? state.results : null,
+  ];
+  for (const list of candidates) {
+    if (Array.isArray(list) && list.length > 0) {
+      const parsed = list
+        .map((r) => (obj(r) ? polyFromResult(r as AnyObj) : null))
+        .filter((x): x is PolyItem => x !== null);
+      if (parsed.length > 0) return parsed;
+    }
+  }
+  return [];
+}
+
+/** Extrai cards de busca diretamente do HTML (Polycard / ui-search-layout__item) como fallback ou complemento. */
+export function readHtmlPolycards(html: string): PolyItem[] {
+  if (!html) return [];
+  const blocks: string[] = [];
+  const liMatches = [
+    ...html.matchAll(
+      /<li\b[^>]*class=["'][^"']*ui-search-layout__item[^"']*["'][^>]*>([\s\S]{100,18000}?)<\/li>/gi,
+    ),
+  ];
+  if (liMatches.length > 0) {
+    for (const m of liMatches) blocks.push(m[1]);
+  } else {
+    const divMatches = [
+      ...html.matchAll(
+        /<div\b[^>]*class=["'][^"']*(?:poly-card|ui-search-result__wrapper)[^"']*["'][^>]*>([\s\S]{100,15000}?)(?=<div\b[^>]*class=["'][^"']*(?:poly-card|ui-search-result__wrapper)|<\/ol>|<\/section>)/gi,
+      ),
+    ];
+    for (const m of divMatches) blocks.push(m[1]);
+  }
+
+  const out: PolyItem[] = [];
+  const seen = new Set<string>();
+
+  for (const block of blocks) {
+    const hrefMatch =
+      block.match(/<a\b[^>]*class=["'][^"']*poly-component__title[^"']*["'][^>]*href=["']([^"']+)["']/i) ??
+      block.match(/<a\b[^>]*href=["'](https?:\/\/[^"']*mercadoli[vb]re[^"']+)["']/i);
+    const rawHref = hrefMatch ? decode(hrefMatch[1].trim()) : null;
+    const image = extractHtmlImage(block);
+
+    const productId =
+      rawHref?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ??
+      block.match(/data-product-id=["'](MLB\d+)["']/i)?.[1]?.toUpperCase() ??
+      null;
+
+    const itemId =
+      mlbFromImageOrUrl(rawHref) ??
+      normalizeMlb(block.match(/data-item-id=["'](MLB\d+)["']/i)?.[1]) ??
+      mlbFromImageOrUrl(image) ??
+      productId;
+    if (!itemId || seen.has(itemId)) continue;
+    seen.add(itemId);
+
+    const titleRaw =
+      textByClass(block, '.poly-component__title, .ui-search-item__title') ??
+      block.match(/<a\b[^>]*class=["'][^"']*poly-component__title[^"']*["'][^>]*>([\s\S]{1,300}?)<\/a>/i)?.[1] ??
+      block.match(/<img\b[^>]*alt=["']([^"']{5,220})["']/i)?.[1] ??
+      null;
+    const title = titleRaw ? textOf(titleRaw) : null;
+
+    const price = parseAndesMoneyBlock(block);
+    const originalPrice = parseOriginalAndesPrice(block);
+
+    // Vendas: .poly-reviews__total, .poly-phrase-label, .ui-search-item__group__element ou texto geral do card
+    const reviewZone =
+      textByClass(block, '.poly-reviews__total, .poly-phrase-label, .ui-search-item__group__element, .poly-component__reviews') ??
+      textOf(block);
+    const soldText = soldTextIn(reviewZone) ?? soldTextIn(textOf(block));
+    const soldQuantity = soldCountFromMatch(soldText);
+
+    const ratingTxt = textByClass(block, '.poly-reviews__rating, .ui-search-reviews__rating-number');
+    const rating = ratingTxt ? num(ratingTxt.replace(',', '.')) : null;
+
+    const totalTxt = textByClass(block, '.poly-reviews__total, .ui-search-reviews__amount');
+    let reviewsCount: number | null = null;
+    if (totalTxt && !SOLD_REGEX.test(totalTxt)) {
+      const rm = totalTxt.match(/(\d[\d.]*)/);
+      if (rm) reviewsCount = Number(rm[1].replace(/\./g, ''));
+    }
+
+    const isFull = /poly_full|aria-label=["'][^"']*full[^"']*["']|fulfillment/i.test(block);
+    const isSponsored = /patrocinado|poly-component__ads-promotions/i.test(block);
+
+    out.push({
+      id: itemId,
+      title,
+      price,
+      originalPrice,
+      soldQuantity,
+      soldText,
+      rating,
+      reviewsCount,
+      permalink: rawHref,
+      image,
+      isFull,
+      isSponsored,
+      productId,
+    });
+  }
+
+  return out;
 }
 
 /* ---------- montagem ---------- */
@@ -531,7 +838,8 @@ function applySelectors(s: PageSignals, html: string): void {
   }
 
   s.itemId ??= normalizeMlb(inputValue(html, 'item_id')) ?? normalizeMlb(inputValue(html, 'itemId'));
-  s.price ??= num(metaItemprop(html, 'price'));
+  s.price ??= num(metaItemprop(html, 'price')) ?? parseAndesMoneyBlock(html);
+  s.originalPrice ??= parseOriginalAndesPrice(html);
   s.rating ??= num(metaItemprop(html, 'ratingValue'));
   if (s.rating === null) {
     const r = textByClass(html, ML_SELECTORS.REVIEW_RATING);
@@ -576,6 +884,29 @@ function applySelectors(s: PageSignals, html: string): void {
   }
   if (/ui-pdp-table ui-pdp-s-table/.test(html) && s.pageType === 'unknown') s.pageType = 'catalog';
   s.isSupermarket ||= /supermarket_eligible|"is_supermarket"\s*:\s*true/i.test(html);
+
+  const htmlCards = readHtmlPolycards(html);
+  if (s.polycards.length === 0 && htmlCards.length > 0) {
+    s.polycards = htmlCards;
+  } else if (htmlCards.length > 0) {
+    const byId = new Map(htmlCards.map((c) => [c.id, c]));
+    s.polycards = s.polycards.map((p) => {
+      const h = byId.get(p.id) ?? (p.productId ? byId.get(p.productId) : undefined);
+      if (!h) return p;
+      return {
+        ...p,
+        title: p.title ?? h.title,
+        price: p.price ?? h.price,
+        originalPrice: p.originalPrice ?? h.originalPrice,
+        soldQuantity: p.soldQuantity ?? h.soldQuantity,
+        soldText: p.soldText ?? h.soldText,
+        rating: p.rating ?? h.rating,
+        reviewsCount: p.reviewsCount ?? h.reviewsCount,
+        image: p.image ?? h.image,
+        permalink: p.permalink ?? h.permalink,
+      };
+    });
+  }
 }
 
 /** Extrai todos os sinais disponíveis do HTML público de um anúncio, catálogo ou busca. */

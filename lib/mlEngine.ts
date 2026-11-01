@@ -218,16 +218,25 @@ export function estimateSales(input: SalesEstimateInput): SalesEstimateResult {
 
 export type Periods = { total: number; monthly: number; weekly: number; daily: number };
 
-/** Média de vendas por período. Anúncios com menos de 7/30 dias usam o total no período. */
+/** Média de vendas por período (função Bc da JoomPulse). Se dias for 0 ou ausente, usa janela de 30 dias. */
 export function salesVelocity(sold: number | null, days: number | null): Periods | null {
-  if (!finite(sold) || !finite(days) || days <= 0 || sold < 0) return null;
-  const daily = sold / days;
+  if (!finite(sold) || sold < 0) return null;
+  const d = finite(days) && days > 0 ? days : 30;
+  const daily = sold / d;
   return {
     total: sold,
-    monthly: days < 30 ? sold : daily * 30,
-    weekly: days < 7 ? sold : daily * 7,
+    monthly: d < 30 ? sold : daily * 30,
+    weekly: d < 7 ? sold : daily * 7,
     daily,
   };
+}
+
+/** Mapeia uma estimativa base ao maior patamar oficial de vendas do ML ("+100 vendidos", etc.). */
+export function tierMarkerFromBase(base: number): string {
+  const n = Math.max(1, Math.round(base));
+  if (n <= EXACT_PUBLIC_MAX) return `${n} vendidos`;
+  const floor = tierFloor(n) ?? SALES_TIERS[0];
+  return `+${floor.toLocaleString('pt-BR')} vendidos`;
 }
 
 export function revenueFromVelocity(price: number | null, v: Periods | null): Periods | null {

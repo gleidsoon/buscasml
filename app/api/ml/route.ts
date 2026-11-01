@@ -11,6 +11,7 @@ import {
   parseSoldText,
   revenueFromVelocity,
   salesVelocity,
+  tierMarkerFromBase,
   type AgeAlert,
   type CategoryFees,
   type Commission,
@@ -19,7 +20,7 @@ import {
   type Periods,
   type SalesEstimate,
 } from '@/lib/mlEngine';
-import { extractPageSignals, type PageSignals, type PolyItem } from '@/lib/pageState';
+import { extractPageSignals, normalizeMlImageUrl, type PageSignals, type PolyItem } from '@/lib/pageState';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,8 +43,8 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const VISION_MODEL = process.env.ANTHROPIC_VISION_MODEL || 'claude-haiku-5-5';
 
-/** Foto real de produto: exige D_NQ_NP_ e o padrão -MLB..._MMYYYY-X.ext. Banners promocionais não casam. */
-const PHOTO_RE = /D_NQ_NP_.*?-MLB\d+_(\d{2})(\d{4})-[A-Za-z]\.(?:webp|jpe?g|png)/i;
+/** Foto real de produto: aceita prefixos MLB/MLA/MLU/MLM/MLC/MCO (catálogo e anúncio), 2X_ e sufixos -O/-F/-OO. */
+const PHOTO_RE = /D_NQ_NP_(?:2X_)?\d+-[A-Z]{2,4}\d+_(\d{2})(\d{4})-[A-Za-z]{1,2}\.(?:webp|jpe?g|png)/i;
 
 const LISTING_LABEL: Record<string, string> = { gold_special: 'Clássico', gold_pro: 'Premium' };
 const MEDAL_LABEL: Record<string, string> = { platinum: 'Platinum', gold: 'Gold', silver: 'Líder' };
@@ -243,6 +244,9 @@ type ComposeInput = {
   productId: string | null;
   itemId: string | null;
   poly?: PolyItem | null;
+  offersCount?: number | null;
+  reviewsCount?: number | null;
+  questionsCount?: number | null;
 };
 
 /* =============================================================================
@@ -355,19 +359,27 @@ function attr(obj: AnyObj | null | undefined, id: string): string | null {
 
 function urlsOf(pictures: AnyObj[]): string[] {
   return pictures
-    .map((p) => (typeof p === 'string' ? p : p?.secure_url ?? p?.url))
+    .map((p) => {
+      if (typeof p === 'string') return p;
+      const u = str(p?.secure_url) ?? str(p?.url);
+      if (u) return u;
+      const pid = str(p?.id);
+      return pid ? `https://http2.mlstatic.com/D_NQ_NP_${pid.replace(/^2X_/i, '')}-O.webp` : null;
+    })
     .filter((u): u is string => typeof u === 'string');
 }
 
 /** Converte para a versão HD (-O.webp) e força https. */
 function toHD(url: string): string {
+  const norm = normalizeMlImageUrl(url);
+  if (norm) return norm;
   return url
     .replace(/^http:\/\//i, 'https://')
     .split('?')[0]
-    .replace(/-[A-Za-z]\.(?:webp|jpe?g|png)$/i, '-O.webp');
+    .replace(/-[A-Za-z]{1,2}\.(?:webp|jpe?g|png)$/i, '-O.webp');
 }
 
-/** Mantém apenas fotos reais de produto (D_NQ_NP_ + padrão _MMYYYY). */
+/** Mantém fotos reais de produto (D_NQ_NP_ + padrão _MMYYYY) com mês e ano para firstPhotoDate. */
 function extractPhotos(urls: string[]): Photo[] {
   const seen = new Set<string>();
   const out: Photo[] = [];
@@ -378,15 +390,66 @@ function extractPhotos(urls: string[]): Photo[] {
     const month = Number(m[1]);
     const year = Number(m[2]);
     if (month < 1 || month > 12 || year < 2005 || year > CURRENT_YEAR + 1) continue;
-    const file = (raw.split('?')[0].split('/').pop() ?? raw).replace(
-      /-[A-Za-z]\.(?:webp|jpe?g|png)$/i,
-      '',
-    );
+    const file = (raw.split('?')[0].split('/').pop() ?? raw)
+      .replace(/^D_NQ_NP_2X_/i, 'D_NQ_NP_')
+      .replace(/-[A-Za-z]{1,2}\.(?:webp|jpe?g|png)$/i, '');
     if (seen.has(file)) continue;
     seen.add(file);
     out.push({ url: toHD(raw), photoId: file, month, year });
   }
   return out;
+}
+
+/** Fallback para URLs de imagem do ML que não tenham sufixo _MMYYYY mas sejam fotos válidas da CDN mlstatic. */
+function fallbackPictureUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of urls) {
+    const hd = toHD(raw);
+    if (!hd || !/mlstatic\.com/i.test(hd)) continue;
+    if (seen.has(hd)) continue;
+    seen.add(hd);
+    out.push(hd);
+  }
+  return out;
+}
+
+/**
+ * Quando o ML oculta a faixa textual na busca/catálogo sem OAuth de usuário,
+ * deriva a faixa de vendas compatível com o Módulo 98069 a partir dos sinais públicos reais
+ * (ofertas ativas no catálogo, perguntas no anúncio, avaliações, histórico do vendedor e idade).
+ */
+function deriveFallbackSoldText(opts: {
+  offersCount?: number | null;
+  reviewsCount?: number | null;
+  questionsCount?: number | null;
+  seller?: SellerInfo | null;
+  daysOnAir?: number | null;
+  fulfillment?: boolean;
+}): string {
+  const offers = Math.max(0, opts.offersCount ?? 0);
+  const reviews = Math.max(0, opts.reviewsCount ?? 0);
+  const questions = Math.max(0, opts.questionsCount ?? 0);
+  const sellerSales = Math.max(0, opts.seller?.completedSales ?? 0);
+  const days = Math.max(15, opts.daysOnAir ?? 90);
+  const months = Math.max(0.5, days / 30.44);
+
+  let base = 0;
+  if (reviews > 0) base = Math.max(base, reviews * 15);
+  if (questions > 0) base = Math.max(base, questions * 10);
+  if (offers > 0) {
+    // Catálogos com múltiplos vendedores ativos têm giro proporcional às ofertas e idade
+    base = Math.max(base, Math.round(offers * 14 * Math.min(months, 12) * 0.35));
+  }
+  if (sellerSales > 0) {
+    const sellerFactor =
+      sellerSales >= 50_000 ? 120 : sellerSales >= 10_000 ? 65 : sellerSales >= 1_000 ? 30 : 12;
+    base = Math.max(base, Math.round(sellerFactor * Math.min(months, 8) * 0.4));
+  }
+  if (opts.fulfillment && base < 50) base = Math.max(base, 50);
+  if (base < 5) base = Math.max(5, Math.min(50, Math.round(months * 6)));
+
+  return tierMarkerFromBase(base);
 }
 
 function earliestPhoto(photos: Photo[]): Photo | null {
@@ -689,7 +752,10 @@ function toSeller(u: AnyObj | null, signals: PageSignals | null = null): SellerI
     state,
     medal: power ? MEDAL_LABEL[power.toLowerCase()] ?? power : 'Sem medalha',
     reputationLevel: str(rep.level_id) ?? signals?.reputationLevel ?? null,
-    completedSales: num(rep.transactions?.completed) ?? num(metrics.sales?.completed),
+    completedSales:
+      num(rep.transactions?.completed) ??
+      num(rep.transactions?.total) ??
+      num(metrics.sales?.completed),
     canceledSales: num(rep.transactions?.canceled),
     cancellationRate: num(metrics.cancellations?.rate),
     claimsRate: num(metrics.claims?.rate),
@@ -760,20 +826,41 @@ function composeSummary(c: ComposeInput): ProductSummary {
   const picList: unknown =
     Array.isArray(productPics) && productPics.length > 0 ? productPics : itemPics;
   const pictures: AnyObj[] = Array.isArray(picList) ? picList : [];
-  const photos = extractPhotos(urlsOf(pictures));
+  const rawPicUrls = urlsOf(pictures);
+  const photos = extractPhotos(rawPicUrls);
+  const fallbackImgs = fallbackPictureUrls(rawPicUrls);
   const first = earliestPhoto(photos);
-  const createdAt = str(item?.date_created) ?? str(item?.start_time) ?? str(p?.date_created);
+
+  const createdAt =
+    str(item?.date_created) ??
+    str(item?.start_time) ??
+    str(p?.date_created) ??
+    (first ? `${first.year}-${pad2(first.month)}-01T00:00:00.000Z` : null);
   const daysOnAir = daysSince(createdAt);
   const price = num(winner?.price) ?? num(item?.price) ?? poly?.price ?? null;
-  const originalPrice = num(item?.original_price) ?? poly?.originalPrice ?? null;
+  const originalPrice =
+    num(winner?.original_price) ?? num(item?.original_price) ?? poly?.originalPrice ?? null;
   const listingTypeId = str(item?.listing_type_id) ?? str(winner?.listing_type_id);
+  const fulfillment = sh.logistic_type === 'fulfillment' || Boolean(poly?.isFull);
+  const reviewsCount = c.reviewsCount ?? poly?.reviewsCount ?? null;
 
   const apiSold = num(item?.sold_quantity);
   const polyExact = poly?.soldQuantity ?? null;
-  const soldText = poly?.soldText ?? tierMarkerForCount(apiSold ?? polyExact);
+  const directSoldText = poly?.soldText ?? tierMarkerForCount(apiSold ?? polyExact);
+  const soldText =
+    directSoldText ??
+    deriveFallbackSoldText({
+      offersCount: c.offersCount,
+      reviewsCount,
+      questionsCount: c.questionsCount,
+      seller: c.seller,
+      daysOnAir,
+      fulfillment,
+    });
+
   const estResult = estimateSales({
     soldText,
-    reviewsCount: null,
+    reviewsCount,
     createdAt,
     listingTypeId,
   });
@@ -781,7 +868,7 @@ function composeSummary(c: ComposeInput): ProductSummary {
 
   let soldQuantity: number | null = null;
   let soldSource = 'Oculto no anúncio';
-  if (polyExact !== null && polyExact > 0) {
+  if (polyExact !== null && polyExact > 0 && (!poly?.soldText || polyExact !== countFromMarker(poly.soldText))) {
     soldQuantity = polyExact;
     soldSource = 'tracks.sold_quantity (exato)';
   } else if (apiSold !== null && apiSold > 0) {
@@ -789,20 +876,35 @@ function composeSummary(c: ComposeInput): ProductSummary {
     soldSource = 'API Oficial';
   } else if (salesEstimate) {
     soldQuantity = salesEstimate.final;
-    soldSource = 'Estimativa Módulo 98069';
+    soldSource = directSoldText ? 'Estimativa Módulo 98069' : 'Estimativa Módulo 98069 (catálogo)';
   }
 
   const velocity = salesVelocity(soldQuantity, daysOnAir);
   const revenue = revenueFromVelocity(price, velocity);
 
+  const resolvedProductId = c.productId ?? poly?.productId ?? null;
+  const resolvedItemId = c.itemId ?? poly?.id ?? null;
+  const defaultPermalink =
+    str(item?.permalink) ??
+    poly?.permalink ??
+    (resolvedProductId
+      ? `https://www.mercadolivre.com.br/p/${resolvedProductId}`
+      : resolvedItemId
+        ? `https://produto.mercadolivre.com.br/${resolvedItemId.replace(/^MLB/i, 'MLB-')}`
+        : null);
+
   return {
-    productId: c.productId ?? poly?.productId ?? null,
-    itemId: c.itemId ?? poly?.id ?? null,
-    categoryId: str(item?.category_id) ?? str(winner?.category_id) ?? str(p?.domain_id),
+    productId: resolvedProductId,
+    itemId: resolvedItemId,
+    categoryId:
+      str(item?.category_id) ??
+      str(winner?.category_id) ??
+      str(p?.domain_id)?.replace(/^MLB-/i, '') ??
+      null,
     title: str(p?.name) ?? str(item?.title) ?? poly?.title ?? 'Sem título',
     brand: attr(p, 'BRAND') ?? attr(item, 'BRAND'),
     model: attr(p, 'MODEL') ?? attr(item, 'MODEL'),
-    image: photos[0]?.url ?? poly?.image ?? null,
+    image: photos[0]?.url ?? fallbackImgs[0] ?? normalizeMlImageUrl(poly?.image) ?? null,
     price,
     originalPrice,
     soldQuantity,
@@ -814,7 +916,7 @@ function composeSummary(c: ComposeInput): ProductSummary {
     availableQuantity: num(item?.available_quantity) ?? num(winner?.available_quantity),
     listingType: listingLabel(listingTypeId),
     listingTypeId,
-    fulfillment: sh.logistic_type === 'fulfillment' || Boolean(poly?.isFull),
+    fulfillment,
     freeShipping: sh.free_shipping === true,
     isSupermarket: isSupermarketItem(item),
     isSponsored: Boolean(poly?.isSponsored),
@@ -824,7 +926,133 @@ function composeSummary(c: ComposeInput): ProductSummary {
     ageAlert: ageAlert(daysOnAir),
     firstPhotoDate: first ? `${pad2(first.month)}/${first.year}` : null,
     seller: c.seller,
-    permalink: str(item?.permalink) ?? poly?.permalink ?? null,
+    permalink: defaultPermalink,
+  };
+}
+
+/**
+ * Hidratação automática (Fallback): se algum card da busca vier sem preço, sem foto ou sem vendas/faturamento,
+ * busca a página individual do anúncio/catálogo e endpoints públicos em paralelo para garantir dados completos.
+ */
+async function hydrateProductSummary(
+  card: ProductSummary,
+  bearer: string | null,
+): Promise<ProductSummary> {
+  const needsPrice = card.price === null || card.price <= 0;
+  const needsImage = !card.image;
+  const needsSales = card.soldQuantity === null || card.revenue === null;
+  if (!needsPrice && !needsImage && !needsSales) return card;
+
+  let price = card.price;
+  let originalPrice = card.originalPrice;
+  let image = card.image;
+  let soldText = card.soldText;
+  let soldQuantity = card.soldQuantity;
+  let soldSource = card.soldSource;
+  let createdAt = card.createdAt;
+  let listingTypeId = card.listingTypeId;
+  let reviewsCount: number | null = null;
+  let offersCount: number | null = null;
+  let seller = card.seller;
+
+  // 1) Se tiver productId e faltar preço ou foto, consulta /products/{id} e /products/{id}/items
+  if (card.productId && (needsPrice || needsImage)) {
+    const [pr, its] = await Promise.all([
+      mlFetch(`/products/${card.productId}`, bearer),
+      mlFetch(`/products/${card.productId}/items`, bearer),
+    ]);
+    const prod = pr.ok && pr.data && typeof pr.data === 'object' ? (pr.data as AnyObj) : null;
+    const offers = listOf(its.data);
+    offersCount = num(its.data?.paging?.total) ?? offers.length;
+    const cheapest = [...offers].sort(priceAsc)[0];
+    const winner = (prod?.buy_box_winner as AnyObj | null) ?? cheapest ?? null;
+    if (price === null) price = num(winner?.price) ?? num(cheapest?.price);
+    if (originalPrice === null) originalPrice = num(winner?.original_price) ?? num(cheapest?.original_price);
+    if (!listingTypeId) listingTypeId = str(winner?.listing_type_id) ?? str(cheapest?.listing_type_id);
+    if (!createdAt) createdAt = str(prod?.date_created);
+    if (!image && prod) {
+      const picUrls = urlsOf(Array.isArray(prod.pictures) ? prod.pictures : []);
+      image = extractPhotos(picUrls)[0]?.url ?? fallbackPictureUrls(picUrls)[0] ?? null;
+    }
+    if (!seller && num(winner?.seller_id)) {
+      const sData = await sellerData(num(winner?.seller_id), bearer);
+      seller = sData.info;
+    }
+  }
+
+  // 2) Se ainda faltar preço, foto ou vendas, faz o fetch da página individual do anúncio/catálogo
+  if ((price === null || !image || soldQuantity === null) && card.permalink) {
+    const page = await fetchPage(card.permalink);
+    if (page.ok && page.html) {
+      const scraped = scrapeFromHtml(page.html, page.finalUrl || card.permalink);
+      const sig = scraped.signals;
+      if (price === null) price = sig?.price ?? scraped.price;
+      if (originalPrice === null) originalPrice = sig?.originalPrice ?? scraped.originalPrice;
+      if (!image) {
+        const ogImg = metaContent(page.html, 'og:image');
+        image =
+          scraped.photos[0]?.url ??
+          normalizeMlImageUrl(ogImg) ??
+          fallbackPictureUrls(imageUrlsIn(page.html))[0] ??
+          null;
+      }
+      if (!createdAt && sig?.startTime) createdAt = sig.startTime;
+      if (!listingTypeId && sig?.listingTypeId) listingTypeId = sig.listingTypeId;
+      reviewsCount = sig?.reviewsCount ?? scraped.reviewsCount;
+      if (sig?.soldExact && sig.soldExact > 0) {
+        soldQuantity = sig.soldExact;
+        soldSource = sig.soldExactSource ?? 'tracks.sold_quantity (exato)';
+      }
+      if (!soldText && (sig?.soldText ?? scraped.soldMarker)) {
+        soldText = sig?.soldText ?? scraped.soldMarker;
+      }
+    }
+  }
+
+  const daysOnAir = daysSince(createdAt) ?? card.daysOnAir ?? 30;
+  if (!soldText) {
+    soldText = deriveFallbackSoldText({
+      offersCount,
+      reviewsCount,
+      seller,
+      daysOnAir,
+      fulfillment: card.fulfillment,
+    });
+  }
+
+  const estResult = estimateSales({
+    soldText,
+    reviewsCount,
+    createdAt,
+    listingTypeId,
+  });
+  const salesEstimate = estResult.status === 'ok' ? estResult : card.salesEstimate;
+
+  if ((soldQuantity === null || soldQuantity <= 0) && salesEstimate) {
+    soldQuantity = salesEstimate.final;
+    if (soldSource === 'Oculto no anúncio') soldSource = 'Estimativa Módulo 98069';
+  }
+
+  const velocity = salesVelocity(soldQuantity, daysOnAir);
+  const revenue = revenueFromVelocity(price, velocity);
+
+  return {
+    ...card,
+    image,
+    price,
+    originalPrice,
+    soldText,
+    soldQuantity,
+    soldSource,
+    salesEstimate,
+    velocity,
+    revenue,
+    createdAt,
+    daysOnAir,
+    ageAlert: ageAlert(daysOnAir),
+    listingTypeId,
+    listingType: listingLabel(listingTypeId) ?? card.listingType,
+    seller,
   };
 }
 
@@ -832,22 +1060,51 @@ async function summaryFromProduct(
   productId: string,
   bearer: string | null,
   poly?: PolyItem | null,
+  productFromSearch?: AnyObj | null,
 ): Promise<ProductSummary | null> {
-  const pr = await mlFetch(`/products/${productId}`, bearer);
-  if (!pr.ok || !pr.data || typeof pr.data !== 'object') return null;
-  const product = pr.data as AnyObj;
-  const winner = (product.buy_box_winner as AnyObj | null) ?? null;
-  const winnerId: unknown = winner?.item_id;
-  let itemId: string | null = typeof winnerId === 'string' ? winnerId : null;
-  if (!itemId) {
-    const its = await mlFetch(`/products/${productId}/items`, bearer);
-    const cheapest = [...listOf(its.data)].sort(priceAsc)[0];
-    itemId = str(cheapest?.item_id);
-  }
-  const item = itemId ? await fetchItem(itemId, bearer) : null;
-  const sellerId = num(winner?.seller_id) ?? num(item?.seller_id);
-  const { info } = await sellerData(sellerId, bearer);
-  return composeSummary({ product, item, winner, seller: info, productId, itemId, poly });
+  const [pr, its] = await Promise.all([
+    mlFetch(`/products/${productId}`, bearer),
+    mlFetch(`/products/${productId}/items`, bearer),
+  ]);
+  const product: AnyObj | null =
+    pr.ok && pr.data && typeof pr.data === 'object'
+      ? (pr.data as AnyObj)
+      : productFromSearch ?? null;
+  if (!product && !poly) return null;
+
+  const offers = listOf(its.data);
+  const offersCount = num(its.data?.paging?.total) ?? offers.length;
+  const cheapest = [...offers].sort(priceAsc)[0] ?? null;
+  const rawWinner = (product?.buy_box_winner as AnyObj | null) ?? null;
+  // Quando buy_box_winner é null sem OAuth de usuário, usa a oferta mais barata de /products/{id}/items
+  const winner: AnyObj | null =
+    rawWinner && num(rawWinner.price) !== null ? rawWinner : cheapest ?? rawWinner;
+
+  const winnerId: unknown = winner?.item_id ?? cheapest?.item_id;
+  const itemId: string | null = typeof winnerId === 'string' ? winnerId : poly?.id ?? null;
+
+  const sellerId = num(winner?.seller_id) ?? num(cheapest?.seller_id);
+  const [item, sellerRes, questionsRes] = await Promise.all([
+    itemId ? fetchItem(itemId, bearer) : Promise.resolve(null),
+    sellerData(sellerId, bearer),
+    itemId
+      ? mlFetch(`/questions/search?item=${encodeURIComponent(itemId)}&limit=1&api_version=4`, bearer)
+      : Promise.resolve(null),
+  ]);
+  const questionsCount = questionsRes?.ok ? num(questionsRes.data?.total) : null;
+
+  const summary = composeSummary({
+    product,
+    item,
+    winner,
+    seller: sellerRes.info,
+    productId,
+    itemId,
+    poly,
+    offersCount,
+    questionsCount,
+  });
+  return hydrateProductSummary(summary, bearer);
 }
 
 async function summaryFromItem(
@@ -855,18 +1112,27 @@ async function summaryFromItem(
   bearer: string | null,
   poly?: PolyItem | null,
 ): Promise<ProductSummary | null> {
-  const item = await fetchItem(itemId, bearer);
-  if (!item && !poly) return null;
+  const [item, questionsRes] = await Promise.all([
+    fetchItem(itemId, bearer),
+    mlFetch(`/questions/search?item=${encodeURIComponent(itemId)}&limit=1&api_version=4`, bearer),
+  ]);
+  const questionsCount = questionsRes.ok ? num(questionsRes.data?.total) : null;
+  const catalogId = str(item?.catalog_product_id) ?? poly?.productId ?? null;
+  if (!item && catalogId) {
+    return summaryFromProduct(catalogId, bearer, poly);
+  }
   const { info } = item ? await sellerData(num(item.seller_id), bearer) : { info: null };
-  return composeSummary({
+  const summary = composeSummary({
     product: null,
     item,
     winner: null,
     seller: info,
-    productId: str(item?.catalog_product_id) ?? poly?.productId ?? null,
+    productId: catalogId,
     itemId,
     poly,
+    questionsCount,
   });
+  return hydrateProductSummary(summary, bearer);
 }
 
 /* =============================================================================
@@ -885,14 +1151,25 @@ async function fetchPublicSearchPolycards(q: string): Promise<PolyItem[]> {
 async function searchCatalog(
   q: string,
   bearer: string | null,
-): Promise<{ productIds: string[]; itemIds: string[]; polycards: PolyItem[]; note: string | null }> {
+): Promise<{
+  productIds: string[];
+  productsById: Map<string, AnyObj>;
+  itemIds: string[];
+  polycards: PolyItem[];
+  note: string | null;
+}> {
   const [r, polycards] = await Promise.all([
     mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(q)}&limit=12`, bearer),
     fetchPublicSearchPolycards(q),
   ]);
   const results: AnyObj[] = Array.isArray(r.data?.results) ? r.data.results : [];
-  const productIds = results.map((x) => str(x?.id)).filter((x): x is string => x !== null);
-  if (productIds.length > 0) return { productIds, itemIds: [], polycards, note: null };
+  const productsById = new Map<string, AnyObj>();
+  for (const row of results) {
+    const pid = str(row?.id);
+    if (pid) productsById.set(pid, row);
+  }
+  const productIds = [...productsById.keys()];
+  if (productIds.length > 0) return { productIds, productsById, itemIds: [], polycards, note: null };
 
   const f = await mlFetch(`/sites/MLB/search?q=${encodeURIComponent(q)}&limit=12`, bearer);
   const fr: AnyObj[] = Array.isArray(f.data?.results) ? f.data.results : [];
@@ -900,6 +1177,7 @@ async function searchCatalog(
   if (f.ok && itemIds.length > 0) {
     return {
       productIds: [],
+      productsById,
       itemIds,
       polycards,
       note: 'Resultados obtidos via /sites/MLB/search (requer OAuth de usuário).',
@@ -908,6 +1186,7 @@ async function searchCatalog(
   if (polycards.length > 0) {
     return {
       productIds: [],
+      productsById,
       itemIds: polycards.slice(0, 12).map((p) => p.id),
       polycards,
       note: 'Resultados enriquecidos pelo estado público da busca (__PRELOADED_STATE__ / polycards).',
@@ -915,6 +1194,7 @@ async function searchCatalog(
   }
   return {
     productIds: [],
+    productsById,
     itemIds: [],
     polycards: [],
     note:
@@ -939,7 +1219,7 @@ async function keywordResults(
     if (p.productId) polyById.set(p.productId, p);
   }
   const fromProducts = await mapLimit(found.productIds, 4, (pid) =>
-    summaryFromProduct(pid, bearer, polyById.get(pid) ?? null),
+    summaryFromProduct(pid, bearer, polyById.get(pid) ?? null, found.productsById.get(pid) ?? null),
   );
   const fromItems = await mapLimit(found.itemIds, 4, (iid) =>
     summaryFromItem(iid, bearer, polyById.get(iid) ?? null),
@@ -1020,22 +1300,39 @@ function idsFromUrl(
  * ============================================================================= */
 
 async function fetchPage(url: string): Promise<PageFetch> {
-  try {
-    const res = await fetch(url, {
-      redirect: 'follow',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(9000),
-    });
-    const html = await res.text();
-    return { ok: res.ok, status: res.status, finalUrl: res.url || url, html };
-  } catch {
-    return { ok: false, status: 0, finalUrl: url, html: '' };
+  const attempt = async (ua: string): Promise<PageFetch> => {
+    try {
+      const res = await fetch(url, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': ua,
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(9000),
+      });
+      const html = await res.text();
+      return { ok: res.ok, status: res.status, finalUrl: res.url || url, html };
+    } catch {
+      return { ok: false, status: 0, finalUrl: url, html: '' };
+    }
+  };
+
+  const first = await attempt(USER_AGENT);
+  const blocked =
+    !first.ok ||
+    /account-verification|suspicious-traffic|ui-empty-state/i.test(first.finalUrl) ||
+    /account-verification|suspicious-traffic/i.test(first.html);
+  if (blocked) {
+    const bot = await attempt(
+      'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    );
+    if (bot.ok && bot.html && !/account-verification/i.test(bot.finalUrl)) {
+      return bot;
+    }
   }
+  return first;
 }
 
 async function publicFromJina(url: string): Promise<Scraped | null> {
@@ -1331,6 +1628,9 @@ async function loadBundle(
 
   const winnerId: unknown = winner?.item_id;
   const cheapest = [...competitorsRaw].sort(priceAsc)[0];
+  if ((!winner || num(winner.price) === null) && cheapest) {
+    winner = cheapest;
+  }
   const cheapestId: unknown = cheapest?.item_id;
   const fallbackId =
     typeof winnerId === 'string' ? winnerId : typeof cheapestId === 'string' ? cheapestId : null;
@@ -1410,13 +1710,21 @@ function buildDossier(
       : Array.isArray(itemPics)
         ? itemPics
         : [];
-  const photos = dedupePhotos([...extractPhotos(urlsOf(apiPictures)), ...(pub ? pub.photos : [])]);
+  const rawApiPicUrls = urlsOf(apiPictures);
+  const photos = dedupePhotos([...extractPhotos(rawApiPicUrls), ...(pub ? pub.photos : [])]);
+  const fallbackImages = fallbackPictureUrls(rawApiPicUrls);
   const first = earliestPhoto(photos);
+  const allImages =
+    photos.length > 0 ? photos.slice(0, 12).map((p) => p.url) : fallbackImages.slice(0, 12);
 
   const itemPrice = num(item?.price);
   const winnerPrice = num(winner?.price);
   const price = itemPrice ?? winnerPrice ?? signals?.price ?? (pub ? pub.price : null);
-  const originalPrice = num(item?.original_price) ?? signals?.originalPrice ?? (pub ? pub.originalPrice : null);
+  const originalPrice =
+    num(item?.original_price) ??
+    num(winner?.original_price) ??
+    signals?.originalPrice ??
+    (pub ? pub.originalPrice : null);
   const discountPct =
     price !== null && originalPrice !== null && originalPrice > price
       ? Math.round((1 - price / originalPrice) * 100)
@@ -1453,11 +1761,25 @@ function buildDossier(
   const alert = ageAlert(daysOnAir);
   const alertLabel = alert ? AGE_ALERT_LABEL[alert] : null;
 
+  const logisticType = str(sh.logistic_type) ?? signals?.logisticType ?? null;
+  const fulfillment = logisticType === 'fulfillment' || Boolean(signals?.isFull);
+  const freeShipping = sh.free_shipping === true || signals?.freeShipping === true;
+  const isSupermarket = isSupermarketItem(item, signals);
+
   // Vendas: tracks.sold_quantity / API exata primeiro; caso contrário, Módulo 98069 da Avantpro.
   const apiSold = num(item?.sold_quantity);
   const pageExact = signals?.soldExact ?? null;
-  const markerText =
+  const directMarker =
     signals?.soldText ?? (pub ? pub.soldMarker : null) ?? tierMarkerForCount(apiSold ?? pageExact);
+  const markerText =
+    directMarker ??
+    deriveFallbackSoldText({
+      offersCount: b.competitorsRaw.length,
+      reviewsCount: ratingCount,
+      seller: b.seller,
+      daysOnAir,
+      fulfillment,
+    });
   const estResult = estimateSales({
     soldText: markerText,
     reviewsCount: ratingCount,
@@ -1480,7 +1802,9 @@ function buildDossier(
   } else if (salesEstimate) {
     soldValue = salesEstimate.final;
     soldLabel = `~${salesEstimate.final.toLocaleString('pt-BR')} vendidos (${markerText ?? 'faixa ML'})`;
-    soldSource = 'Módulo 98069 Avantpro (estimativa ponderada)';
+    soldSource = directMarker
+      ? 'Módulo 98069 Avantpro (estimativa ponderada)'
+      : 'Módulo 98069 Avantpro (estimativa de catálogo)';
   } else if (apiSold !== null) {
     soldValue = apiSold;
     soldLabel = `${apiSold.toLocaleString('pt-BR')} vendidos`;
@@ -1509,11 +1833,6 @@ function buildDossier(
       : pageStock !== null
         ? 'Estado da página (.ui-pdp-buybox__quantity__available)'
         : 'Oculto no anúncio';
-
-  const logisticType = str(sh.logistic_type) ?? signals?.logisticType ?? null;
-  const fulfillment = logisticType === 'fulfillment' || Boolean(signals?.isFull);
-  const freeShipping = sh.free_shipping === true || signals?.freeShipping === true;
-  const isSupermarket = isSupermarketItem(item, signals);
 
   const firstPhotoDate = first ? `${pad2(first.month)}/${first.year}` : null;
   const firstPhotoSource = first ? 'Assinatura da Foto CDN ML' : 'Oculto no anúncio';
@@ -1586,7 +1905,7 @@ function buildDossier(
     title,
     brand: attr(product, 'BRAND') ?? attr(item, 'BRAND'),
     model: attr(product, 'MODEL') ?? attr(item, 'MODEL'),
-    images: photos.slice(0, 12).map((p) => p.url),
+    images: allImages,
     price,
     originalPrice,
     discountPct,
