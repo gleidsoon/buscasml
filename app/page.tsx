@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
+  Award,
+  BarChart3,
+  Boxes,
   Calculator,
   Calendar,
   Camera,
@@ -11,20 +15,44 @@ import {
   ChevronLeft,
   ChevronRight,
   Code,
+  Copy,
   ExternalLink,
+  Hash,
   Info,
   Key,
+  Layers,
   LayoutGrid,
   List,
   Loader2,
   LogOut,
   Search,
+  Sparkles,
   Star,
   Store,
+  Tag,
   Truck,
   TrendingUp,
   X,
 } from 'lucide-react';
+import {
+  AGE_ALERT_LABEL,
+  DEFAULT_COMMISSION_PCT,
+  FREE_SHIPPING_THRESHOLD,
+  MAX_PRICE_ITERATIONS,
+  breakdownAt,
+  extractKeywords,
+  suggestPrice,
+  type AgeAlert,
+  type CalculatorBreakdown,
+  type CalculatorInput,
+  type CategoryFees,
+  type Commission,
+  type KeywordStat,
+  type Periods,
+  type SalesEstimate,
+  type SuggestedPrice,
+} from '@/lib/mlEngine';
+import type { PageSignals } from '@/lib/pageState';
 
 /* =============================================================================
  * TIPOS (espelham as respostas de app/api/ml/route.ts)
@@ -38,7 +66,28 @@ type SellerInfo = {
   city: string | null;
   state: string | null;
   medal: string;
+  reputationLevel: string | null;
   completedSales: number | null;
+  canceledSales: number | null;
+  cancellationRate: number | null;
+  claimsRate: number | null;
+  delayedHandlingRate: number | null;
+  positiveRatingPct: number | null;
+  officialStoreId: number | null;
+};
+
+type FeeSnapshot = {
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryPath: string | null;
+  categoryFees: CategoryFees;
+  classic: Commission | null;
+  premium: Commission | null;
+  current: Commission | null;
+  shippingListCost: number | null;
+  freeShippingByMeli: boolean;
+  shippingSource: string;
+  feeSource: string;
 };
 
 type CompetitorRow = {
@@ -55,18 +104,30 @@ type CompetitorRow = {
 type ProductSummary = {
   productId: string | null;
   itemId: string | null;
+  categoryId: string | null;
   title: string;
   brand: string | null;
   model: string | null;
   image: string | null;
   price: number | null;
+  originalPrice: number | null;
   soldQuantity: number | null;
+  soldText: string | null;
+  soldSource: string;
+  salesEstimate: SalesEstimate | null;
+  velocity: Periods | null;
+  revenue: Periods | null;
+  availableQuantity: number | null;
   listingType: string | null;
+  listingTypeId: string | null;
   fulfillment: boolean;
   freeShipping: boolean;
+  isSupermarket: boolean;
+  isSponsored: boolean;
   createdAt: string | null;
   createdSource: string;
   daysOnAir: number | null;
+  ageAlert: AgeAlert | null;
   firstPhotoDate: string | null;
   seller: SellerInfo | null;
   permalink: string | null;
@@ -76,6 +137,9 @@ type Dossier = {
   origin: string;
   productId: string | null;
   itemId: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryPath: string | null;
   permalink: string | null;
   title: string;
   brand: string | null;
@@ -86,9 +150,17 @@ type Dossier = {
   discountPct: number | null;
   currency: string;
   listingType: string | null;
+  listingTypeId: string | null;
+  isSupermarket: boolean;
+  availableQuantity: number | null;
+  stockText: string | null;
+  stockSource: string;
   soldValue: number | null;
   soldLabel: string;
   soldSource: string;
+  salesEstimate: SalesEstimate | null;
+  velocity: Periods | null;
+  revenue: Periods | null;
   ratingAverage: number | null;
   ratingCount: number | null;
   fulfillment: boolean;
@@ -97,15 +169,26 @@ type Dossier = {
   createdAt: string | null;
   createdSource: string;
   daysOnAir: number | null;
+  ageAlert: AgeAlert | null;
+  ageAlertLabel: string | null;
   firstPhotoDate: string | null;
   firstPhotoSource: string;
   seller: SellerInfo | null;
   competitors: CompetitorRow[];
+  fees: FeeSnapshot;
+  keywords: { words: KeywordStat[]; phrases: KeywordStat[] };
+  pageSignals: PageSignals | null;
   notes: string[];
   raw: Record<string, unknown>;
 };
 
-type KeywordAnalysis = { mode: 'keyword'; query: string; products: ProductSummary[]; note: string | null };
+type KeywordAnalysis = {
+  mode: 'keyword';
+  query: string;
+  products: ProductSummary[];
+  keywords?: { words: KeywordStat[]; phrases: KeywordStat[] };
+  note: string | null;
+};
 type DossierAnalysis = { mode: 'dossier'; dossier: Dossier };
 type Analysis = KeywordAnalysis | DossierAnalysis;
 
@@ -144,13 +227,20 @@ type FilterState = { age: AgeFilter; logistic: LogisticFilter; sort: SortKey; vi
 
 type CalcForm = {
   title: string;
+  categoryLabel: string;
   salePrice: string;
   supplierCost: string;
   packagingCost: string;
   taxPct: string;
+  classicPct: string;
+  premiumPct: string;
   listing: ListingKind;
-  freeShipping: boolean;
   shippingCost: string;
+  mlCoversShipping: boolean;
+  shippingBelowThreshold: boolean;
+  isSupermarket: boolean;
+  marginMode: 'pct' | 'brl';
+  marginTarget: string;
 };
 
 type Notice = { kind: 'ok' | 'erro' | 'aviso'; text: string };
@@ -166,18 +256,6 @@ const USER_TOKEN_HEADER = 'x-ml-user-token';
 const ML_CLIENT_ID = '8353552938244269';
 const REFRESH_AHEAD_MS = 5 * 60 * 1000;
 const HIDDEN = 'Oculto no anúncio';
-const MARKER_SOURCE = 'Marcador público da página';
-
-const MARGIN_TARGET_PCT = 18;
-const FREE_SHIPPING_MIN = 79;
-const FIXED_FEE_VALUE = 6.25;
-/** Tipos que pagam a taxa fixa abaixo de R$ 79. Conforme a especificação, somente Premium. */
-const FIXED_FEE_TYPES: ListingKind[] = ['premium'];
-const COMMISSION_RATE: Record<ListingKind, number> = { classico: 0.12, premium: 0.17 };
-const LISTING_LABEL: Record<ListingKind, string> = {
-  classico: 'Clássico (12%)',
-  premium: 'Premium (17%)',
-};
 
 const AGE_OPTIONS: { value: AgeFilter; label: string }[] = [
   { value: 'todos', label: 'Todos' },
@@ -205,13 +283,20 @@ const DEFAULT_FILTERS: FilterState = { age: 'todos', logistic: 'todos', sort: 'r
 
 const INITIAL_CALC: CalcForm = {
   title: '',
+  categoryLabel: '',
   salePrice: '',
   supplierCost: '',
   packagingCost: '',
-  taxPct: '',
+  taxPct: '6',
+  classicPct: String(DEFAULT_COMMISSION_PCT.gold_special),
+  premiumPct: String(DEFAULT_COMMISSION_PCT.gold_pro),
   listing: 'classico',
-  freeShipping: false,
-  shippingCost: '',
+  shippingCost: '22,90',
+  mlCoversShipping: false,
+  shippingBelowThreshold: false,
+  isSupermarket: false,
+  marginMode: 'pct',
+  marginTarget: '18',
 };
 
 const EXAMPLES = [
@@ -239,6 +324,8 @@ const PILL_TONES = {
   green: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
   yellow: 'border-[#facc15]/30 bg-[#facc15]/10 text-[#facc15]',
   blue: 'border-[#3b82f6]/30 bg-[#3b82f6]/10 text-blue-300',
+  red: 'border-red-500/30 bg-red-500/10 text-red-300',
+  amber: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
 };
 type PillTone = keyof typeof PILL_TONES;
 
@@ -254,7 +341,13 @@ function formatBRL(value: number | null | undefined, fallback: string = HIDDEN):
 }
 
 function formatInt(value: number | null | undefined, fallback: string = HIDDEN): string {
-  return typeof value === 'number' && Number.isFinite(value) ? integer.format(value) : fallback;
+  return typeof value === 'number' && Number.isFinite(value) ? integer.format(Math.round(value)) : fallback;
+}
+
+function formatDecimal(value: number | null | undefined, digits = 1, fallback: string = HIDDEN): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toFixed(digits).replace('.', ',')
+    : fallback;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -279,8 +372,10 @@ function formatRating(value: number | null): string {
   return value === null ? HIDDEN : value.toFixed(1).replace('.', ',');
 }
 
-function formatPercent(value: number | null): string {
-  return value === null || !Number.isFinite(value) ? HIDDEN : `${value.toFixed(1).replace('.', ',')}%`;
+function formatPercent(value: number | null | undefined, fallback: string = HIDDEN): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toFixed(1).replace('.', ',')}%`
+    : fallback;
 }
 
 function formatInputNumber(value: number): string {
@@ -301,8 +396,8 @@ function parseInputNumber(raw: string): number {
 
 function kindFromLabel(label: string | null): ListingKind | null {
   if (!label) return null;
-  if (/premium/i.test(label)) return 'premium';
-  if (/cl[aá]ssico/i.test(label)) return 'classico';
+  if (/premium|gold_pro/i.test(label)) return 'premium';
+  if (/cl[aá]ssico|gold_special/i.test(label)) return 'classico';
   return null;
 }
 
@@ -311,78 +406,68 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 /* =============================================================================
- * CALCULADORA DE MARGEM (estilo Avantpro)
- * Lucro líquido = preço - fornecedor - embalagem - imposto - comissão - taxa fixa - frete.
- * Teto do fornecedor = maior custo que ainda entrega a margem alvo de 18%.
+ * MOTOR DA CALCULADORA (Classe Ee da Avantpro)
  * ============================================================================= */
 
-type MarginInput = {
-  salePrice: number;
-  supplierCost: number;
-  packagingCost: number;
-  taxPct: number;
-  listing: ListingKind;
-  freeShipping: boolean;
-  shippingCost: number;
+type EeOutput = {
+  input: CalculatorInput;
+  classic: CalculatorBreakdown;
+  premium: CalculatorBreakdown;
+  suggestedClassic: SuggestedPrice;
+  suggestedPremium: SuggestedPrice;
 };
 
-type MarginResult = {
-  commission: number;
-  fixedFee: number;
-  shipping: number;
-  tax: number;
-  netProfit: number;
-  netMarginPct: number;
-  maxSupplierCost: number;
-};
-
-function nonNegative(value: number): number {
-  return Number.isFinite(value) && value > 0 ? value : 0;
+function buildCategoryFees(classicPct: number, premiumPct: number): CategoryFees {
+  const c = classicPct > 0 ? classicPct : DEFAULT_COMMISSION_PCT.gold_special;
+  const p = premiumPct > 0 ? premiumPct : DEFAULT_COMMISSION_PCT.gold_pro;
+  const row = { gold_special: c, gold_pro: p };
+  return {
+    range_16: { ...row },
+    range_32: { ...row },
+    range_64: { ...row },
+    range_128: { ...row },
+  };
 }
 
-function roundMoney(value: number): number {
-  return Math.round(value * 100) / 100;
-}
+function computeEeCalculator(form: CalcForm): EeOutput {
+  const price = Math.max(0, parseInputNumber(form.salePrice));
+  const productCost = Math.max(0, parseInputNumber(form.supplierCost));
+  const extraCost = Math.max(0, parseInputNumber(form.packagingCost));
+  const taxRate = Math.max(0, parseInputNumber(form.taxPct)) / 100;
+  const shippingCost = Math.max(0, parseInputNumber(form.shippingCost));
+  const classicPct = Math.max(0, parseInputNumber(form.classicPct));
+  const premiumPct = Math.max(0, parseInputNumber(form.premiumPct));
+  const rawTarget = Math.max(0, parseInputNumber(form.marginTarget));
+  const marginTarget = form.marginMode === 'pct' ? rawTarget / 100 : rawTarget;
 
-function computeMargin(input: MarginInput): MarginResult {
-  const price = nonNegative(input.salePrice);
-  const rate = COMMISSION_RATE[input.listing];
-  const taxRate = nonNegative(input.taxPct) / 100;
-  const packaging = nonNegative(input.packagingCost);
-  const supplier = nonNegative(input.supplierCost);
-
-  const commission = price * rate;
-  const fixedFee =
-    FIXED_FEE_TYPES.includes(input.listing) && price < FREE_SHIPPING_MIN ? FIXED_FEE_VALUE : 0;
-  const shipping =
-    input.freeShipping && price >= FREE_SHIPPING_MIN ? nonNegative(input.shippingCost) : 0;
-  const tax = price * taxRate;
-
-  const deductions = supplier + packaging + tax + commission + fixedFee + shipping;
-  const netProfit = price - deductions;
-  const netMarginPct = price > 0 ? (netProfit / price) * 100 : 0;
-
-  const maxSupplierCost =
-    price > 0
-      ? price * (1 - MARGIN_TARGET_PCT / 100 - taxRate - rate) - packaging - fixedFee - shipping
-      : 0;
+  const fees = buildCategoryFees(classicPct, premiumPct);
+  const input: CalculatorInput = {
+    price,
+    productCost,
+    extraCost,
+    taxRate,
+    shippingCost,
+    mlCoversShipping: form.mlCoversShipping,
+    shippingBelowThreshold: form.shippingBelowThreshold,
+    isSupermarket: form.isSupermarket,
+    fees,
+    marginMode: form.marginMode,
+    marginTarget,
+  };
 
   return {
-    commission: roundMoney(commission),
-    fixedFee: roundMoney(fixedFee),
-    shipping: roundMoney(shipping),
-    tax: roundMoney(tax),
-    netProfit: roundMoney(netProfit),
-    netMarginPct,
-    maxSupplierCost: roundMoney(maxSupplierCost),
+    input,
+    classic: breakdownAt(price, 'gold_special', input),
+    premium: breakdownAt(price, 'gold_pro', input),
+    suggestedClassic: suggestPrice('gold_special', input),
+    suggestedPremium: suggestPrice('gold_pro', input),
   };
 }
 
 /* =============================================================================
- * FILTROS, ORDENAÇÃO E RECEITA ESTIMADA
+ * FILTROS E ORDENAÇÃO
  * ============================================================================= */
 
-/** Ordena com valores ausentes sempre no fim, em qualquer direção. */
 function nullsLast(a: number | null, b: number | null, direction: 1 | -1): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
@@ -412,19 +497,6 @@ function applyFilters(
   return sorted;
 }
 
-type Revenue = { dailyUnits: number | null; est30: number | null; gross: number | null };
-
-/** Receita derivada apenas de dados reais: média de vendas desde a criação e preço atual. */
-function revenueOf(d: Dossier): Revenue {
-  const sold = d.soldValue;
-  const price = d.price;
-  const days = d.daysOnAir;
-  const dailyUnits = sold !== null && days !== null && days > 0 ? sold / days : null;
-  const est30 = dailyUnits !== null && price !== null ? dailyUnits * 30 * price : null;
-  const gross = sold !== null && price !== null ? sold * price : null;
-  return { dailyUnits, est30, gross };
-}
-
 /* =============================================================================
  * SESSÃO OAUTH (localStorage)
  * ============================================================================= */
@@ -446,7 +518,7 @@ function writeSession(session: StoredSession): void {
   try {
     window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
-    // Armazenamento bloqueado ou cheio: a sessão vale só nesta aba.
+    // Armazenamento bloqueado ou cheio.
   }
 }
 
@@ -454,7 +526,7 @@ function clearSession(): void {
   try {
     window.localStorage.removeItem(SESSION_KEY);
   } catch {
-    // Nada a fazer se o navegador bloquear o armazenamento.
+    // Nada a fazer.
   }
 }
 
@@ -640,11 +712,30 @@ function Modal({
 function Pill({ children, tone = 'slate' }: { children: ReactNode; tone?: PillTone }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${PILL_TONES[tone]}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${PILL_TONES[tone]}`}
     >
       {children}
     </span>
   );
+}
+
+function AgeAlertBadge({ alert, days }: { alert: AgeAlert | null; days: number | null }) {
+  if (!alert || days === null) return null;
+  if (alert === 'danger') {
+    return (
+      <Pill tone="red">
+        <AlertTriangle size={11} /> {days}d · Perigo (&gt;365d)
+      </Pill>
+    );
+  }
+  if (alert === 'warning') {
+    return (
+      <Pill tone="amber">
+        <AlertTriangle size={11} /> {days}d · Aviso (&gt;180d)
+      </Pill>
+    );
+  }
+  return <Pill tone="green">{days}d · Recente</Pill>;
 }
 
 function Stat({
@@ -872,18 +963,18 @@ function Onboarding() {
   const items: { icon: ReactNode; title: string; text: string }[] = [
     {
       icon: <Search size={18} />,
-      title: 'Palavra-chave',
-      text: 'Digite o nome do produto e veja os anúncios encontrados, com foto, preço e vendedor.',
+      title: 'Palavra-chave + Extrator SEO',
+      text: 'Pesquise nichos com métricas de vendas, alertas de maturidade e extração de palavras-chave dos títulos.',
     },
     {
       icon: <LayoutGrid size={18} />,
-      title: 'Link ou código MLB',
-      text: 'Cole um link do Mercado Livre (meli.la, /p/MLB, /up/MLBU) para abrir o Raio-X completo.',
+      title: 'Raio-X Avantpro + JoomPulse',
+      text: 'Cole um link ou MLB para ver vendas estimadas (Módulo 98069), giro diário/semanal/mensal e taxas reais.',
     },
     {
-      icon: <Camera size={18} />,
-      title: 'Foto ou print',
-      text: 'Clique em Buscar por Foto ou cole um print com Ctrl+V. A IA identifica o produto e faz a pesquisa.',
+      icon: <Calculator size={18} />,
+      title: 'Calculadora Classe Ee (10 iterações)',
+      text: 'Simule custo total, repasse líquido, margem de contribuição e preço sugerido em % ou R$ para Clássico e Premium.',
     },
   ];
   return (
@@ -920,6 +1011,123 @@ function ExamplesRow({ onPick }: { onPick: (text: string) => void }) {
 }
 
 /* =============================================================================
+ * EXTRATOR DE PALAVRAS-CHAVE DOS TÍTULOS
+ * ============================================================================= */
+
+function KeywordsPanel({
+  keywords,
+  onPickTerm,
+  title = 'Extrator de Palavras-Chave dos Títulos',
+}: {
+  keywords: { words: KeywordStat[]; phrases: KeywordStat[] };
+  onPickTerm?: (term: string) => void;
+  title?: string;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  if (keywords.words.length === 0 && keywords.phrases.length === 0) return null;
+
+  const copyTerm = (term: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(term);
+      setCopied(term);
+      setTimeout(() => setCopied((c) => (c === term ? null : c)), 1500);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Hash size={16} className="text-[#facc15]" /> {title}
+        </p>
+        <span className="text-xs text-slate-400">
+          Clique para copiar ou buscar termos recorrentes nos anúncios
+        </span>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div>
+          <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Termos individuais mais usados
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {keywords.words.slice(0, 14).map((w) => {
+              const pct = Math.round(w.share * 100);
+              return (
+                <div
+                  key={w.term}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-[#0b1220] px-2.5 py-1.5 text-xs text-slate-200"
+                >
+                  <button
+                    type="button"
+                    onClick={() => (onPickTerm ? onPickTerm(w.term) : copyTerm(w.term))}
+                    className="font-medium hover:text-[#facc15]"
+                    title="Pesquisar ou copiar termo"
+                  >
+                    {w.term}
+                  </button>
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
+                    {w.count}x · {pct}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copyTerm(w.term)}
+                    aria-label={`Copiar ${w.term}`}
+                    className="text-slate-500 hover:text-slate-200"
+                  >
+                    {copied === w.term ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Expressões compostas (cauda longa)
+          </p>
+          {keywords.phrases.length === 0 ? (
+            <p className="text-xs text-slate-500">Nenhuma combinação repetida entre os títulos analisados.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {keywords.phrases.slice(0, 12).map((p) => {
+                const pct = Math.round(p.share * 100);
+                return (
+                  <div
+                    key={p.term}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#3b82f6]/25 bg-[#3b82f6]/10 px-2.5 py-1.5 text-xs text-blue-200"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => (onPickTerm ? onPickTerm(p.term) : copyTerm(p.term))}
+                      className="font-medium hover:text-[#facc15]"
+                    >
+                      {p.term}
+                    </button>
+                    <span className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-blue-300">
+                      {p.count}x · {pct}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyTerm(p.term)}
+                      aria-label={`Copiar ${p.term}`}
+                      className="text-blue-300/70 hover:text-white"
+                    >
+                      {copied === p.term ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
  * LISTAGEM DE PRODUTOS (cards, tabela e filtros)
  * ============================================================================= */
 
@@ -933,8 +1141,17 @@ function ProductCard({
   onSimulate: (p: ProductSummary) => void;
 }) {
   const code = p.itemId ?? p.productId;
+  const borderClass =
+    p.ageAlert === 'danger'
+      ? 'border-red-500/30 hover:border-red-500/50'
+      : p.ageAlert === 'warning'
+        ? 'border-amber-500/30 hover:border-amber-500/50'
+        : 'border-white/5 hover:border-white/10';
+
   return (
-    <article className="flex flex-col overflow-hidden rounded-2xl border border-white/5 bg-[#111827] transition hover:border-white/10">
+    <article
+      className={`flex flex-col overflow-hidden rounded-2xl border bg-[#111827] transition ${borderClass}`}
+    >
       <div className="flex h-56 items-center justify-center bg-white p-4">
         <SafeImage src={p.image} alt={p.title} className="max-h-full max-w-full object-contain" />
       </div>
@@ -943,16 +1160,31 @@ function ProductCard({
           {p.listingType && <Pill tone="blue">{p.listingType}</Pill>}
           {p.fulfillment && <Pill tone="green">Full</Pill>}
           {p.freeShipping && <Pill tone="yellow">Frete grátis</Pill>}
+          {p.isSponsored && <Pill tone="amber">Patrocinado</Pill>}
+          <AgeAlertBadge alert={p.ageAlert} days={p.daysOnAir} />
         </div>
         <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-snug text-slate-100">{p.title}</h3>
-        <p className="text-2xl font-bold text-[#facc15]">{formatBRL(p.price)}</p>
+        <div className="flex items-baseline gap-2">
+          <p className="text-2xl font-bold text-[#facc15]">{formatBRL(p.price)}</p>
+          {p.originalPrice !== null && p.price !== null && p.originalPrice > p.price && (
+            <span className="text-xs text-slate-500 line-through">{formatBRL(p.originalPrice)}</span>
+          )}
+        </div>
         <div className="grid grid-cols-3 gap-2 text-xs">
           <Mini label="Criado em" value={formatDate(p.createdAt)} sub={formatDaysOnAir(p.daysOnAir)} />
-          <Mini label="Vendas" value={formatInt(p.soldQuantity)} />
           <Mini
-            label="Vendedor"
-            value={p.seller?.nickname ?? HIDDEN}
-            sub={formatAccountAge(p.seller?.accountYears ?? null)}
+            label="Vendas"
+            value={formatInt(p.soldQuantity)}
+            sub={
+              p.velocity
+                ? `${formatDecimal(p.velocity.daily, 1)}/dia · ${formatInt(p.velocity.monthly)}/mês`
+                : p.soldSource
+            }
+          />
+          <Mini
+            label="Faturamento 30d"
+            value={p.revenue ? formatBRL(p.revenue.monthly) : HIDDEN}
+            sub={p.seller?.nickname ?? HIDDEN}
           />
         </div>
         <div className="mt-auto grid grid-cols-2 gap-2 pt-1">
@@ -984,9 +1216,10 @@ function ProductTable({
           <tr>
             <th className="px-4 py-3 font-medium">Produto</th>
             <th className="px-4 py-3 font-medium">Preço</th>
-            <th className="px-4 py-3 font-medium">Criação do anúncio</th>
+            <th className="px-4 py-3 font-medium">Idade / Alerta</th>
+            <th className="px-4 py-3 font-medium">Vendas / Giro</th>
+            <th className="px-4 py-3 font-medium">Receita 30d</th>
             <th className="px-4 py-3 font-medium">Vendedor</th>
-            <th className="px-4 py-3 font-medium">Vendas</th>
             <th className="px-4 py-3 text-right font-medium">Ações</th>
           </tr>
         </thead>
@@ -999,26 +1232,40 @@ function ProductTable({
                 className="border-t border-white/5 align-middle transition hover:bg-white/[0.02]"
               >
                 <td className="px-4 py-3">
-                  <div className="flex min-w-[260px] items-center gap-3">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1">
+                  <div className="flex min-w-[250px] items-center gap-3">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1">
                       <SafeImage src={p.image} alt={p.title} className="max-h-full max-w-full object-contain" />
                     </div>
                     <div className="min-w-0">
                       <p className="line-clamp-2 font-medium text-slate-100">{p.title}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{code ?? HIDDEN}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                        <span>{code ?? HIDDEN}</span>
+                        {p.fulfillment && <Pill tone="green">Full</Pill>}
+                        {p.listingType && <Pill tone="blue">{p.listingType}</Pill>}
+                      </div>
                     </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 font-semibold text-[#facc15]">{formatBRL(p.price)}</td>
                 <td className="px-4 py-3">
                   <p className="text-slate-200">{formatDate(p.createdAt)}</p>
-                  <p className="text-xs text-slate-400">{formatDaysOnAir(p.daysOnAir)}</p>
+                  <div className="mt-1">
+                    <AgeAlertBadge alert={p.ageAlert} days={p.daysOnAir} />
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-slate-200">{formatInt(p.soldQuantity)}</p>
+                  <p className="text-xs text-slate-400">
+                    {p.velocity ? `${formatDecimal(p.velocity.daily, 1)}/dia` : p.soldSource}
+                  </p>
+                </td>
+                <td className="px-4 py-3 font-medium text-emerald-400">
+                  {p.revenue ? formatBRL(p.revenue.monthly) : HIDDEN}
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-slate-200">{p.seller?.nickname ?? HIDDEN}</p>
-                  <p className="text-xs text-slate-400">{formatAccountAge(p.seller?.accountYears ?? null)}</p>
+                  <p className="text-xs text-slate-400">{p.seller?.medal ?? HIDDEN}</p>
                 </td>
-                <td className="px-4 py-3 text-slate-200">{formatInt(p.soldQuantity)}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     <button type="button" onClick={() => onOpen(p)} disabled={!code} className={BTN_SM_BLUE}>
@@ -1044,17 +1291,33 @@ function KeywordView({
   onFilters,
   onOpen,
   onSimulate,
+  onPickTerm,
 }: {
   result: KeywordAnalysis;
   filters: FilterState;
   onFilters: (patch: Partial<FilterState>) => void;
   onOpen: (p: ProductSummary) => void;
   onSimulate: (p: ProductSummary) => void;
+  onPickTerm: (term: string) => void;
 }) {
   const visible = useMemo(
     () => applyFilters(result.products, filters.age, filters.logistic, filters.sort),
     [result.products, filters.age, filters.logistic, filters.sort],
   );
+
+  const keywords = useMemo(
+    () => result.keywords ?? extractKeywords(result.products.map((p) => p.title)),
+    [result.keywords, result.products],
+  );
+
+  const summaryMetrics = useMemo(() => {
+    const prices = visible.map((p) => p.price).filter((x): x is number => x !== null && x > 0);
+    const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+    const totalSold = visible.reduce((acc, p) => acc + (p.soldQuantity ?? 0), 0);
+    const totalRev30 = visible.reduce((acc, p) => acc + (p.revenue?.monthly ?? 0), 0);
+    const fullCount = visible.filter((p) => p.fulfillment).length;
+    return { avgPrice, totalSold, totalRev30, fullCount };
+  }, [visible]);
 
   return (
     <section className="space-y-4">
@@ -1083,6 +1346,35 @@ function KeywordView({
       </div>
 
       {result.note && <Banner kind="aviso">{result.note}</Banner>}
+
+      {visible.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat
+            icon={<Tag size={14} />}
+            label="Preço médio da página"
+            value={formatBRL(summaryMetrics.avgPrice)}
+            valueClass="text-[#facc15]"
+          />
+          <Stat
+            icon={<TrendingUp size={14} />}
+            label="Vendas acumuladas (amostra)"
+            value={formatInt(summaryMetrics.totalSold)}
+          />
+          <Stat
+            icon={<BarChart3 size={14} />}
+            label="Receita mensal estimada (30d)"
+            value={summaryMetrics.totalRev30 > 0 ? formatBRL(summaryMetrics.totalRev30) : HIDDEN}
+            valueClass="text-emerald-400"
+          />
+          <Stat
+            icon={<Truck size={14} />}
+            label="Anúncios no Full"
+            value={`${summaryMetrics.fullCount} de ${visible.length}`}
+          />
+        </div>
+      )}
+
+      <KeywordsPanel keywords={keywords} onPickTerm={onPickTerm} />
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/5 bg-[#111827] p-3">
         <ChipGroup
@@ -1136,8 +1428,227 @@ function KeywordView({
 }
 
 /* =============================================================================
- * RAIO-X: dossiê, vendedor e concorrentes
+ * RAIO-X: PAINÉIS ANALÍTICOS JOOMPULSE / AVANTPRO
  * ============================================================================= */
+
+function VelocityRevenuePanel({
+  velocity,
+  revenue,
+  soldSource,
+}: {
+  velocity: Periods | null;
+  revenue: Periods | null;
+  soldSource: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <BarChart3 size={16} className="text-[#10b981]" /> Giro de Vendas &amp; Faturamento (Métricas JoomPulse Bc / Uc)
+        </p>
+        <Pill tone="blue">{soldSource}</Pill>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          label="Giro Diário"
+          value={velocity ? `${formatDecimal(velocity.daily, 2)} un./dia` : HIDDEN}
+          hint={revenue ? `Receita: ${formatBRL(revenue.daily)}/dia` : 'Requer vendas e data de criação'}
+          valueClass="text-slate-100"
+        />
+        <Stat
+          label="Giro Semanal (7d)"
+          value={velocity ? `${formatInt(velocity.weekly)} un./sem` : HIDDEN}
+          hint={revenue ? `Receita: ${formatBRL(revenue.weekly)}/sem` : undefined}
+          valueClass="text-slate-100"
+        />
+        <Stat
+          label="Giro Mensal (30d)"
+          value={velocity ? `${formatInt(velocity.monthly)} un./mês` : HIDDEN}
+          hint={revenue ? `Receita 30d: ${formatBRL(revenue.monthly)}` : undefined}
+          valueClass="text-[#10b981]"
+        />
+        <Stat
+          label="Faturamento Total"
+          value={revenue ? formatBRL(revenue.total) : HIDDEN}
+          hint={velocity ? `${formatInt(velocity.total)} unidades acumuladas` : undefined}
+          valueClass="text-[#facc15]"
+        />
+      </div>
+    </div>
+  );
+}
+
+function SalesEstimatePanel({
+  est,
+  soldLabel,
+  soldSource,
+}: {
+  est: SalesEstimate | null;
+  soldLabel: string;
+  soldSource: string;
+}) {
+  if (!est) return null;
+  const rangeStr =
+    est.maxSales === null
+      ? `≥ ${formatInt(est.minSales)}`
+      : est.minSales === est.maxSales
+        ? formatInt(est.minSales)
+        : `${formatInt(est.minSales)} – ${formatInt(est.maxSales)}`;
+
+  return (
+    <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Sparkles size={16} className="text-[#facc15]" /> Motor de Vendas (Módulo 98069 Avantpro)
+        </p>
+        <Pill tone="yellow">{soldLabel}</Pill>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Stat
+          label="Faixa pública ML"
+          value={rangeStr}
+          hint={`Centro da faixa: ${formatInt(est.rangeCenter)}`}
+        />
+        <Stat
+          label="Centro ajustado (w)"
+          value={formatInt(est.rangeCenterAdjusted)}
+          hint={
+            est.ageMonths !== null
+              ? `Idade ~${formatDecimal(est.ageMonths, 1)} meses (${((est.ageAdjustment ?? 0) * 100).toFixed(0)}%)`
+              : 'Sem ajuste por idade'
+          }
+        />
+        <Stat
+          label="Por avaliações (A)"
+          value={est.reviewsEstimateAdjusted !== null ? formatInt(est.reviewsEstimateAdjusted) : 'Sem opiniões'}
+          hint={
+            est.reviewsEstimate !== null
+              ? `Base bruta (×15): ${formatInt(est.reviewsEstimate)}`
+              : 'Ponderação 100% na faixa'
+          }
+        />
+        <Stat
+          label="Estimativa Final"
+          value={formatInt(est.final)}
+          hint={`Consolidada (0,6·A + 0,4·w): ${formatInt(est.consolidated)}`}
+          valueClass="text-[#facc15]"
+        />
+        <Stat
+          label="Ritmo Atual / Mês"
+          value={est.monthlyPace !== null ? `${formatInt(est.monthlyPace)} un./mês` : HIDDEN}
+          hint="Fórmula 0,4·C / (meses / 3)"
+          valueClass="text-[#10b981]"
+        />
+      </div>
+
+      <ul className="mt-3 grid gap-1.5 text-xs text-slate-400 sm:grid-cols-2">
+        {est.explanation.map((line, i) => (
+          <li key={i}>• {line}</li>
+        ))}
+        <li>• Fonte ativa para o dossiê: {soldSource}</li>
+      </ul>
+    </div>
+  );
+}
+
+function FeesAndSignalsPanel({
+  fees,
+  signals,
+  isSupermarket,
+}: {
+  fees: FeeSnapshot;
+  signals: PageSignals | null;
+  isSupermarket: boolean;
+}) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+            <Layers size={16} className="text-[#3b82f6]" /> Tarifas Reais da Categoria &amp; Frete
+          </p>
+          {isSupermarket && <Pill tone="yellow">Supermercado</Pill>}
+        </div>
+        <p className="mb-3 text-xs text-slate-400">
+          Categoria: <span className="text-slate-200">{fees.categoryPath ?? fees.categoryId ?? HIDDEN}</span>
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat
+            label="Clássico (gold_special)"
+            value={fees.classic ? formatBRL(fees.classic.amount) : HIDDEN}
+            hint={
+              fees.classic
+                ? `${formatDecimal(fees.classic.percentage, 1)}% + fixa ${formatBRL(fees.classic.fixed)}`
+                : undefined
+            }
+          />
+          <Stat
+            label="Premium (gold_pro)"
+            value={fees.premium ? formatBRL(fees.premium.amount) : HIDDEN}
+            hint={
+              fees.premium
+                ? `${formatDecimal(fees.premium.percentage, 1)}% + fixa ${formatBRL(fees.premium.fixed)}`
+                : undefined
+            }
+          />
+          <Stat
+            label="Frete (list_cost)"
+            value={
+              fees.freeShippingByMeli
+                ? 'R$ 0,00 (coberto ML)'
+                : fees.shippingListCost !== null
+                  ? formatBRL(fees.shippingListCost)
+                  : 'Simular na aba'
+            }
+            hint={fees.shippingSource}
+          />
+        </div>
+        <p className="mt-2 text-[11px] text-slate-500">Origem das taxas: {fees.feeSource}</p>
+      </div>
+
+      <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+        <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Code size={16} className="text-[#facc15]" /> Estado da Página Capturado
+        </p>
+        {signals && signals.sources.length > 0 ? (
+          <div className="space-y-3 text-xs">
+            <div className="flex flex-wrap gap-1.5">
+              {signals.sources.map((src) => (
+                <Pill key={src} tone="blue">
+                  {src}
+                </Pill>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Mini label="Tipo de página" value={signals.pageType} />
+              <Mini label="start_time" value={formatDate(signals.startTime)} sub={signals.startTimeSource ?? undefined} />
+              <Mini
+                label="tracks.sold_quantity"
+                value={signals.soldExact !== null ? formatInt(signals.soldExact) : signals.soldText ?? HIDDEN}
+              />
+              <Mini
+                label="Estoque no DOM"
+                value={signals.availableQuantity !== null ? formatInt(signals.availableQuantity) : HIDDEN}
+                sub={signals.stockText ?? undefined}
+              />
+              <Mini
+                label="Vendedores catálogo"
+                value={signals.catalogSellers !== null ? formatInt(signals.catalogSellers) : HIDDEN}
+              />
+              <Mini label="Polycards lidos" value={formatInt(signals.polycards.length)} />
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">
+            Dados carregados diretamente da API Oficial do Mercado Livre.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function SellerPanel({ seller }: { seller: SellerInfo | null }) {
   if (!seller) return <EmptyBox>Vendedor oculto no anúncio.</EmptyBox>;
@@ -1147,20 +1658,63 @@ function SellerPanel({ seller }: { seller: SellerInfo | null }) {
       : (seller.city ?? seller.state ?? HIDDEN);
   return (
     <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
-      <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
-        <Store size={16} className="text-[#10b981]" /> Vendedor
-      </p>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Stat label="Loja" value={seller.nickname ?? HIDDEN} />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Store size={16} className="text-[#10b981]" /> Reputação do Vendedor
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <Pill tone="yellow">
+            <Award size={12} /> {seller.medal}
+          </Pill>
+          {seller.reputationLevel && <Pill tone="green">Nível {seller.reputationLevel}</Pill>}
+          {seller.officialStoreId && <Pill tone="blue">Loja Oficial #{seller.officialStoreId}</Pill>}
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Loja" value={seller.nickname ?? HIDDEN} hint={seller.id ? `ID #${seller.id}` : undefined} />
         <Stat
           label="Conta criada em"
           value={formatDate(seller.registrationDate)}
           hint={formatAccountAge(seller.accountYears)}
         />
         <Stat label="Localização" value={location} />
-        <Stat label="Medalha" value={seller.medal} valueClass="text-[#facc15]" />
-        <Stat label="Vendas concluídas" value={formatInt(seller.completedSales)} />
+        <Stat
+          label="Vendas concluídas"
+          value={formatInt(seller.completedSales)}
+          hint={
+            seller.positiveRatingPct !== null
+              ? `${formatDecimal(seller.positiveRatingPct, 1)}% avaliações positivas`
+              : undefined
+          }
+          valueClass="text-[#10b981]"
+        />
       </div>
+      {(seller.claimsRate !== null ||
+        seller.cancellationRate !== null ||
+        seller.delayedHandlingRate !== null) && (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <Mini
+            label="Taxa de reclamações"
+            value={
+              seller.claimsRate !== null ? formatPercent(seller.claimsRate * 100) : HIDDEN
+            }
+          />
+          <Mini
+            label="Taxa de cancelamento"
+            value={
+              seller.cancellationRate !== null ? formatPercent(seller.cancellationRate * 100) : HIDDEN
+            }
+          />
+          <Mini
+            label="Envio com atraso"
+            value={
+              seller.delayedHandlingRate !== null
+                ? formatPercent(seller.delayedHandlingRate * 100)
+                : HIDDEN
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -1212,19 +1766,15 @@ function DossierView({
   canGoBack,
   onBack,
   onSimulate,
+  onPickTerm,
 }: {
   d: Dossier;
   canGoBack: boolean;
   onBack: () => void;
   onSimulate: () => void;
+  onPickTerm: (term: string) => void;
 }) {
   const [jsonOpen, setJsonOpen] = useState(false);
-  const rev = revenueOf(d);
-  const estimated = d.soldSource === MARKER_SOURCE;
-  const velocity =
-    rev.dailyUnits !== null
-      ? `${rev.dailyUnits.toFixed(2).replace('.', ',')} vendas/dia (média desde a criação)`
-      : d.soldSource;
   const ratingCountText =
     d.ratingCount === null ? 'Opiniões ocultas' : `${formatInt(d.ratingCount)} opiniões`;
 
@@ -1243,7 +1793,7 @@ function DossierView({
             <Code size={14} /> Ver JSON Puro da API
           </button>
           <button type="button" onClick={onSimulate} className={BTN_SM_YELLOW}>
-            <Calculator size={14} /> Simular Margem
+            <Calculator size={14} /> Simular na Calculadora Ee
           </button>
           {d.permalink && (
             <a href={d.permalink} target="_blank" rel="noreferrer" className={BTN_GHOST}>
@@ -1253,13 +1803,23 @@ function DossierView({
         </div>
       </div>
 
+      {d.ageAlert && d.ageAlert !== 'ok' && (
+        <Banner kind={d.ageAlert === 'danger' ? 'erro' : 'aviso'}>
+          <strong>{d.ageAlertLabel ?? AGE_ALERT_LABEL[d.ageAlert]}:</strong> este anúncio está no ar há{' '}
+          {formatDaysOnAir(d.daysOnAir)} (criado em {formatDate(d.createdAt)}).
+        </Banner>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Pill>Fonte: {d.origin}</Pill>
         {d.itemId && <Pill tone="blue">Anúncio: {d.itemId}</Pill>}
         {d.productId && <Pill tone="blue">Catálogo: {d.productId}</Pill>}
+        {d.categoryId && <Pill tone="slate">Categoria: {d.categoryId}</Pill>}
         {d.listingType && <Pill tone="yellow">{d.listingType}</Pill>}
         {d.fulfillment && <Pill tone="green">Full</Pill>}
         {d.freeShipping && <Pill tone="green">Frete grátis</Pill>}
+        {d.isSupermarket && <Pill tone="amber">Supermercado</Pill>}
+        <AgeAlertBadge alert={d.ageAlert} days={d.daysOnAir} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
@@ -1272,6 +1832,7 @@ function DossierView({
             <h2 className="text-xl font-semibold leading-snug text-slate-100">{d.title}</h2>
             <p className="mt-1 text-sm text-slate-400">
               Marca: {d.brand ?? HIDDEN} · Modelo: {d.model ?? HIDDEN}
+              {d.categoryPath ? ` · ${d.categoryPath}` : ''}
             </p>
           </div>
 
@@ -1289,30 +1850,12 @@ function DossierView({
                 {formatRating(d.ratingAverage)}
               </span>
               <span>{ratingCountText}</span>
+              {d.fees.current && (
+                <span className="text-xs text-slate-400">
+                  Comissão estimada: {formatBRL(d.fees.current.amount)} ({formatDecimal(d.fees.current.percentage, 1)}%)
+                </span>
+              )}
             </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Stat
-              icon={<TrendingUp size={14} />}
-              label="Receita estimada 30d"
-              value={formatBRL(rev.est30)}
-              hint={
-                rev.est30 === null
-                  ? 'Requer vendas e data de criação visíveis'
-                  : estimated
-                    ? 'Piso mínimo: média diária desde a criação'
-                    : 'Média diária desde a criação × 30 dias'
-              }
-              valueClass="text-[#10b981]"
-            />
-            <Stat
-              icon={<TrendingUp size={14} />}
-              label="Faturamento bruto"
-              value={formatBRL(rev.gross)}
-              hint={estimated ? 'Vendas mínimas × preço atual' : 'Vendas totais × preço atual'}
-              valueClass="text-[#10b981]"
-            />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1321,6 +1864,26 @@ function DossierView({
               label="Criação do anúncio"
               value={formatDate(d.createdAt)}
               hint={`${formatDaysOnAir(d.daysOnAir)} · ${d.createdSource}`}
+              valueClass={
+                d.ageAlert === 'danger'
+                  ? 'text-red-400'
+                  : d.ageAlert === 'warning'
+                    ? 'text-amber-300'
+                    : 'text-slate-100'
+              }
+            />
+            <Stat
+              icon={<Boxes size={14} />}
+              label="Estoque disponível"
+              value={formatInt(d.availableQuantity)}
+              hint={d.stockText ? `${d.stockText} · ${d.stockSource}` : d.stockSource}
+            />
+            <Stat
+              icon={<TrendingUp size={14} />}
+              label="Volume de vendas"
+              value={d.soldLabel}
+              hint={d.soldSource}
+              valueClass="text-[#10b981]"
             />
             <Stat
               icon={<Camera size={14} />}
@@ -1328,21 +1891,22 @@ function DossierView({
               value={d.firstPhotoDate ?? HIDDEN}
               hint={d.firstPhotoSource}
             />
-            <Stat icon={<TrendingUp size={14} />} label="Volume / velocidade" value={d.soldLabel} hint={velocity} />
-            <Stat
-              icon={<Truck size={14} />}
-              label="Logística"
-              value={d.fulfillment ? 'Full' : (d.logisticType ?? HIDDEN)}
-              hint={d.freeShipping ? 'Frete grátis' : 'Sem frete grátis'}
-            />
           </div>
 
           <SellerPanel seller={d.seller} />
         </div>
       </div>
 
+      <VelocityRevenuePanel velocity={d.velocity} revenue={d.revenue} soldSource={d.soldSource} />
+
+      <SalesEstimatePanel est={d.salesEstimate} soldLabel={d.soldLabel} soldSource={d.soldSource} />
+
+      <FeesAndSignalsPanel fees={d.fees} signals={d.pageSignals} isSupermarket={d.isSupermarket} />
+
+      <KeywordsPanel keywords={d.keywords} onPickTerm={onPickTerm} />
+
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-200">Ofertas concorrentes</h3>
+        <h3 className="text-sm font-semibold text-slate-200">Ofertas concorrentes no catálogo</h3>
         <CompetitorList rows={d.competitors} />
       </div>
 
@@ -1355,9 +1919,9 @@ function DossierView({
       )}
 
       {jsonOpen && (
-        <Modal title="JSON puro da API" onClose={() => setJsonOpen(false)} wide>
+        <Modal title="JSON puro da API e Estado da Página" onClose={() => setJsonOpen(false)} wide>
           <p className="mb-3 text-xs text-slate-400">
-            Resposta real usada para montar este Raio-X. Campos ocultos pelo Mercado Livre aparecem ausentes.
+            Resposta completa combinando API oficial, estado da página e cálculos do Módulo 98069.
           </p>
           <pre className="max-h-[65vh] overflow-auto rounded-xl bg-[#070b14] p-4 text-xs leading-relaxed text-slate-300">
             {JSON.stringify(d.raw, null, 2)}
@@ -1369,40 +1933,167 @@ function DossierView({
 }
 
 /* =============================================================================
- * SIMULADOR DE MARGEM
+ * CALCULADORA COMPLETA DA CLASSE "Ee" (custo total, MC, líquido e preço sugerido)
  * ============================================================================= */
+
+function BreakdownCard({
+  title,
+  badge,
+  active,
+  b,
+  suggested,
+  marginMode,
+  marginTargetRaw,
+  onApplySuggested,
+}: {
+  title: string;
+  badge: string;
+  active: boolean;
+  b: CalculatorBreakdown;
+  suggested: SuggestedPrice;
+  marginMode: 'pct' | 'brl';
+  marginTargetRaw: string;
+  onApplySuggested: (price: number) => void;
+}) {
+  const hasPrice = b.price > 0;
+  const mcPositive = b.contribution >= 0;
+
+  return (
+    <div
+      className={`space-y-4 rounded-2xl border p-5 ${
+        active ? 'border-[#facc15]/40 bg-[#111827]' : 'border-white/5 bg-[#111827]/90'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold text-slate-100">{title}</h3>
+          <p className="text-xs text-slate-400">{badge}</p>
+        </div>
+        {active && <Pill tone="yellow">Modalidade selecionada</Pill>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Stat
+          label="Margem de Contribuição (R$)"
+          value={hasPrice ? formatBRL(b.contribution) : 'Informe o preço'}
+          valueClass={!hasPrice ? 'text-slate-400' : mcPositive ? 'text-emerald-400' : 'text-red-400'}
+        />
+        <Stat
+          label="Margem de Contribuição (%)"
+          value={hasPrice ? formatPercent(b.contributionPct * 100) : 'Informe o preço'}
+          valueClass={!hasPrice ? 'text-slate-400' : mcPositive ? 'text-emerald-400' : 'text-red-400'}
+        />
+        <Stat
+          label="Valor Líquido a Receber (ML)"
+          value={hasPrice ? formatBRL(b.netReceive) : 'Informe o preço'}
+          hint="Preço − comissão − taxa fixa − frete"
+          valueClass="text-[#3b82f6]"
+        />
+        <Stat
+          label="Custo Total da Operação"
+          value={hasPrice ? formatBRL(b.totalCost) : 'Informe o preço'}
+          hint="Comissão + fixa + frete + produto + extra + imposto"
+        />
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-white/5 bg-[#0b1220] p-4 text-xs">
+        <p className="mb-1 font-semibold uppercase tracking-wide text-slate-400">
+          Decomposição no preço {hasPrice ? formatBRL(b.price) : 'R$ 0,00'}
+        </p>
+        <div className="flex justify-between text-slate-300">
+          <span>Comissão ML ({formatDecimal(b.commissionPct, 1)}%)</span>
+          <span>{formatBRL(b.commission, 'R$ 0,00')}</span>
+        </div>
+        <div className="flex justify-between text-slate-300">
+          <span>Taxa fixa por faixa</span>
+          <span>{formatBRL(b.fixedFee, 'R$ 0,00')}</span>
+        </div>
+        <div className="flex justify-between text-slate-300">
+          <span>Frete considerado</span>
+          <span>{formatBRL(b.shipping, 'R$ 0,00')}</span>
+        </div>
+        <div className="flex justify-between text-slate-300">
+          <span>Imposto NF</span>
+          <span>{formatBRL(b.tax, 'R$ 0,00')}</span>
+        </div>
+        <div className="flex justify-between text-slate-300">
+          <span>Custo do produto + embalagem</span>
+          <span>{formatBRL(b.productCost + b.extraCost, 'R$ 0,00')}</span>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[#facc15]/25 bg-[#facc15]/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-[#facc15]">
+              Preço Sugerido ({marginMode === 'pct' ? `Meta ${marginTargetRaw || '0'}%` : `Meta R$ ${marginTargetRaw || '0'}`})
+            </p>
+            <p className="mt-1 text-2xl font-bold text-slate-100">
+              {suggested.price !== null ? formatBRL(suggested.price) : 'Meta inatingível'}
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              {suggested.price !== null
+                ? `Convergiu em ${suggested.iterations}/${MAX_PRICE_ITERATIONS} iterações (|ΔP| < R$ 0,01) · MC resultante: ${
+                    suggested.breakdown
+                      ? `${formatBRL(suggested.breakdown.contribution)} (${formatPercent(suggested.breakdown.contributionPct * 100)})`
+                      : '-'
+                  }`
+                : 'A soma de imposto + comissão + margem desejada ultrapassa 100%.'}
+            </p>
+          </div>
+          {suggested.price !== null && (
+            <button
+              type="button"
+              onClick={() => onApplySuggested(suggested.price as number)}
+              className={BTN_SM_YELLOW}
+            >
+              Aplicar preço
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CalculatorView({
   calc,
   onChange,
-  margin,
+  ee,
 }: {
   calc: CalcForm;
   onChange: (patch: Partial<CalcForm>) => void;
-  margin: MarginResult;
+  ee: EeOutput;
 }) {
-  const hasPrice = parseInputNumber(calc.salePrice) > 0;
-  const belowTarget = hasPrice && margin.netMarginPct < MARGIN_TARGET_PCT;
-  const isPremium = calc.listing === 'premium';
+  const applySuggested = (price: number) => {
+    onChange({ salePrice: formatInputNumber(price) });
+  };
 
   return (
-    <section className="grid gap-6 lg:grid-cols-5">
-      <div className="space-y-4 rounded-2xl border border-white/5 bg-[#111827] p-5 lg:col-span-3">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Calculator size={18} className="text-[#facc15]" /> Simulador de margem
-        </h2>
+    <section className="space-y-6">
+      <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Calculator size={18} className="text-[#facc15]" /> Calculadora de Precificação &amp; Margem (Classe Ee Avantpro)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Regras de comissão e taxa fixa por faixa (&lt;R$ 12,50 → 50%; &lt;R$ 29 → R$ 6,25; &lt;R$ 50 → R$ 6,50; &lt;R$ 79 → R$ 6,75; ≥R$ 79 → isento) e cálculo iterativo de até {MAX_PRICE_ITERATIONS} repetições.
+            </p>
+          </div>
+          {calc.categoryLabel && <Pill tone="blue">Categoria: {calc.categoryLabel}</Pill>}
+        </div>
 
-        <Field label="Produto (opcional)">
-          <input
-            className={INPUT_CLASS}
-            value={calc.title}
-            onChange={(e) => onChange({ title: e.target.value })}
-            placeholder="Ex.: Creatina Growth 250g"
-          />
-        </Field>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Preço de venda (R$)">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Field label="Produto analisado" className="md:col-span-2">
+            <input
+              className={INPUT_CLASS}
+              value={calc.title}
+              onChange={(e) => onChange({ title: e.target.value })}
+              placeholder="Ex.: Creatina Growth 250g"
+            />
+          </Field>
+          <Field label="Preço de venda atual (R$)">
             <input
               inputMode="decimal"
               className={INPUT_CLASS}
@@ -1411,7 +2102,18 @@ function CalculatorView({
               placeholder="0,00"
             />
           </Field>
-          <Field label="Custo no fornecedor (R$)">
+          <Field label="Modalidade em destaque">
+            <select
+              className={INPUT_CLASS}
+              value={calc.listing}
+              onChange={(e) => onChange({ listing: e.target.value as ListingKind })}
+            >
+              <option value="classico">Clássico (gold_special)</option>
+              <option value="premium">Premium (gold_pro)</option>
+            </select>
+          </Field>
+
+          <Field label="Custo do produto (R$)">
             <input
               inputMode="decimal"
               className={INPUT_CLASS}
@@ -1420,7 +2122,7 @@ function CalculatorView({
               placeholder="0,00"
             />
           </Field>
-          <Field label="Embalagem / custo extra (R$)">
+          <Field label="Custo extra / embalagem (R$)">
             <input
               inputMode="decimal"
               className={INPUT_CLASS}
@@ -1429,106 +2131,122 @@ function CalculatorView({
               placeholder="0,00"
             />
           </Field>
-          <Field label="Imposto da nota fiscal (%)">
+          <Field label="Imposto NF (%)">
             <input
               inputMode="decimal"
               className={INPUT_CLASS}
               value={calc.taxPct}
               onChange={(e) => onChange({ taxPct: e.target.value })}
-              placeholder="0"
+              placeholder="6"
             />
           </Field>
-          <Field label="Tipo de anúncio">
+          <Field label="Custo de frete list_cost (R$)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.shippingCost}
+              onChange={(e) => onChange({ shippingCost: e.target.value })}
+              placeholder="22,90"
+            />
+          </Field>
+
+          <Field label="Comissão Clássico (%)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.classicPct}
+              onChange={(e) => onChange({ classicPct: e.target.value })}
+              placeholder="12"
+            />
+          </Field>
+          <Field label="Comissão Premium (%)">
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.premiumPct}
+              onChange={(e) => onChange({ premiumPct: e.target.value })}
+              placeholder="17"
+            />
+          </Field>
+          <Field label="Modo da Margem Desejada">
             <select
               className={INPUT_CLASS}
-              value={calc.listing}
-              onChange={(e) => onChange({ listing: e.target.value as ListingKind })}
+              value={calc.marginMode}
+              onChange={(e) => onChange({ marginMode: e.target.value as 'pct' | 'brl' })}
             >
-              <option value="classico">{LISTING_LABEL.classico}</option>
-              <option value="premium">{LISTING_LABEL.premium}</option>
+              <option value="pct">Em percentual (%)</option>
+              <option value="brl">Em reais (R$)</option>
             </select>
           </Field>
-          <div className="space-y-3">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
-              <input
-                type="checkbox"
-                checked={calc.freeShipping}
-                onChange={(e) => onChange({ freeShipping: e.target.checked })}
-                className="h-4 w-4 accent-[#3b82f6]"
-              />
-              Frete grátis pelo vendedor (acima de R$ 79)
-            </label>
-            {calc.freeShipping && (
-              <Field label="Custo do frete (R$)">
-                <input
-                  inputMode="decimal"
-                  className={INPUT_CLASS}
-                  value={calc.shippingCost}
-                  onChange={(e) => onChange({ shippingCost: e.target.value })}
-                  placeholder="0,00"
-                />
-              </Field>
-            )}
-          </div>
+          <Field
+            label={
+              calc.marginMode === 'pct'
+                ? 'Margem de Contribuição Desejada (%)'
+                : 'Margem de Contribuição Desejada (R$)'
+            }
+          >
+            <input
+              inputMode="decimal"
+              className={INPUT_CLASS}
+              value={calc.marginTarget}
+              onChange={(e) => onChange({ marginTarget: e.target.value })}
+              placeholder={calc.marginMode === 'pct' ? '18' : '25,00'}
+            />
+          </Field>
         </div>
 
-        <p className="text-xs text-slate-500">
-          {isPremium
-            ? 'Premium: taxa fixa de R$ 6,25 em vendas abaixo de R$ 79.'
-            : 'Clássico: sem taxa fixa nesta simulação. Confira no simulador oficial do Mercado Livre.'}
-        </p>
+        <div className="mt-4 flex flex-wrap gap-5 border-t border-white/5 pt-4 text-xs text-slate-300">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={calc.mlCoversShipping}
+              onChange={(e) => onChange({ mlCoversShipping: e.target.checked })}
+              className="h-4 w-4 accent-[#3b82f6]"
+            />
+            Mercado Livre cobre o frete (entra como R$ 0,00)
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={calc.shippingBelowThreshold}
+              onChange={(e) => onChange({ shippingBelowThreshold: e.target.checked })}
+              className="h-4 w-4 accent-[#3b82f6]"
+            />
+            Manter frete grátis por conta do vendedor mesmo abaixo de R$ {FREE_SHIPPING_THRESHOLD}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={calc.isSupermarket}
+              onChange={(e) => onChange({ isSupermarket: e.target.checked })}
+              className="h-4 w-4 accent-[#3b82f6]"
+            />
+            Regra Supermercado (taxa fixa: &lt;30 R$1 · &lt;50 R$2 · &lt;100 R$4 · &lt;199 R$6)
+          </label>
+        </div>
       </div>
 
-      <div className="space-y-4 lg:col-span-2">
-        <div className="space-y-4 rounded-2xl border border-white/5 bg-[#111827] p-5">
-          <Stat
-            label="Lucro líquido por venda"
-            value={hasPrice ? formatBRL(margin.netProfit) : 'Informe o preço'}
-            valueClass={!hasPrice ? 'text-slate-400' : margin.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}
-          />
-          <Stat
-            label="Margem líquida"
-            value={hasPrice ? formatPercent(margin.netMarginPct) : 'Informe o preço'}
-            valueClass={belowTarget ? 'text-red-400' : 'text-emerald-400'}
-            hint={`Meta: ${MARGIN_TARGET_PCT}%`}
-          />
-          <Stat
-            label={`Teto no fornecedor (${MARGIN_TARGET_PCT}%)`}
-            value={hasPrice ? formatBRL(margin.maxSupplierCost) : 'Informe o preço'}
-            valueClass="text-[#facc15]"
-            hint={
-              hasPrice && margin.maxSupplierCost <= 0
-                ? 'Com este preço, a margem alvo não é atingível'
-                : 'Maior custo que ainda entrega a margem alvo'
-            }
-          />
-        </div>
-
-        <div className="space-y-2 rounded-2xl border border-white/5 bg-[#111827] p-5 text-sm">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Descontos calculados</p>
-          <div className="flex justify-between text-slate-300">
-            <span>Comissão ({isPremium ? '17%' : '12%'})</span>
-            <span>{formatBRL(margin.commission, 'R$ 0,00')}</span>
-          </div>
-          <div className="flex justify-between text-slate-300">
-            <span>Taxa fixa</span>
-            <span>{formatBRL(margin.fixedFee, 'R$ 0,00')}</span>
-          </div>
-          <div className="flex justify-between text-slate-300">
-            <span>Imposto</span>
-            <span>{formatBRL(margin.tax, 'R$ 0,00')}</span>
-          </div>
-          <div className="flex justify-between text-slate-300">
-            <span>Frete grátis</span>
-            <span>{formatBRL(margin.shipping, 'R$ 0,00')}</span>
-          </div>
-        </div>
-
-        {belowTarget && (
-          <Banner kind="aviso">
-            Margem abaixo da meta de {MARGIN_TARGET_PCT}%. Revise o preço ou o custo no fornecedor.
-          </Banner>
-        )}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <BreakdownCard
+          title="Anúncio Clássico (gold_special)"
+          badge={`Taxa base: ${calc.classicPct || '12'}%`}
+          active={calc.listing === 'classico'}
+          b={ee.classic}
+          suggested={ee.suggestedClassic}
+          marginMode={calc.marginMode}
+          marginTargetRaw={calc.marginTarget}
+          onApplySuggested={applySuggested}
+        />
+        <BreakdownCard
+          title="Anúncio Premium (gold_pro)"
+          badge={`Taxa base: ${calc.premiumPct || '17'}% (parcelamento sem juros)`}
+          active={calc.listing === 'premium'}
+          b={ee.premium}
+          suggested={ee.suggestedPremium}
+          marginMode={calc.marginMode}
+          marginTargetRaw={calc.marginTarget}
+          onApplySuggested={applySuggested}
+        />
       </div>
     </section>
   );
@@ -1618,19 +2336,7 @@ export default function BuscasMLPro() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchSeqRef = useRef(0);
 
-  const margin = useMemo(
-    () =>
-      computeMargin({
-        salePrice: parseInputNumber(calc.salePrice),
-        supplierCost: parseInputNumber(calc.supplierCost),
-        packagingCost: parseInputNumber(calc.packagingCost),
-        taxPct: parseInputNumber(calc.taxPct),
-        listing: calc.listing,
-        freeShipping: calc.freeShipping,
-        shippingCost: parseInputNumber(calc.shippingCost),
-      }),
-    [calc],
-  );
+  const ee = useMemo(() => computeEeCalculator(calc), [calc]);
 
   /* ---------- sessão ---------- */
 
@@ -1641,10 +2347,6 @@ export default function BuscasMLPro() {
     else clearSession();
   }, []);
 
-  /**
-   * Devolve um token válido. O refresh token rotaciona a cada renovação, então
-   * chamadas simultâneas compartilham a mesma renovação em andamento.
-   */
   const getBearer = useCallback(async (): Promise<string | null> => {
     const current = sessionRef.current;
     if (!current) return null;
@@ -1691,7 +2393,6 @@ export default function BuscasMLPro() {
     }
   }, []);
 
-  /** Retorno do Mercado Livre com ?code=... ou ?error=...: troca o código e limpa a URL. */
   useEffect(() => {
     if (exchangeStartedRef.current) return;
     const url = new URL(window.location.href);
@@ -1752,7 +2453,6 @@ export default function BuscasMLPro() {
     }
   }, []);
 
-  /** Em erro, os resultados anteriores permanecem na tela. Só respostas da busca mais recente são aplicadas. */
   const runAnalysis = useCallback(
     async (input: string, label: string) => {
       const seq = ++searchSeqRef.current;
@@ -1858,19 +2558,38 @@ export default function BuscasMLPro() {
 
   /* ---------- calculadora e filtros ---------- */
 
-  const simulate = (src: {
-    title: string;
-    price: number | null;
-    listingType: string | null;
-    freeShipping: boolean;
-  }) => {
-    setCalc({
-      ...INITIAL_CALC,
+  const simulateFromSummary = (src: ProductSummary) => {
+    setCalc((prev) => ({
+      ...prev,
       title: src.title,
+      categoryLabel: src.categoryId ?? '',
       salePrice: src.price !== null ? formatInputNumber(src.price) : '',
-      listing: kindFromLabel(src.listingType) ?? 'classico',
-      freeShipping: src.freeShipping,
-    });
+      listing: kindFromLabel(src.listingType ?? src.listingTypeId) ?? 'classico',
+      isSupermarket: src.isSupermarket,
+      mlCoversShipping: false,
+    }));
+    setTab('calculadora');
+  };
+
+  const simulateFromDossier = (d: Dossier) => {
+    const cPct =
+      d.fees.categoryFees.range_128?.gold_special ?? DEFAULT_COMMISSION_PCT.gold_special;
+    const pPct = d.fees.categoryFees.range_128?.gold_pro ?? DEFAULT_COMMISSION_PCT.gold_pro;
+    setCalc((prev) => ({
+      ...prev,
+      title: d.title,
+      categoryLabel: d.categoryPath ?? d.categoryId ?? '',
+      salePrice: d.price !== null ? formatInputNumber(d.price) : '',
+      listing: kindFromLabel(d.listingType ?? d.listingTypeId) ?? 'classico',
+      classicPct: String(cPct).replace('.', ','),
+      premiumPct: String(pPct).replace('.', ','),
+      shippingCost:
+        d.fees.shippingListCost !== null
+          ? formatInputNumber(d.fees.shippingListCost)
+          : prev.shippingCost,
+      mlCoversShipping: d.fees.freeShippingByMeli,
+      isSupermarket: d.isSupermarket,
+    }));
     setTab('calculadora');
   };
 
@@ -1905,7 +2624,7 @@ export default function BuscasMLPro() {
               <p className="text-sm font-bold leading-tight">
                 BuscasML <span className="text-[#facc15]">Pro</span>
               </p>
-              <p className="text-[11px] leading-tight text-slate-500">Inteligência de mercado</p>
+              <p className="text-[11px] leading-tight text-slate-500">Motor Analítico Avantpro + JoomPulse</p>
             </div>
           </div>
 
@@ -1920,7 +2639,7 @@ export default function BuscasMLPro() {
               active={tab === 'calculadora'}
               onClick={() => setTab('calculadora')}
               icon={<Calculator size={15} />}
-              label="Simulador de Margem"
+              label="Calculadora Classe Ee"
             />
           </nav>
 
@@ -1948,10 +2667,11 @@ export default function BuscasMLPro() {
         {tab === 'busca' ? (
           <>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Busca & Raio-X de produtos</h1>
+              <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Busca &amp; Raio-X Analítico</h1>
               <p className="mt-1 max-w-3xl text-sm text-slate-400">
-                Dados da API oficial do Mercado Livre e do anúncio público. Campos ocultos aparecem como
-                &quot;Oculto no anúncio&quot;; nada é inventado.
+                Extração de estado da página (<code>__PRELOADED_STATE__</code>, <code>_n.ctx.r</code>,{' '}
+                <code>melidata</code>, <code>ld+json</code>), vendas estimadas pelo Módulo 98069, giro JoomPulse e
+                tarifas reais de categoria.
               </p>
             </div>
 
@@ -2028,7 +2748,8 @@ export default function BuscasMLPro() {
                 d={dossier}
                 canGoBack={keywordResult !== null}
                 onBack={() => setDossier(null)}
-                onSimulate={() => simulate(dossier)}
+                onSimulate={() => simulateFromDossier(dossier)}
+                onPickTerm={runExample}
               />
             ) : keywordResult ? (
               <KeywordView
@@ -2036,7 +2757,8 @@ export default function BuscasMLPro() {
                 filters={filters}
                 onFilters={patchFilters}
                 onOpen={openProduct}
-                onSimulate={simulate}
+                onSimulate={simulateFromSummary}
+                onPickTerm={runExample}
               />
             ) : loading ? null : (
               <>
@@ -2046,7 +2768,7 @@ export default function BuscasMLPro() {
             )}
           </>
         ) : (
-          <CalculatorView calc={calc} onChange={patchCalc} margin={margin} />
+          <CalculatorView calc={calc} onChange={patchCalc} ee={ee} />
         )}
       </main>
 
