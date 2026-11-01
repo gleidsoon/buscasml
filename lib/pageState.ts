@@ -342,11 +342,11 @@ export function normalizeMlImageUrl(rawUrlOrId: string | null | undefined): stri
   const s = str(rawUrlOrId);
   if (!s || /^data:/i.test(s)) return null;
   // Caso seja apenas o ID (ex.: "963201-MLB78912345_092024" ou "615190-MLA99501602606_112025")
-  if (/^(?:2X_)?\d+-[A-Z]{2,4}\d+_\d{6}$/i.test(s)) {
+  if (/^(?:2X_)?\d+-[A-Z]{2,4}\d+_\d{4,6}$/i.test(s)) {
     const cleanId = s.replace(/^2X_/i, '');
     return `https://http2.mlstatic.com/D_NQ_NP_${cleanId}-O.webp`;
   }
-  const idMatch = s.match(/D_NQ_NP_(?:2X_)?(\d+-[A-Z]{2,4}\d+_\d{4,6})/i);
+  const idMatch = s.match(/D_(?:NQ_NP_)?(?:2X_)?(\d+-[A-Z]{2,4}\d+_\d{4,6})/i);
   if (idMatch) {
     return `https://http2.mlstatic.com/D_NQ_NP_${idMatch[1]}-O.webp`;
   }
@@ -398,7 +398,15 @@ export function extractHtmlImage(block: string): string | null {
   return anyMlStatic ? normalizeMlImageUrl(anyMlStatic[0]) : null;
 }
 
-/** Converte fração + centavos de um bloco .andes-money-amount em número. */
+/** Converte uma string "1.599,90" ou "207" capturada após R$ em número. */
+function parseBrlCapture(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const clean = raw.trim().replace(/\./g, '').replace(',', '.');
+  const n = Number(clean);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+/** Converte fração + centavos de um bloco .andes-money-amount ou regex R$ em número. */
 function parseAndesMoneyBlock(fragment: string): number | null {
   const withoutStrike = fragment.replace(
     /<(s|del)\b[^>]*>[\s\S]*?<\/\1>|<span[^>]*andes-money-amount--previous[\s\S]*?<\/span>/gi,
@@ -418,7 +426,15 @@ function parseAndesMoneyBlock(fragment: string): number | null {
       if (v !== null) return v;
     }
   }
-  return extractFractionAndCents(withoutStrike);
+  const byFraction = extractFractionAndCents(withoutStrike);
+  if (byFraction !== null) return byFraction;
+
+  // 4) Fallback via regex /R\$\s*([\d.]+(?:,\d{2})?)/ no HTML/texto bruto do card
+  const textClean = textOf(withoutStrike);
+  const brlMatch =
+    textClean.match(/R\$\s*([\d.]+(?:,\d{2})?)/i) ??
+    withoutStrike.match(/R\$\s*([\d.]+(?:,\d{2})?)/i);
+  return brlMatch ? parseBrlCapture(brlMatch[1]) : null;
 }
 
 function extractFractionAndCents(scope: string): number | null {
@@ -486,18 +502,51 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     str(r.title) ??
     str(r.name);
 
-  // Preço: polycard.components (type === "price" -> price.current_price.value)
+  // Preço: varre polycard.components (current_price.value, price.value, amount) e todo o objeto
   const priceComp = obj(comp('price')?.price) ?? obj(poly.price) ?? {};
-  const price =
+  let price: number | null =
     num(at(priceComp, 'current_price.value')) ??
     num(at(priceComp, 'price.value')) ??
+    num(priceComp.amount) ??
     num(priceComp.value) ??
     num(r.price) ??
+    num(at(r, 'sale_price.amount')) ??
     num(at(r, 'buy_box_winner.price'));
-  const originalPrice =
+
+  let originalPrice: number | null =
     num(at(priceComp, 'previous_price.value')) ??
     num(at(priceComp, 'original_price.value')) ??
-    num(r.original_price);
+    num(r.original_price) ??
+    num(at(r, 'sale_price.regular_amount'));
+
+  if (price === null) {
+    for (const c of components) {
+      const co = obj(c);
+      if (!co) continue;
+      const cand =
+        num(at(co, 'price.current_price.value')) ??
+        num(at(co, 'current_price.value')) ??
+        num(at(co, 'price.value')) ??
+        num(at(co, 'price.amount')) ??
+        num(co.amount) ??
+        num(co.value);
+      if (cand !== null && cand > 0) {
+        price = cand;
+        originalPrice ??=
+          num(at(co, 'price.previous_price.value')) ?? num(at(co, 'previous_price.value'));
+        break;
+      }
+    }
+  }
+  if (price === null) {
+    const deepCurrent = obj(findDeep(poly, 'current_price', 4_000));
+    price = num(deepCurrent?.value) ?? num(deepCurrent?.amount);
+  }
+  if (price === null) {
+    const rawJson = JSON.stringify(poly);
+    const m = rawJson.match(/R\$\s*([\d.]+(?:,\d{2})?)/i);
+    if (m) price = parseBrlCapture(m[1]);
+  }
 
   // Vendas e Avaliações: polycard.components (review_compacted.values -> label2 ou "vendido") + tracks.sold_quantity
   const tracks = obj(meta.tracks) ?? obj(at(poly, 'tracks')) ?? {};

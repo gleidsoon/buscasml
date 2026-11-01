@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent, ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -182,17 +182,39 @@ type Dossier = {
   raw: Record<string, unknown>;
 };
 
+type CategoryTrend = {
+  keyword: string;
+  url: string;
+};
+
+type CategoryChild = {
+  id: string;
+  name: string;
+  totalItems: number | null;
+};
+
+type CategoryOverview = {
+  id: string;
+  name: string;
+  path: string;
+  totalItems: number | null;
+  childrenCategories: CategoryChild[];
+  trends: CategoryTrend[];
+  fees: FeeSnapshot;
+};
+
+type SearchMode = 'auto' | 'termo' | 'anuncio' | 'categoria';
+
 type KeywordAnalysis = {
   mode: 'keyword';
   query: string;
   products: ProductSummary[];
   keywords?: { words: KeywordStat[]; phrases: KeywordStat[] };
+  category?: CategoryOverview | null;
   note: string | null;
 };
 type DossierAnalysis = { mode: 'dossier'; dossier: Dossier };
 type Analysis = KeywordAnalysis | DossierAnalysis;
-
-type Identified = { query: string; confidence: string; reason: string };
 
 type OAuthTokens = {
   accessToken: string;
@@ -208,12 +230,9 @@ type StatusEnvelope = {
   ok: true;
   secretConfigured: boolean;
   appTokenActive: boolean;
-  photoSearchConfigured: boolean;
-  visionModel: string;
 };
 
 type SearchEnvelope = { ok: true; data: Analysis };
-type PhotoEnvelope = { ok: true; identified: Identified; data: Analysis };
 type TokenEnvelope = { ok: true; tokens: OAuthTokens };
 
 type ListingKind = 'classico' | 'premium';
@@ -301,11 +320,53 @@ const INITIAL_CALC: CalcForm = {
 
 const EXAMPLES = [
   'Coroa tiara strass noiva',
+  'Parafusadeira Vonder',
   'Creatina Growth 250g',
   'Pote hermético tempero',
   'Jogo 6 taças diamante',
   'Cadeira gamer reclinável',
-  'Parafusadeira Vonder',
+];
+
+const AD_CODE_EXAMPLES = [
+  { code: 'MLB5625506238', label: 'MLB5625506238 (Anúncio)' },
+  { code: 'MLBU3375028575', label: 'MLBU3375028575 (Catálogo UP)' },
+  { code: 'MLB45458519', label: 'MLB45458519 (Catálogo)' },
+];
+
+const CATEGORY_EXAMPLES = [
+  { code: 'MLB190433', label: 'MLB190433 · Arcos e Tiaras' },
+  { code: 'MLB1051', label: 'MLB1051 · Celulares e Telefones' },
+  { code: 'MLB1648', label: 'MLB1648 · Informática' },
+  { code: 'MLB1276', label: 'MLB1276 · Esportes e Fitness' },
+  { code: 'MLB1430', label: 'MLB1430 · Calçados, Roupas e Bolsas' },
+  { code: 'MLB1574', label: 'MLB1574 · Casa, Móveis e Decoração' },
+];
+
+const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string; placeholder: string; hint: string }[] = [
+  {
+    value: 'auto',
+    label: 'Detecção Automática',
+    placeholder: 'Palavra-chave, link, código de anúncio (MLB5625506238 / MLBU...) ou categoria (MLB190433)',
+    hint: 'Diferencia automaticamente termos, links, códigos de anúncio (8–12 dígitos / MLBU) e códigos de categoria (4–7 dígitos).',
+  },
+  {
+    value: 'termo',
+    label: 'Termo / Link',
+    placeholder: 'Ex.: Coroa tiara strass noiva ou https://produto.mercadolivre.com.br/...',
+    hint: 'Pesquise por palavra-chave de nicho ou cole o link direto do anúncio / catálogo (mercadolivre.com.br ou meli.la).',
+  },
+  {
+    value: 'anuncio',
+    label: 'Código MLB Anúncio',
+    placeholder: 'Ex.: MLB5625506238, MLB-5625506238, MLBU3375028575 ou MLB45458519',
+    hint: 'Abre direto o Raio-X analítico completo do anúncio ou produto de catálogo.',
+  },
+  {
+    value: 'categoria',
+    label: 'Código MLB Categoria',
+    placeholder: 'Ex.: MLB190433 ou nome da categoria (Arcos, Tiaras e Faixas)',
+    hint: 'Consulta os anúncios da categoria, árvore completa (/categories/MLB...), tendências (/trends/MLB/...) e taxas Clássico/Premium.',
+  },
 ];
 
 const INPUT_CLASS =
@@ -562,8 +623,13 @@ function authHeaders(bearer: string | null): Record<string, string> {
   return bearer ? { [USER_TOKEN_HEADER]: bearer } : {};
 }
 
-async function requestAnalysis(input: string, bearer: string | null): Promise<Analysis> {
-  const res = await fetch(`/api/ml?q=${encodeURIComponent(input)}`, {
+async function requestAnalysis(
+  input: string,
+  bearer: string | null,
+  mode: SearchMode = 'auto',
+): Promise<Analysis> {
+  const params = new URLSearchParams({ q: input, mode });
+  const res = await fetch(`/api/ml?${params.toString()}`, {
     headers: authHeaders(bearer),
     cache: 'no-store',
   });
@@ -574,18 +640,6 @@ async function requestAnalysis(input: string, bearer: string | null): Promise<An
 async function requestStatus(): Promise<StatusEnvelope> {
   const res = await fetch('/api/ml?action=status', { cache: 'no-store' });
   return readEnvelope<StatusEnvelope>(res);
-}
-
-async function requestPhoto(file: File, bearer: string | null): Promise<PhotoEnvelope> {
-  const form = new FormData();
-  form.append('image', file, file.name || 'colagem.png');
-  const res = await fetch('/api/ml', {
-    method: 'POST',
-    headers: authHeaders(bearer),
-    body: form,
-    cache: 'no-store',
-  });
-  return readEnvelope<PhotoEnvelope>(res);
 }
 
 async function requestTokenAction(body: Record<string, unknown>): Promise<OAuthTokens> {
@@ -605,21 +659,6 @@ function requestExchange(code: string, redirectUri: string): Promise<OAuthTokens
 
 function requestRefresh(refreshToken: string): Promise<OAuthTokens> {
   return requestTokenAction({ action: 'refresh', refreshToken });
-}
-
-/* =============================================================================
- * ÁREA DE TRANSFERÊNCIA (colagem de print com Ctrl+V)
- * ============================================================================= */
-
-function imageFromDataTransfer(data: DataTransfer | null | undefined): File | null {
-  if (!data) return null;
-  for (const item of Array.from(data.items)) {
-    if (item.kind === 'file' && item.type.startsWith('image/')) {
-      const file = item.getAsFile();
-      if (file) return file;
-    }
-  }
-  return null;
 }
 
 /* =============================================================================
@@ -963,13 +1002,13 @@ function Onboarding() {
   const items: { icon: ReactNode; title: string; text: string }[] = [
     {
       icon: <Search size={18} />,
-      title: 'Palavra-chave + Extrator SEO',
-      text: 'Pesquise nichos com métricas de vendas, alertas de maturidade e extração de palavras-chave dos títulos.',
+      title: 'Palavra-chave, Link ou Código MLB',
+      text: 'Pesquise por termo, link do ML (meli.la, /p/MLB, /up/MLBU) ou código de anúncio (MLB5625506238, MLBU3375028575) abrindo direto o Raio-X.',
     },
     {
-      icon: <LayoutGrid size={18} />,
-      title: 'Raio-X Avantpro + JoomPulse',
-      text: 'Cole um link ou MLB para ver vendas estimadas (Módulo 98069), giro diário/semanal/mensal e taxas reais.',
+      icon: <Layers size={18} />,
+      title: 'Raio-X de Categoria & Tendências',
+      text: 'Consulte qualquer código de categoria (ex.: MLB190433) para ver árvore completa, tendências oficiais (/trends/MLB) e taxas Clássico/Premium.',
     },
     {
       icon: <Calculator size={18} />,
@@ -992,20 +1031,170 @@ function Onboarding() {
   );
 }
 
-function ExamplesRow({ onPick }: { onPick: (text: string) => void }) {
+function ExamplesRow({
+  onPickTerm,
+  onPickAdCode,
+  onPickCategory,
+}: {
+  onPickTerm: (text: string) => void;
+  onPickAdCode: (code: string) => void;
+  onPickCategory: (categoryId: string) => void;
+}) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-slate-500">Testar:</span>
-      {EXAMPLES.map((ex) => (
-        <button
-          key={ex}
-          type="button"
-          onClick={() => onPick(ex)}
-          className="rounded-full border border-white/10 bg-[#111827] px-3 py-1 text-xs text-slate-300 transition hover:bg-white/10"
-        >
-          {ex}
-        </button>
-      ))}
+    <div className="space-y-3 rounded-2xl border border-white/5 bg-[#111827] p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-400">Termos de busca:</span>
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            onClick={() => onPickTerm(ex)}
+            className="rounded-full border border-white/10 bg-[#0b1220] px-3 py-1 text-xs text-slate-300 transition hover:bg-white/10"
+          >
+            {ex}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-400">Códigos de Anúncio / Catálogo:</span>
+        {AD_CODE_EXAMPLES.map((item) => (
+          <button
+            key={item.code}
+            type="button"
+            onClick={() => onPickAdCode(item.code)}
+            className="rounded-full border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-1 text-xs text-blue-200 transition hover:bg-[#3b82f6]/20"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-400">Códigos de Categoria:</span>
+        {CATEGORY_EXAMPLES.map((cat) => (
+          <button
+            key={cat.code}
+            type="button"
+            onClick={() => onPickCategory(cat.code)}
+            className="rounded-full border border-[#facc15]/30 bg-[#facc15]/10 px-3 py-1 text-xs text-[#facc15] transition hover:bg-[#facc15]/20"
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CategoryOverviewPanel({
+  category,
+  onSelectCategory,
+  onPickTrend,
+  onUseCategoryFees,
+}: {
+  category: CategoryOverview;
+  onSelectCategory: (categoryId: string) => void;
+  onPickTrend: (keyword: string) => void;
+  onUseCategoryFees: (category: CategoryOverview) => void;
+}) {
+  const r64 = category.fees.categoryFees.range_64;
+  const r128 = category.fees.categoryFees.range_128;
+  const classicSample = category.fees.classic;
+  const premiumSample = category.fees.premium;
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-[#facc15]/25 bg-[#111827] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone="yellow">Categoria {category.id}</Pill>
+            {category.totalItems !== null && (
+              <Pill tone="blue">{formatInt(category.totalItems)} anúncios na categoria</Pill>
+            )}
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-slate-100">{category.name}</h3>
+          {category.path && (
+            <p className="mt-1 text-xs text-slate-400">
+              Árvore da categoria: <span className="text-slate-200">{category.path}</span>
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => onUseCategoryFees(category)} className={BTN_SM_YELLOW}>
+            <Calculator size={14} /> Simular Taxas da Categoria
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
+          <p className="font-medium text-slate-400">Comissão Clássico (gold_special)</p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">
+            {r128?.gold_special !== undefined
+              ? `${formatDecimal(r128.gold_special, 1)}%`
+              : classicSample
+                ? `${formatDecimal(classicSample.percentage, 1)}%`
+                : HIDDEN}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
+          <p className="font-medium text-slate-400">Comissão Premium (gold_pro)</p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">
+            {r128?.gold_pro !== undefined
+              ? `${formatDecimal(r128.gold_pro, 1)}%`
+              : premiumSample
+                ? `${formatDecimal(premiumSample.percentage, 1)}%`
+                : HIDDEN}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
+          <p className="font-medium text-slate-400">Faixa &lt; R$ 79 (/listing_prices)</p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">
+            Clássico: {r64?.gold_special !== undefined ? `${formatDecimal(r64.gold_special, 1)}%` : HIDDEN} · Premium:{' '}
+            {r64?.gold_pro !== undefined ? `${formatDecimal(r64.gold_pro, 1)}%` : HIDDEN}
+          </p>
+        </div>
+      </div>
+
+      {category.trends.length > 0 && (
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+            <Sparkles size={13} className="text-[#facc15]" /> Tendências Oficiais da Categoria (/trends/MLB/{category.id})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {category.trends.slice(0, 18).map((t) => (
+              <button
+                key={t.keyword}
+                type="button"
+                onClick={() => onPickTrend(t.keyword)}
+                className="rounded-xl border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-2.5 py-1 text-xs text-blue-200 transition hover:bg-[#3b82f6]/20"
+              >
+                {t.keyword}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {category.childrenCategories.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Subcategorias de {category.name}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {category.childrenCategories.map((ch) => (
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => onSelectCategory(ch.id)}
+                className="rounded-xl border border-white/10 bg-[#0b1220] px-2.5 py-1 text-xs text-slate-200 transition hover:border-[#facc15]/40 hover:text-[#facc15]"
+              >
+                {ch.name} <span className="text-slate-500">({ch.id})</span>
+                {ch.totalItems !== null ? ` · ${formatInt(ch.totalItems)}` : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1135,10 +1324,12 @@ function ProductCard({
   p,
   onOpen,
   onSimulate,
+  onOpenCategory,
 }: {
   p: ProductSummary;
   onOpen: (p: ProductSummary) => void;
   onSimulate: (p: ProductSummary) => void;
+  onOpenCategory?: (categoryId: string) => void;
 }) {
   const code = p.itemId ?? p.productId;
   const borderClass =
@@ -1161,6 +1352,16 @@ function ProductCard({
           {p.fulfillment && <Pill tone="green">Full</Pill>}
           {p.freeShipping && <Pill tone="yellow">Frete grátis</Pill>}
           {p.isSponsored && <Pill tone="amber">Patrocinado</Pill>}
+          {p.categoryId && onOpenCategory && (
+            <button
+              type="button"
+              onClick={() => onOpenCategory(p.categoryId as string)}
+              className="rounded-md bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-[#facc15]"
+              title={`Analisar categoria ${p.categoryId}`}
+            >
+              Cat: {p.categoryId}
+            </button>
+          )}
           <AgeAlertBadge alert={p.ageAlert} days={p.daysOnAir} />
         </div>
         <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-snug text-slate-100">{p.title}</h3>
@@ -1292,6 +1493,8 @@ function KeywordView({
   onOpen,
   onSimulate,
   onPickTerm,
+  onOpenCategory,
+  onUseCategoryFees,
 }: {
   result: KeywordAnalysis;
   filters: FilterState;
@@ -1299,6 +1502,8 @@ function KeywordView({
   onOpen: (p: ProductSummary) => void;
   onSimulate: (p: ProductSummary) => void;
   onPickTerm: (term: string) => void;
+  onOpenCategory: (categoryId: string) => void;
+  onUseCategoryFees: (category: CategoryOverview) => void;
 }) {
   const visible = useMemo(
     () => applyFilters(result.products, filters.age, filters.logistic, filters.sort),
@@ -1346,6 +1551,15 @@ function KeywordView({
       </div>
 
       {result.note && <Banner kind="aviso">{result.note}</Banner>}
+
+      {result.category && (
+        <CategoryOverviewPanel
+          category={result.category}
+          onSelectCategory={onOpenCategory}
+          onPickTrend={onPickTerm}
+          onUseCategoryFees={onUseCategoryFees}
+        />
+      )}
 
       {visible.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1417,6 +1631,7 @@ function KeywordView({
               p={p}
               onOpen={onOpen}
               onSimulate={onSimulate}
+              onOpenCategory={onOpenCategory}
             />
           ))}
         </div>
@@ -1767,12 +1982,14 @@ function DossierView({
   onBack,
   onSimulate,
   onPickTerm,
+  onOpenCategory,
 }: {
   d: Dossier;
   canGoBack: boolean;
   onBack: () => void;
   onSimulate: () => void;
   onPickTerm: (term: string) => void;
+  onOpenCategory: (categoryId: string) => void;
 }) {
   const [jsonOpen, setJsonOpen] = useState(false);
   const ratingCountText =
@@ -1814,7 +2031,16 @@ function DossierView({
         <Pill>Fonte: {d.origin}</Pill>
         {d.itemId && <Pill tone="blue">Anúncio: {d.itemId}</Pill>}
         {d.productId && <Pill tone="blue">Catálogo: {d.productId}</Pill>}
-        {d.categoryId && <Pill tone="slate">Categoria: {d.categoryId}</Pill>}
+        {d.categoryId && (
+          <button
+            type="button"
+            onClick={() => onOpenCategory(d.categoryId as string)}
+            className="inline-flex items-center gap-1 rounded-md border border-[#facc15]/30 bg-[#facc15]/10 px-2 py-0.5 text-xs font-medium text-[#facc15] transition hover:bg-[#facc15]/20"
+            title="Clique para abrir o Raio-X e tendências desta categoria"
+          >
+            <Layers size={12} /> Categoria: {d.categoryId}
+          </button>
+        )}
         {d.listingType && <Pill tone="yellow">{d.listingType}</Pill>}
         {d.fulfillment && <Pill tone="green">Full</Pill>}
         {d.freeShipping && <Pill tone="green">Frete grátis</Pill>}
@@ -2318,6 +2544,7 @@ function OAuthModal({
 export default function BuscasMLPro() {
   const [tab, setTab] = useState<TabKey>('busca');
   const [query, setQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>('auto');
   const [loading, setLoading] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [keywordResult, setKeywordResult] = useState<KeywordAnalysis | null>(null);
@@ -2326,14 +2553,11 @@ export default function BuscasMLPro() {
   const [calc, setCalc] = useState<CalcForm>(INITIAL_CALC);
   const [session, setSession] = useState<StoredSession | null>(null);
   const [envStatus, setEnvStatus] = useState<StatusEnvelope | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
 
   const sessionRef = useRef<StoredSession | null>(null);
   const refreshRef = useRef<Promise<string | null> | null>(null);
   const exchangeStartedRef = useRef(false);
-  const photoUrlRef = useRef<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const searchSeqRef = useRef(0);
 
   const ee = useMemo(() => computeEeCalculator(calc), [calc]);
@@ -2436,12 +2660,6 @@ export default function BuscasMLPro() {
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
-    };
-  }, []);
-
   /* ---------- buscas ---------- */
 
   const applyAnalysis = useCallback((a: Analysis) => {
@@ -2454,13 +2672,14 @@ export default function BuscasMLPro() {
   }, []);
 
   const runAnalysis = useCallback(
-    async (input: string, label: string) => {
+    async (input: string, label: string, modeOverride?: SearchMode) => {
       const seq = ++searchSeqRef.current;
+      const effectiveMode = modeOverride ?? searchMode;
       setLoading(label);
       setNotice(null);
       try {
         const bearer = await getBearer();
-        const analysis = await requestAnalysis(input, bearer);
+        const analysis = await requestAnalysis(input, bearer, effectiveMode);
         if (seq === searchSeqRef.current) applyAnalysis(analysis);
       } catch (err) {
         if (seq === searchSeqRef.current) {
@@ -2470,67 +2689,44 @@ export default function BuscasMLPro() {
         if (seq === searchSeqRef.current) setLoading(null);
       }
     },
-    [applyAnalysis, getBearer],
+    [applyAnalysis, getBearer, searchMode],
   );
-
-  const runPhoto = useCallback(
-    async (file: File) => {
-      const previous = photoUrlRef.current;
-      const url = URL.createObjectURL(file);
-      photoUrlRef.current = url;
-      setPhotoPreview(url);
-      if (previous) URL.revokeObjectURL(previous);
-
-      setTab('busca');
-      const seq = ++searchSeqRef.current;
-      setLoading('Identificando o produto na imagem...');
-      setNotice(null);
-      try {
-        const bearer = await getBearer();
-        const env = await requestPhoto(file, bearer);
-        if (seq === searchSeqRef.current) {
-          setQuery(env.identified.query);
-          applyAnalysis(env.data);
-          setNotice({
-            kind: 'ok',
-            text: `Produto identificado: "${env.identified.query}" (confiança ${env.identified.confidence}). ${env.identified.reason}`.trim(),
-          });
-        }
-      } catch (err) {
-        if (seq === searchSeqRef.current) {
-          setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível identificar a imagem.') });
-        }
-      } finally {
-        if (seq === searchSeqRef.current) setLoading(null);
-      }
-    },
-    [applyAnalysis, getBearer],
-  );
-
-  useEffect(() => {
-    const onPaste = (event: ClipboardEvent) => {
-      const file = imageFromDataTransfer(event.clipboardData);
-      if (!file) return;
-      event.preventDefault();
-      void runPhoto(file);
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, [runPhoto]);
 
   const submitSearch = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const input = query.trim();
     if (!input) {
-      setNotice({ kind: 'aviso', text: 'Digite uma palavra-chave, um código MLB ou um link do Mercado Livre.' });
+      setNotice({
+        kind: 'aviso',
+        text: 'Digite uma palavra-chave, um código de anúncio (MLB/MLBU), um código de categoria (ex.: MLB190433) ou um link do Mercado Livre.',
+      });
       return;
     }
-    void runAnalysis(input, 'Consultando o Mercado Livre...');
+    const label =
+      searchMode === 'anuncio'
+        ? `Abrindo Raio-X do anúncio ${input}...`
+        : searchMode === 'categoria'
+          ? `Consultando categoria ${input}...`
+          : 'Consultando o Mercado Livre...';
+    void runAnalysis(input, label, searchMode);
   };
 
-  const runExample = (text: string) => {
+  const runExampleTerm = (text: string) => {
     setQuery(text);
-    void runAnalysis(text, `Buscando "${text}"...`);
+    setSearchMode('termo');
+    void runAnalysis(text, `Buscando "${text}"...`, 'termo');
+  };
+
+  const runExampleAdCode = (code: string) => {
+    setQuery(code);
+    setSearchMode('anuncio');
+    void runAnalysis(code, `Abrindo Raio-X de ${code}...`, 'anuncio');
+  };
+
+  const openCategory = (categoryId: string) => {
+    setQuery(categoryId);
+    setSearchMode('categoria');
+    void runAnalysis(categoryId, `Consultando categoria ${categoryId}...`, 'categoria');
   };
 
   const openProduct = (p: ProductSummary) => {
@@ -2539,21 +2735,9 @@ export default function BuscasMLPro() {
       setNotice({ kind: 'aviso', text: 'Este anúncio não tem código para abrir o Raio-X.' });
       return;
     }
-    void runAnalysis(code, 'Abrindo o Raio-X...');
-  };
-
-  const onFileChosen = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (file) void runPhoto(file);
-  };
-
-  const clearPhoto = () => {
-    if (photoUrlRef.current) {
-      URL.revokeObjectURL(photoUrlRef.current);
-      photoUrlRef.current = null;
-    }
-    setPhotoPreview(null);
+    setQuery(code);
+    setSearchMode('anuncio');
+    void runAnalysis(code, 'Abrindo o Raio-X...', 'anuncio');
   };
 
   /* ---------- calculadora e filtros ---------- */
@@ -2593,6 +2777,28 @@ export default function BuscasMLPro() {
     setTab('calculadora');
   };
 
+  const simulateCategoryFees = (category: CategoryOverview) => {
+    const cf = category.fees.categoryFees;
+    const cPct =
+      cf.range_128?.gold_special ??
+      cf.range_64?.gold_special ??
+      category.fees.classic?.percentage ??
+      DEFAULT_COMMISSION_PCT.gold_special;
+    const pPct =
+      cf.range_128?.gold_pro ??
+      cf.range_64?.gold_pro ??
+      category.fees.premium?.percentage ??
+      DEFAULT_COMMISSION_PCT.gold_pro;
+    setCalc((prev) => ({
+      ...prev,
+      title: prev.title || `Simulação · ${category.name}`,
+      categoryLabel: `${category.id} · ${category.path}`,
+      classicPct: String(cPct).replace('.', ','),
+      premiumPct: String(pPct).replace('.', ','),
+    }));
+    setTab('calculadora');
+  };
+
   const patchCalc = useCallback((patch: Partial<CalcForm>) => {
     setCalc((c) => ({ ...c, ...patch }));
   }, []);
@@ -2611,6 +2817,8 @@ export default function BuscasMLPro() {
   };
 
   const dossierKey = dossier ? (dossier.itemId ?? dossier.productId ?? dossier.title) : '';
+  const activeModeMeta =
+    SEARCH_MODE_OPTIONS.find((m) => m.value === searchMode) ?? SEARCH_MODE_OPTIONS[0];
 
   return (
     <div className="min-h-screen">
@@ -2675,8 +2883,46 @@ export default function BuscasMLPro() {
               </p>
             </div>
 
-            <form onSubmit={submitSearch} className="rounded-2xl border border-white/5 bg-[#111827] p-3">
+            <form onSubmit={submitSearch} className="space-y-3 rounded-2xl border border-white/5 bg-[#111827] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {SEARCH_MODE_OPTIONS.map((opt) => {
+                    const active = searchMode === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setSearchMode(opt.value)}
+                        className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                          active
+                            ? 'bg-[#3b82f6] text-white'
+                            : 'border border-white/10 bg-[#0b1220] text-slate-300 hover:bg-white/10'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Detecção automática diferencia categorias (4–7 dígitos, ex.: MLB190433) e anúncios (8–12 dígitos, ex.: MLB5625506238)
+                </span>
+              </div>
+
               <div className="flex flex-col gap-3 md:flex-row">
+                <select
+                  value={searchMode}
+                  onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+                  aria-label="Tipo de busca"
+                  className="rounded-xl border border-white/10 bg-[#070b14] px-3 py-3 text-xs font-medium text-slate-200 outline-none focus:border-[#3b82f6] md:w-56"
+                >
+                  {SEARCH_MODE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+
                 <div className="relative flex-1">
                   <Search
                     size={18}
@@ -2685,57 +2931,47 @@ export default function BuscasMLPro() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Palavra-chave, código MLB ou link (meli.la, /p/MLB, /up/MLBU)"
+                    placeholder={activeModeMeta.placeholder}
                     aria-label="Pesquisa no Mercado Livre"
                     className={`${INPUT_CLASS} py-3 pl-10`}
                   />
                 </div>
-                <div className="flex gap-2">
-                  <button type="submit" disabled={loading !== null} className={BTN_PRIMARY}>
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-                    Buscar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={loading !== null}
-                    className={BTN_GHOST}
-                    title={
-                      envStatus?.photoSearchConfigured === false
-                        ? 'Configure ANTHROPIC_API_KEY na Vercel'
-                        : 'Buscar por foto'
-                    }
-                  >
-                    <Camera size={16} /> Buscar por Foto
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={onFileChosen}
-                  />
-                </div>
+
+                <button type="submit" disabled={loading !== null} className={BTN_PRIMARY}>
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  Buscar
+                </button>
               </div>
 
-              <p className="mt-2 px-1 text-xs text-slate-500">
-                Dica: cole um print em qualquer lugar da página com Ctrl+V para identificar o produto.
-                {envStatus?.photoSearchConfigured === false &&
-                  ' A busca por foto precisa de ANTHROPIC_API_KEY na Vercel.'}
-              </p>
+              {searchMode === 'anuncio' && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                  <span className="text-slate-400">Exemplos de códigos de anúncio/catálogo:</span>
+                  {AD_CODE_EXAMPLES.map((item) => (
+                    <button
+                      key={item.code}
+                      type="button"
+                      onClick={() => runExampleAdCode(item.code)}
+                      className="rounded-lg border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-2.5 py-1 text-blue-200 transition hover:bg-[#3b82f6]/20"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              {photoPreview && (
-                <div className="mt-3 flex items-center gap-3 rounded-xl bg-[#070b14] p-2">
-                  <img src={photoPreview} alt="Foto enviada" className="h-14 w-14 rounded-lg object-cover" />
-                  <p className="flex-1 text-xs text-slate-400">Foto usada na busca.</p>
-                  <button
-                    type="button"
-                    onClick={clearPhoto}
-                    aria-label="Remover foto"
-                    className="rounded p-1 text-slate-400 transition hover:text-slate-100"
-                  >
-                    <X size={16} />
-                  </button>
+              {searchMode === 'categoria' && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                  <span className="text-slate-400">Categorias populares do ML:</span>
+                  {CATEGORY_EXAMPLES.map((cat) => (
+                    <button
+                      key={cat.code}
+                      type="button"
+                      onClick={() => openCategory(cat.code)}
+                      className="rounded-lg border border-[#facc15]/30 bg-[#facc15]/10 px-2.5 py-1 text-[#facc15] transition hover:bg-[#facc15]/20"
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
                 </div>
               )}
             </form>
@@ -2749,7 +2985,8 @@ export default function BuscasMLPro() {
                 canGoBack={keywordResult !== null}
                 onBack={() => setDossier(null)}
                 onSimulate={() => simulateFromDossier(dossier)}
-                onPickTerm={runExample}
+                onPickTerm={runExampleTerm}
+                onOpenCategory={openCategory}
               />
             ) : keywordResult ? (
               <KeywordView
@@ -2758,12 +2995,18 @@ export default function BuscasMLPro() {
                 onFilters={patchFilters}
                 onOpen={openProduct}
                 onSimulate={simulateFromSummary}
-                onPickTerm={runExample}
+                onPickTerm={runExampleTerm}
+                onOpenCategory={openCategory}
+                onUseCategoryFees={simulateCategoryFees}
               />
             ) : loading ? null : (
               <>
                 <Onboarding />
-                <ExamplesRow onPick={runExample} />
+                <ExamplesRow
+                  onPickTerm={runExampleTerm}
+                  onPickAdCode={runExampleAdCode}
+                  onPickCategory={openCategory}
+                />
               </>
             )}
           </>
