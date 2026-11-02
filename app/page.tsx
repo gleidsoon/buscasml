@@ -52,7 +52,7 @@ import {
   type SalesEstimate,
   type SuggestedPrice,
 } from '@/lib/mlEngine';
-import type { PageSignals } from '@/lib/pageState';
+import type { PageSignals, ProductVideo } from '@/lib/pageState';
 
 /* =============================================================================
  * TIPOS (espelham as respostas de app/api/ml/route.ts)
@@ -92,13 +92,21 @@ type FeeSnapshot = {
 
 type CompetitorRow = {
   itemId: string;
+  productId: string | null;
+  title: string;
+  image: string | null;
   price: number | null;
+  priceDiffPct: number | null;
   sellerId: number | null;
   sellerNickname: string | null;
   sellerMedal: string | null;
   fulfillment: boolean;
   freeShipping: boolean;
   listingType: string | null;
+  soldQuantity: number | null;
+  soldLabel: string | null;
+  permalink: string | null;
+  source: 'Catálogo BuyBox' | 'Busca Similar';
 };
 
 type ProductSummary = {
@@ -145,6 +153,7 @@ type Dossier = {
   brand: string | null;
   model: string | null;
   images: string[];
+  videos: ProductVideo[];
   price: number | null;
   originalPrice: number | null;
   discountPct: number | null;
@@ -911,9 +920,29 @@ function SafeImage({ src, alt, className }: { src: string | null; alt: string; c
   );
 }
 
-function Gallery({ images, title }: { images: string[]; title: string }) {
+function Gallery({
+  images,
+  videos = [],
+  title,
+}: {
+  images: string[];
+  videos?: ProductVideo[];
+  title: string;
+}) {
+  type MediaSlide =
+    | { kind: 'image'; src: string }
+    | { kind: 'video'; video: ProductVideo };
+
+  const slides: MediaSlide[] = useMemo(
+    () => [
+      ...images.map((src): MediaSlide => ({ kind: 'image', src })),
+      ...videos.map((video): MediaSlide => ({ kind: 'video', video })),
+    ],
+    [images, videos],
+  );
+
   const [index, setIndex] = useState(0);
-  const total = images.length;
+  const total = slides.length;
 
   if (total === 0) {
     return (
@@ -924,18 +953,51 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
   }
 
   const current = Math.min(index, total - 1);
+  const activeSlide = slides[current];
   const step = (delta: number) => setIndex((i) => (i + delta + total) % total);
 
   return (
     <div className="rounded-2xl border border-white/5 bg-[#111827] p-3">
+      <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+        <span>
+          Galeria Oficial do Anúncio ({images.length} {images.length === 1 ? 'foto' : 'fotos'}
+          {videos.length > 0 ? ` · ${videos.length} ${videos.length === 1 ? 'vídeo' : 'vídeos'}` : ''})
+        </span>
+        {activeSlide.kind === 'video' && (
+          <Pill tone="yellow">Vídeo do Produto</Pill>
+        )}
+      </div>
+
       <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-white">
-        <SafeImage src={images[current]} alt={title} className="max-h-full max-w-full object-contain p-6" />
+        {activeSlide.kind === 'image' ? (
+          <SafeImage src={activeSlide.src} alt={title} className="max-h-full max-w-full object-contain p-6" />
+        ) : activeSlide.video.mimeType === 'embed' && /youtube\.com\/embed/i.test(activeSlide.video.url) ? (
+          <iframe
+            src={activeSlide.video.url}
+            title={activeSlide.video.title ?? title}
+            className="h-full w-full bg-black"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center bg-black">
+            <video
+              key={activeSlide.video.url}
+              src={activeSlide.video.url}
+              poster={activeSlide.video.thumbnail ?? images[0] ?? undefined}
+              controls
+              playsInline
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
+        )}
+
         {total > 1 && (
           <>
             <button
               type="button"
               onClick={() => step(-1)}
-              aria-label="Foto anterior"
+              aria-label="Mídia anterior"
               className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80"
             >
               <ChevronLeft size={18} />
@@ -943,7 +1005,7 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
             <button
               type="button"
               onClick={() => step(1)}
-              aria-label="Próxima foto"
+              aria-label="Próxima mídia"
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80"
             >
               <ChevronRight size={18} />
@@ -954,27 +1016,43 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
           </>
         )}
       </div>
+
       {total > 1 && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {images.map((src, i) => (
-            <button
-              key={src}
-              type="button"
-              onClick={() => setIndex(i)}
-              aria-label={`Foto ${i + 1}`}
-              className={`h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-white transition ${
-                i === current ? 'border-[#facc15]' : 'border-transparent opacity-70 hover:opacity-100'
-              }`}
-            >
-              <img
-                src={src}
-                alt=""
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                className="h-full w-full object-contain"
-              />
-            </button>
-          ))}
+          {slides.map((slide, i) => {
+            const key = slide.kind === 'image' ? `img-${slide.src}-${i}` : `vid-${slide.video.url}-${i}`;
+            const thumbSrc = slide.kind === 'image' ? slide.src : (slide.video.thumbnail ?? images[0] ?? '');
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setIndex(i)}
+                aria-label={slide.kind === 'image' ? `Foto ${i + 1}` : `Vídeo ${i + 1}`}
+                className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-white transition ${
+                  i === current ? 'border-[#facc15]' : 'border-transparent opacity-70 hover:opacity-100'
+                }`}
+              >
+                {thumbSrc ? (
+                  <img
+                    src={thumbSrc}
+                    alt=""
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center bg-slate-900 text-[10px] font-bold text-[#facc15]">
+                    VÍDEO
+                  </span>
+                )}
+                {slide.kind === 'video' && (
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-bold text-[#facc15]">
+                    ▶ CLIP
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1934,42 +2012,139 @@ function SellerPanel({ seller }: { seller: SellerInfo | null }) {
   );
 }
 
-function CompetitorList({ rows }: { rows: CompetitorRow[] }) {
+function CompetitorList({
+  rows,
+  onAnalyzeCompetitor,
+}: {
+  rows: CompetitorRow[];
+  onAnalyzeCompetitor?: (itemId: string) => void;
+}) {
   if (rows.length === 0) {
-    return <EmptyBox>Nenhuma oferta concorrente retornada para este catálogo.</EmptyBox>;
+    return (
+      <EmptyBox>
+        Nenhuma oferta concorrente equivalente retornada no catálogo ou na busca desta categoria.
+      </EmptyBox>
+    );
   }
   return (
     <div className="overflow-x-auto rounded-2xl border border-white/5 bg-[#111827]">
       <table className="min-w-full text-left text-sm">
         <thead className="bg-[#0b1220] text-xs uppercase tracking-wide text-slate-400">
           <tr>
-            <th className="px-4 py-3 font-medium">Anúncio</th>
-            <th className="px-4 py-3 font-medium">Preço</th>
+            <th className="px-4 py-3 font-medium">Anúncio &amp; Produto</th>
+            <th className="px-4 py-3 font-medium">Preço &amp; Diferença</th>
+            <th className="px-4 py-3 font-medium">Vendas Estimadas</th>
             <th className="px-4 py-3 font-medium">Vendedor</th>
-            <th className="px-4 py-3 font-medium">Logística</th>
+            <th className="px-4 py-3 font-medium">Tipo &amp; Logística</th>
+            <th className="px-4 py-3 text-right font-medium">Ações</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.itemId} className="border-t border-white/5">
-              <td className="px-4 py-3">
-                <p className="text-slate-200">{r.itemId}</p>
-                {r.listingType && <p className="text-xs text-slate-500">{r.listingType}</p>}
-              </td>
-              <td className="px-4 py-3 font-semibold text-[#facc15]">{formatBRL(r.price)}</td>
-              <td className="px-4 py-3">
-                <p className="text-slate-200">{r.sellerNickname ?? HIDDEN}</p>
-                <p className="text-xs text-slate-500">{r.sellerMedal ?? HIDDEN}</p>
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1.5">
-                  {r.fulfillment && <Pill tone="green">Full</Pill>}
-                  {r.freeShipping && <Pill tone="yellow">Frete grátis</Pill>}
-                  {!r.fulfillment && !r.freeShipping && <span className="text-xs text-slate-500">Padrão</span>}
-                </div>
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const diff = r.priceDiffPct ?? null;
+            const diffText =
+              diff === null
+                ? null
+                : diff === 0
+                  ? 'Mesmo preço'
+                  : diff < 0
+                    ? `${formatDecimal(diff, 1)}% mais barato`
+                    : `+${formatDecimal(diff, 1)}% mais caro`;
+            return (
+              <tr key={r.itemId} className="border-t border-white/5 hover:bg-white/[0.02]">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {r.image ? (
+                      <img
+                        src={r.image}
+                        alt={r.title ?? r.itemId}
+                        className="h-12 w-12 shrink-0 rounded-lg border border-white/10 bg-[#070b14] object-contain p-1"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#070b14] text-slate-600">
+                        <Boxes size={18} />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="line-clamp-2 max-w-xs font-medium text-slate-100">
+                        {r.title ?? r.itemId}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                        <span className="font-mono text-blue-300">{r.itemId}</span>
+                        {r.source === 'Catálogo BuyBox' && <Pill tone="blue">Catálogo BuyBox</Pill>}
+                        {r.source === 'Busca Similar' && <Pill>Mesma Categoria</Pill>}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="font-semibold text-[#facc15]">{formatBRL(r.price)}</p>
+                  {diffText && (
+                    <span
+                      className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        diff !== null && diff < 0
+                          ? 'bg-[#10b981]/15 text-[#10b981]'
+                          : diff !== null && diff > 0
+                            ? 'bg-red-500/15 text-red-300'
+                            : 'bg-white/10 text-slate-300'
+                      }`}
+                    >
+                      {diffText}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <p className="font-semibold text-[#10b981]">
+                    {r.soldLabel ?? (r.soldQuantity !== null && r.soldQuantity !== undefined ? `${formatInt(r.soldQuantity)} vendidos` : HIDDEN)}
+                  </p>
+                  {r.soldQuantity !== null && r.soldQuantity !== undefined && r.price !== null && (
+                    <p className="text-xs text-slate-500">
+                      Fat. est.: {formatBRL(r.soldQuantity * r.price)}
+                    </p>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-slate-200">{r.sellerNickname ?? HIDDEN}</p>
+                  {r.sellerMedal && <p className="text-xs text-slate-500">{r.sellerMedal}</p>}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {r.listingType && <Pill tone="yellow">{r.listingType}</Pill>}
+                    {r.fulfillment && <Pill tone="green">Full</Pill>}
+                    {r.freeShipping && <Pill tone="green">Frete grátis</Pill>}
+                    {!r.fulfillment && !r.freeShipping && !r.listingType && (
+                      <span className="text-xs text-slate-500">Padrão</span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    {onAnalyzeCompetitor && (
+                      <button
+                        type="button"
+                        onClick={() => onAnalyzeCompetitor(r.itemId)}
+                        className={BTN_SM_BLUE}
+                      >
+                        <Search size={13} /> Analisar no Raio-X
+                      </button>
+                    )}
+                    {r.permalink && (
+                      <a
+                        href={r.permalink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={BTN_GHOST}
+                        title="Abrir anúncio no Mercado Livre"
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1983,6 +2158,7 @@ function DossierView({
   onSimulate,
   onPickTerm,
   onOpenCategory,
+  onAnalyzeCompetitor,
 }: {
   d: Dossier;
   canGoBack: boolean;
@@ -1990,6 +2166,7 @@ function DossierView({
   onSimulate: () => void;
   onPickTerm: (term: string) => void;
   onOpenCategory: (categoryId: string) => void;
+  onAnalyzeCompetitor: (itemId: string) => void;
 }) {
   const [jsonOpen, setJsonOpen] = useState(false);
   const ratingCountText =
@@ -2050,7 +2227,12 @@ function DossierView({
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2">
-          <Gallery key={d.itemId ?? d.productId ?? d.title} images={d.images} title={d.title} />
+          <Gallery
+            key={d.itemId ?? d.productId ?? d.title}
+            images={d.images}
+            videos={d.videos}
+            title={d.title}
+          />
         </div>
 
         <div className="space-y-5 lg:col-span-3">
@@ -2132,8 +2314,15 @@ function DossierView({
       <KeywordsPanel keywords={d.keywords} onPickTerm={onPickTerm} />
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-200">Ofertas concorrentes no catálogo</h3>
-        <CompetitorList rows={d.competitors} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-200">
+            Concorrentes Diretos do Mesmo Produto (Catálogo &amp; Busca Similar)
+          </h3>
+          <span className="text-xs text-slate-400">
+            {d.competitors.length} {d.competitors.length === 1 ? 'oferta encontrada' : 'ofertas encontradas'}
+          </span>
+        </div>
+        <CompetitorList rows={d.competitors} onAnalyzeCompetitor={onAnalyzeCompetitor} />
       </div>
 
       {d.notes.length > 0 && (
@@ -2852,9 +3041,9 @@ export default function BuscasMLPro() {
           </nav>
 
           <div className="flex items-center gap-2">
-            {session && <Pill tone="green">Conta conectada</Pill>}
+            {session && <Pill tone="green">Conta ML Conectada</Pill>}
             <button type="button" onClick={() => setAuthOpen(true)} className={BTN_SM_YELLOW}>
-              <Key size={14} /> Autorizar Conta ML (OAuth)
+              <Key size={14} /> {session ? 'Gerenciar Conta ML (OAuth)' : 'Autorizar Conta ML (OAuth)'}
             </button>
           </div>
         </div>
@@ -2987,6 +3176,7 @@ export default function BuscasMLPro() {
                 onSimulate={() => simulateFromDossier(dossier)}
                 onPickTerm={runExampleTerm}
                 onOpenCategory={openCategory}
+                onAnalyzeCompetitor={runExampleAdCode}
               />
             ) : keywordResult ? (
               <KeywordView

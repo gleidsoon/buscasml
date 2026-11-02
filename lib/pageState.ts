@@ -5,7 +5,7 @@
  *   2. <script id="__NORDIC_RENDERING_CTX__"> _n.ctx.r = {...}  (appProps.pageProps.initialState)
  *   3. melidata("add", "event_data", {...}) e melidata("send", "view", {...})
  *   4. <script type="application/ld+json"> e "start_time" em scripts embutidos
- *   5. Seletores de DOM/CSS mapeados da página de produto e da busca (via regex)
+ *   5. Seletores de DOM/CSS mapeados da página de produto (.ui-pdp-gallery) e da busca
  * ============================================================================= */
 
 type AnyObj = Record<string, any>;
@@ -26,6 +26,15 @@ export type PolyItem = {
   productId: string | null;
 };
 
+export type ProductVideo = {
+  id: string | null;
+  url: string;
+  thumbnail: string | null;
+  mimeType: 'mp4' | 'hls' | 'embed';
+  title: string | null;
+  durationSeconds: number | null;
+};
+
 export type PageSignals = {
   sources: string[];
   pageType: 'product' | 'catalog' | 'search' | 'category' | 'unknown';
@@ -34,6 +43,9 @@ export type PageSignals = {
   categoryId: string | null;
   categoryName: string | null;
   title: string | null;
+  brand: string | null;
+  model: string | null;
+  gtin: string | null;
   price: number | null;
   originalPrice: number | null;
   currency: string | null;
@@ -52,11 +64,17 @@ export type PageSignals = {
   rating: number | null;
   reviewsCount: number | null;
   sellerId: number | null;
+  sellerIdFromUrl: number | null;
   sellerName: string | null;
   powerSellerStatus: string | null;
   reputationLevel: string | null;
   officialStoreId: number | null;
   catalogSellers: number | null;
+  galleryImages: string[];
+  videos: ProductVideo[];
+  alAndroidUrl: string | null;
+  ogUrl: string | null;
+  ogDescription: string | null;
   polycards: PolyItem[];
 };
 
@@ -65,6 +83,8 @@ export const ML_SELECTORS = {
   PRODUCT_HEADER: '.ui-pdp-header',
   PRODUCT_SUBTITLE: '.ui-pdp-subtitle',
   PRODUCT_HEADER_SUBTITLE: '.ui-pdp-header__subtitle',
+  PDP_GALLERY: '.ui-pdp-gallery',
+  PDP_GALLERY_FIGURES: '.ui-pdp-gallery__figure img, .ui-pdp-gallery__wrapper img, .ui-pdp-gallery__column img',
   BUYBOX_QUANTITY_AVAILABLE: '.ui-pdp-buybox__quantity__available',
   BUYBOX_QUANTITY: '.ui-pdp-buybox__quantity',
   CATALOG_ITEM_ID_INPUT: 'input[name="item_id"]',
@@ -293,9 +313,11 @@ function metaItemprop(html: string, prop: string): string | null {
 }
 
 function metaProperty(html: string, prop: string): string | null {
-  const a = new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*content=["']([^"']*)["']`, 'i');
-  const b = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*property=["']${prop}["']`, 'i');
-  return str((html.match(a) ?? html.match(b))?.[1]);
+  const esc = prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const a = new RegExp(`<meta[^>]+(?:property|name)=["']${esc}["'][^>]*content=["']([^"']*)["']`, 'i');
+  const b = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${esc}["']`, 'i');
+  const v = (html.match(a) ?? html.match(b))?.[1];
+  return v ? decode(v.trim()) : null;
 }
 
 function inputValue(html: string, name: string): string | null {
@@ -372,17 +394,15 @@ function mlbFromImageOrUrl(url: string | null | undefined): string | null {
 /** Extrai foto de tags <img> lendo src, data-src e srcset (incluindo .poly-component__picture e .ui-search-result-image__element). */
 export function extractHtmlImage(block: string): string | null {
   const imgTags = [...block.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  // Prioriza imagens com as classes de card da busca (.poly-component__picture e .ui-search-result-image__element)
   const prioritized = [
-    ...imgTags.filter((tag) => /poly-component__picture|ui-search-result-image__element/i.test(tag)),
+    ...imgTags.filter((tag) => /poly-component__picture|ui-search-result-image__element|ui-pdp-gallery/i.test(tag)),
     ...imgTags,
   ];
   for (const tag of prioritized) {
-    for (const attrName of ['data-src', 'src', 'srcset', 'data-srcset']) {
+    for (const attrName of ['data-zoom', 'data-src', 'src', 'srcset', 'data-srcset']) {
       const m = tag.match(new RegExp(`\\b${attrName}=["']([^"']+)["']`, 'i'));
       if (!m) continue;
       const rawVal = decode(m[1].trim());
-      // Em srcset pode haver "https://... 1x, https://... 2x"
       const parts = rawVal
         .split(',')
         .map((p) => p.trim().split(/\s+/)[0])
@@ -394,8 +414,275 @@ export function extractHtmlImage(block: string): string | null {
       }
     }
   }
-  const anyMlStatic = block.match(/https?:\/\/http2\.mlstatic\.com\/D_NQ_NP_[^\s"'<>()\\]+/i);
+  const anyMlStatic = block.match(/https?:\/\/http2\.mlstatic\.com\/D_(?:NQ_NP_)?[^\s"'<>()\\]+/i);
   return anyMlStatic ? normalizeMlImageUrl(anyMlStatic[0]) : null;
+}
+
+/**
+ * Extrai estritamente as fotos e vídeos de `components.gallery` no estado da página (_n.ctx.r / initialState):
+ * - Fotos: `components.gallery.pictures` montadas com `picture.id` e `picture_config.template` -> `D_NQ_NP_${id}-O.webp`
+ * - Vídeos: `components.gallery.video_data` / `video_comp` / `clips` / `components.clips`
+ */
+function extractGalleryFromState(state: AnyObj | null): { images: string[]; videos: ProductVideo[] } {
+  if (!state) return { images: [], videos: [] };
+  const components = obj(state.components) ?? {};
+  const gallery = obj(components.gallery) ?? obj(state.gallery) ?? {};
+  const pictureConfig = obj(gallery.picture_config) ?? obj(components.picture_config) ?? {};
+  const template =
+    str(pictureConfig.template_2x) ??
+    str(pictureConfig.template) ??
+    'https://http2.mlstatic.com/D_NQ_NP_{id}-O.webp';
+
+  const rawPictures: AnyObj[] = Array.isArray(gallery.pictures)
+    ? (gallery.pictures as AnyObj[])
+    : Array.isArray(state.pictures)
+      ? (state.pictures as AnyObj[])
+      : [];
+
+  const seenImages = new Set<string>();
+  const images: string[] = [];
+
+  for (const pic of rawPictures) {
+    const pObj = obj(pic);
+    const picId = str(pObj?.id) ?? (typeof pic === 'string' ? str(pic) : null);
+    const directUrl = str(pObj?.url) ?? str(pObj?.secure_url) ?? str(at(pObj, ' zoom.url'));
+    let resolved: string | null = null;
+
+    if (picId && /^(?:2X_)?\d+-[A-Z]{2,4}\d+_\d{4,6}$/i.test(picId)) {
+      const cleanId = picId.replace(/^2X_/i, '');
+      const fromTemplate = template
+        .replace(/\{id\}/gi, cleanId)
+        .replace(/\{sanitizedTitle\}/gi, '');
+      resolved = normalizeMlImageUrl(fromTemplate) ?? `https://http2.mlstatic.com/D_NQ_NP_${cleanId}-O.webp`;
+    } else if (directUrl) {
+      resolved = normalizeMlImageUrl(directUrl);
+    }
+
+    if (resolved && !seenImages.has(resolved)) {
+      seenImages.add(resolved);
+      images.push(resolved);
+    }
+  }
+
+  // Extração de vídeos da galeria (video_data, video_comp, clips)
+  const videos: ProductVideo[] = [];
+  const seenVideoUrls = new Set<string>();
+
+  const pushVideoCandidate = (rawNode: unknown) => {
+    const vObj = obj(rawNode);
+    if (!vObj) return;
+
+    const vidId = str(vObj.id) ?? str(vObj.video_id) ?? str(vObj.clip_id) ?? str(vObj.uid);
+    const title = str(vObj.title) ?? str(at(vObj, 'header.title')) ?? null;
+    const duration = num(vObj.duration) ?? num(vObj.duration_seconds) ?? null;
+
+    const thumbId =
+      str(at(vObj, 'thumbnail.id')) ??
+      str(at(vObj, 'picture.id')) ??
+      str(at(vObj, 'cover.id')) ??
+      str(vObj.thumbnail_id);
+    const thumbRawUrl =
+      str(at(vObj, 'thumbnail.url')) ??
+      str(vObj.thumbnail_url) ??
+      str(vObj.thumbnail) ??
+      str(vObj.poster) ??
+      str(at(vObj, 'cover.url'));
+    const thumbnail = normalizeMlImageUrl(thumbId ?? thumbRawUrl) ?? thumbRawUrl ?? images[0] ?? null;
+
+    // 1) Procura URLs diretas .mp4 ou .m3u8 em streams / sources / video_url / url
+    const candidateStrings: string[] = [];
+    for (const k of ['mp4_url', 'video_url', 'stream_url', 'hls_url', 'dash_url', 'url', 'src', 'contentUrl', 'embedUrl']) {
+      const val = str(vObj[k]);
+      if (val) candidateStrings.push(val);
+    }
+    const streams = obj(vObj.streams) ?? obj(vObj.sources) ?? obj(vObj.media) ?? obj(vObj.video_streams);
+    if (streams) {
+      for (const v of Object.values(streams)) {
+        if (typeof v === 'string') candidateStrings.push(v);
+        else if (obj(v)?.url) candidateStrings.push(String(obj(v)?.url));
+      }
+    }
+    if (Array.isArray(vObj.sources)) {
+      for (const srcItem of vObj.sources) {
+        const u = str(obj(srcItem)?.url) ?? str(obj(srcItem)?.src) ?? str(srcItem);
+        if (u) candidateStrings.push(u);
+      }
+    }
+    // Varre strings internas por .mp4 / .m3u8 se ainda não encontrou
+    if (candidateStrings.length === 0) {
+      const dumped = JSON.stringify(vObj).replace(/\\\//g, '/');
+      const mediaMatches = dumped.match(/https?:\/\/[^\s"'<>\\]+?\.(?:mp4|m3u8)(?:\?[^\s"'<>\\]*)?/gi) ?? [];
+      candidateStrings.push(...mediaMatches);
+    }
+
+    // Prioriza .mp4 depois .m3u8 depois embed
+    const mp4Url = candidateStrings.find((u) => /\.mp4(\?|$)/i.test(u));
+    const hlsUrl = candidateStrings.find((u) => /\.m3u8(\?|$)/i.test(u));
+    const embedUrl = candidateStrings.find((u) => /^https?:\/\//i.test(u));
+
+    const chosenUrl =
+      mp4Url ??
+      hlsUrl ??
+      embedUrl ??
+      (vidId && /^[A-Za-z0-9_-]{11}$/.test(vidId) ? `https://www.youtube.com/embed/${vidId}` : null);
+
+    if (!chosenUrl || seenVideoUrls.has(chosenUrl)) return;
+    seenVideoUrls.add(chosenUrl);
+
+    const mimeType: 'mp4' | 'hls' | 'embed' = mp4Url
+      ? 'mp4'
+      : hlsUrl
+        ? 'hls'
+        : 'embed';
+
+    videos.push({
+      id: vidId,
+      url: chosenUrl,
+      thumbnail,
+      mimeType,
+      title,
+      durationSeconds: duration,
+    });
+  };
+
+  const videoNodes: unknown[] = [
+    gallery.video_data,
+    gallery.video_comp,
+    gallery.video,
+    gallery.clips,
+    components.video_data,
+    components.video_comp,
+    components.clips,
+    state.clips,
+  ];
+  for (const node of videoNodes) {
+    if (!node) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pushVideoCandidate(item);
+    } else {
+      pushVideoCandidate(node);
+      const innerList = (obj(node)?.clips ?? obj(node)?.videos ?? obj(node)?.items) as unknown;
+      if (Array.isArray(innerList)) {
+        for (const item of innerList) pushVideoCandidate(item);
+      }
+    }
+  }
+
+  return { images, videos };
+}
+
+/**
+ * Extrai imagens do DOM HTML da página do produto RESTRINGINDO EXCLUSIVAMENTE ao container `.ui-pdp-gallery`
+ * (ex.: `.ui-pdp-gallery__figure img`, `.ui-pdp-gallery__wrapper img`, `.ui-pdp-gallery__column img`).
+ * NUNCA captura imagens de polycards relacionados/patrocinados no rodapé.
+ */
+export function extractPdpGalleryHtmlImages(html: string): string[] {
+  if (!html) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  // Isola os blocos que pertencem estritamente à galeria do produto (.ui-pdp-gallery)
+  const galleryBlocks: string[] = [];
+  const figureMatches = [
+    ...html.matchAll(
+      /<(?:figure|div|span)\b[^>]*class=["'][^"']*ui-pdp-gallery__(?:figure|wrapper|column)[^"']*["'][^>]*>([\s\S]{10,4500}?)<\/(?:figure|div|span)>/gi,
+    ),
+  ];
+  for (const m of figureMatches) galleryBlocks.push(m[1]);
+
+  if (galleryBlocks.length === 0) {
+    const pdpGalleryIdx = html.search(/class=["'][^"']*ui-pdp-gallery\b/i);
+    if (pdpGalleryIdx >= 0) {
+      // Corta apenas a seção da galeria principal (antes de recomendações/carrosséis)
+      const slice = html.slice(pdpGalleryIdx, pdpGalleryIdx + 28_000);
+      const stopIdx = slice.search(/ui-recommendations|poly-card|ui-pdp-related|ui-search/i);
+      galleryBlocks.push(stopIdx > 0 ? slice.slice(0, stopIdx) : slice);
+    }
+  }
+
+  for (const block of galleryBlocks) {
+    const imgTags = [...block.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
+    for (const tag of imgTags) {
+      for (const attrName of ['data-zoom', 'data-src', 'src', 'srcset']) {
+        const m = tag.match(new RegExp(`\\b${attrName}=["']([^"']+)["']`, 'i'));
+        if (!m) continue;
+        const rawVal = decode(m[1].trim());
+        const firstUrl = rawVal.split(',')[0]?.trim().split(/\s+/)[0];
+        const norm = normalizeMlImageUrl(firstUrl);
+        if (norm && !seen.has(norm)) {
+          seen.add(norm);
+          out.push(norm);
+          break;
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+/** Extrai Marca, Modelo e EAN/GTIN recursivamente de `_n.ctx.r` / `initialState` ou da descrição do produto. */
+function extractSpecsFromState(
+  state: AnyObj | null,
+  descriptionText?: string | null,
+): { brand: string | null; model: string | null; gtin: string | null } {
+  let brand: string | null = null;
+  let model: string | null = null;
+  let gtin: string | null = null;
+
+  const inspectPair = (rawKey: string | null, rawVal: string | null) => {
+    if (!rawKey || !rawVal) return;
+    const k = rawKey.toLowerCase().trim();
+    const v = rawVal.trim();
+    if (!v || v.length > 80) return;
+    if (!brand && (/^(marca|brand|fabricante)$/i.test(k) || k === 'brand')) brand = v;
+    if (!model && (/^(modelo|model|linha)$/i.test(k) || k === 'model')) model = v;
+    if (!gtin && (/^(ean|gtin|c[oó]digo universal|upc)$/i.test(k) || /^\d{8,14}$/.test(v))) {
+      const digits = v.match(/\b(\d{8,14})\b/);
+      if (digits) gtin = digits[1];
+    }
+  };
+
+  if (state) {
+    const stack: unknown[] = [state.components ?? state];
+    let visited = 0;
+    while (stack.length > 0 && visited < 20_000 && (!brand || !model || !gtin)) {
+      const cur = stack.pop();
+      visited++;
+      if (!cur || typeof cur !== 'object') continue;
+      if (Array.isArray(cur)) {
+        for (let i = cur.length - 1; i >= 0; i--) stack.push(cur[i]);
+        continue;
+      }
+      const o = cur as AnyObj;
+      const id = str(o.id) ?? str(o.name) ?? str(o.title) ?? str(o.label) ?? str(o.key);
+      const val =
+        str(o.value_name) ??
+        str(o.value) ??
+        str(at(o, 'values.0.name')) ??
+        str(at(o, 'value.text')) ??
+        str(o.text);
+      if (id && val) inspectPair(id, val);
+      for (const v of Object.values(o)) if (v && typeof v === 'object') stack.push(v);
+    }
+  }
+
+  if (descriptionText) {
+    if (!brand) {
+      const bm = descriptionText.match(/\b(?:Marca|Fabricante)\s*:\s*([^\n•|;,.]{2,40})/i);
+      if (bm) brand = bm[1].trim();
+    }
+    if (!model) {
+      const mm = descriptionText.match(/\b(?:Modelo|Material|Linha)\s*:\s*([^\n•|;,.]{2,45})/i);
+      if (mm) model = mm[1].trim();
+    }
+    if (!gtin) {
+      const gm = descriptionText.match(/\b(?:EAN|GTIN)\s*:\s*(\d{8,14})\b/i);
+      if (gm) gtin = gm[1];
+    }
+  }
+
+  return { brand, model, gtin };
 }
 
 /** Converte uma string "1.599,90" ou "207" capturada após R$ em número. */
@@ -412,9 +699,6 @@ function parseAndesMoneyBlock(fragment: string): number | null {
     /<(s|del)\b[^>]*>[\s\S]*?<\/\1>|<span[^>]*andes-money-amount--previous[\s\S]*?<\/span>/gi,
     ' ',
   );
-  // 1) .poly-price__current .andes-money-amount__fraction
-  // 2) .poly-component__price .andes-money-amount__fraction
-  // 3) .andes-money-amount__fraction
   const scopePatterns = [
     /class=["'][^"']*poly-price__current[^"']*["'][^>]*>([\s\S]{0,1200})/i,
     /class=["'][^"']*poly-component__price[^"']*["'][^>]*>([\s\S]{0,1500})/i,
@@ -429,7 +713,6 @@ function parseAndesMoneyBlock(fragment: string): number | null {
   const byFraction = extractFractionAndCents(withoutStrike);
   if (byFraction !== null) return byFraction;
 
-  // 4) Fallback via regex /R\$\s*([\d.]+(?:,\d{2})?)/ no HTML/texto bruto do card
   const textClean = textOf(withoutStrike);
   const brlMatch =
     textClean.match(/R\$\s*([\d.]+(?:,\d{2})?)/i) ??
@@ -464,7 +747,6 @@ function polyFromResult(r: AnyObj): PolyItem | null {
   const components: AnyObj[] = Array.isArray(poly.components) ? poly.components : [];
   const comp = (type: string): AnyObj | null => obj(components.find((c) => obj(c)?.type === type)) ?? null;
 
-  // Foto: polycard.pictures.pictures[0].id ou componente pictures ou thumbnail
   const pictures: AnyObj[] = Array.isArray(at(poly, 'pictures.pictures'))
     ? (at(poly, 'pictures.pictures') as AnyObj[])
     : Array.isArray(at(comp('pictures'), 'pictures.pictures'))
@@ -502,7 +784,6 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     str(r.title) ??
     str(r.name);
 
-  // Preço: varre polycard.components (current_price.value, price.value, amount) e todo o objeto
   const priceComp = obj(comp('price')?.price) ?? obj(poly.price) ?? {};
   let price: number | null =
     num(at(priceComp, 'current_price.value')) ??
@@ -548,7 +829,6 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     if (m) price = parseBrlCapture(m[1]);
   }
 
-  // Vendas e Avaliações: polycard.components (review_compacted.values -> label2 ou "vendido") + tracks.sold_quantity
   const tracks = obj(meta.tracks) ?? obj(at(poly, 'tracks')) ?? {};
   const melidataTrack = obj(at(tracks, 'melidata_track.event_data')) ?? {};
   const exactTrackSold =
@@ -583,7 +863,6 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     }
   }
 
-  // Também varre outros componentes de texto/frases por "+X vendidos"
   if (!soldLabel) {
     const dumped = JSON.stringify(components);
     soldLabel = soldTextIn(dumped);
@@ -681,7 +960,6 @@ export function readHtmlPolycards(html: string): PolyItem[] {
     const price = parseAndesMoneyBlock(block);
     const originalPrice = parseOriginalAndesPrice(block);
 
-    // Vendas: .poly-reviews__total, .poly-phrase-label, .ui-search-item__group__element ou texto geral do card
     const reviewZone =
       textByClass(block, '.poly-reviews__total, .poly-phrase-label, .ui-search-item__group__element, .poly-component__reviews') ??
       textOf(block);
@@ -732,6 +1010,9 @@ function emptySignals(): PageSignals {
     categoryId: null,
     categoryName: null,
     title: null,
+    brand: null,
+    model: null,
+    gtin: null,
     price: null,
     originalPrice: null,
     currency: null,
@@ -750,13 +1031,30 @@ function emptySignals(): PageSignals {
     rating: null,
     reviewsCount: null,
     sellerId: null,
+    sellerIdFromUrl: null,
     sellerName: null,
     powerSellerStatus: null,
     reputationLevel: null,
     officialStoreId: null,
     catalogSellers: null,
+    galleryImages: [],
+    videos: [],
+    alAndroidUrl: null,
+    ogUrl: null,
+    ogDescription: null,
     polycards: [],
   };
+}
+
+function addUniqueImages(target: string[], candidates: (string | null | undefined)[]): void {
+  const seen = new Set(target);
+  for (const raw of candidates) {
+    const norm = normalizeMlImageUrl(raw);
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      target.push(norm);
+    }
+  }
 }
 
 function applyEventData(s: PageSignals, ev: AnyObj | null, label: string): void {
@@ -803,6 +1101,25 @@ function applyInitialState(s: PageSignals, state: AnyObj | null, label: string):
   const subtitle = str(header.subtitle);
   s.soldText ??= soldTextIn(subtitle);
 
+  // Galeria exclusiva do produto: components.gallery.pictures e vídeos
+  const gal = extractGalleryFromState(state);
+  addUniqueImages(s.galleryImages, gal.images);
+  if (gal.videos.length > 0) {
+    const seenVids = new Set(s.videos.map((v) => v.url));
+    for (const v of gal.videos) {
+      if (!seenVids.has(v.url)) {
+        seenVids.add(v.url);
+        s.videos.push(v);
+      }
+    }
+  }
+
+  // Especificações (Marca, Modelo, EAN/GTIN)
+  const specs = extractSpecsFromState(state);
+  s.brand ??= specs.brand;
+  s.model ??= specs.model;
+  s.gtin ??= specs.gtin;
+
   const aq = obj(components.available_quantity) ?? {};
   const stockLabel =
     str(at(aq, 'label.text')) ??
@@ -820,6 +1137,7 @@ function applyInitialState(s: PageSignals, state: AnyObj | null, label: string):
 
   const seller = obj(components.seller_data) ?? obj(components.seller) ?? {};
   s.sellerName ??= str(at(seller, 'header.title.text')) ?? str(at(seller, 'title.text')) ?? str(seller.seller_name);
+  s.sellerId ??= num(seller.seller_id) ?? num(findDeep(seller, 'seller_id', 2_000));
 
   if (s.startTime === null) {
     const st = str(findDeep(state, 'start_time')) ?? str(findDeep(state, 'date_created'));
@@ -853,6 +1171,15 @@ function applyLdJson(s: PageSignals, nodes: AnyObj[]): void {
   if (!product) return;
   s.sources.push('application/ld+json');
   s.title ??= str(product.name);
+  s.brand ??= str(obj(product.brand)?.name) ?? str(product.brand);
+  s.model ??= str(product.model);
+  s.gtin ??= str(product.gtin13) ?? str(product.gtin) ?? str(product.gtin14) ?? str(product.gtin8);
+
+  const ldImages = Array.isArray(product.image)
+    ? (product.image as unknown[]).map((x) => str(x) ?? str(obj(x)?.url))
+    : [str(product.image) ?? str(obj(product.image)?.url)];
+  addUniqueImages(s.galleryImages, ldImages);
+
   const offers = Array.isArray(product.offers) ? obj(product.offers[0]) : obj(product.offers);
   s.price ??= num(offers?.price);
   s.currency ??= str(offers?.priceCurrency);
@@ -886,8 +1213,39 @@ function applySelectors(s: PageSignals, html: string): void {
     }
   }
 
+  // Galeria DOM restrita exclusivamente a .ui-pdp-gallery (e fallback único para og:image do próprio anúncio)
+  const pdpDomGallery = extractPdpGalleryHtmlImages(html);
+  addUniqueImages(s.galleryImages, pdpDomGallery);
+  if (s.galleryImages.length === 0) {
+    const ogImg = metaProperty(html, 'og:image') ?? metaProperty(html, 'twitter:image');
+    addUniqueImages(s.galleryImages, [ogImg]);
+  }
+
+  // Meta tags OpenGraph e AppLinks (al:android:url, og:url, og:description)
+  s.alAndroidUrl ??=
+    metaProperty(html, 'al:android:url') ??
+    metaProperty(html, 'al:ios:url') ??
+    metaProperty(html, 'twitter:app:url:iphone');
+  s.ogUrl ??= metaProperty(html, 'og:url');
+  s.ogDescription ??= metaProperty(html, 'og:description') ?? metaProperty(html, 'description');
+
+  if (s.alAndroidUrl) {
+    const itemFromAl =
+      s.alAndroidUrl.match(/item\?id=(MLB\d+)/i)?.[1] ??
+      s.alAndroidUrl.match(/items-core\/(MLB\d+)/i)?.[1] ??
+      null;
+    if (itemFromAl) s.itemId ??= itemFromAl.toUpperCase();
+  }
+
+  if (s.ogDescription && (!s.brand || !s.model)) {
+    const descSpecs = extractSpecsFromState(null, s.ogDescription);
+    s.brand ??= descSpecs.brand;
+    s.model ??= descSpecs.model;
+    s.gtin ??= descSpecs.gtin;
+  }
+
   s.itemId ??= normalizeMlb(inputValue(html, 'item_id')) ?? normalizeMlb(inputValue(html, 'itemId'));
-  s.price ??= num(metaItemprop(html, 'price')) ?? parseAndesMoneyBlock(html);
+  s.price ??= num(metaItemprop(html, 'price')) ?? num(metaProperty(html, 'product:price:amount')) ?? parseAndesMoneyBlock(html);
   s.originalPrice ??= parseOriginalAndesPrice(html);
   s.rating ??= num(metaItemprop(html, 'ratingValue'));
   if (s.rating === null) {
@@ -968,6 +1326,12 @@ export function extractPageSignals(html: string, url: string | null = null): Pag
     else if (/\/c\//.test(url)) s.pageType = 'category';
     else if (/\/p\/MLB\d+/i.test(url)) s.pageType = 'catalog';
     else if (/MLB-?\d+|\/up\/MLBU/i.test(url)) s.pageType = 'product';
+
+    const sellerInUrl = url.match(/seller_id\s*[:=]\s*(\d+)/i)?.[1];
+    if (sellerInUrl) {
+      s.sellerIdFromUrl = Number(sellerInUrl);
+      s.sellerId ??= s.sellerIdFromUrl;
+    }
   }
 
   applyInitialState(s, readPreloadedState(html), '__PRELOADED_STATE__');
@@ -986,7 +1350,7 @@ export function extractPageSignals(html: string, url: string | null = null): Pag
 
   if (s.logisticType === 'fulfillment') s.isFull = true;
   if (s.startTime && !s.startTimeSource) s.startTimeSource = 'Estado da página (start_time)';
-  if (s.pageType === 'unknown' && s.itemId) s.pageType = 'product';
+  if (s.pageType === 'unknown' && (s.itemId || s.title)) s.pageType = 'product';
   s.sources = [...new Set(s.sources)];
   return s;
 }
