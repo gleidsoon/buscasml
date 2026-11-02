@@ -35,6 +35,34 @@ export type ProductVideo = {
   durationSeconds: number | null;
 };
 
+export type ReviewStarBreakdown = {
+  stars: 5 | 4 | 3 | 2 | 1;
+  count: number;
+  percentage: number;
+};
+
+export type ReviewAttribute = {
+  name: string;
+  rating: number;
+};
+
+export type ReviewComment = {
+  id: string;
+  title: string;
+  content: string;
+  rating: number;
+  date: string;
+  likes: number;
+};
+
+export type ScrapedReviews = {
+  ratingAverage: number | null;
+  totalReviews: number | null;
+  distribution: ReviewStarBreakdown[];
+  attributes: ReviewAttribute[];
+  comments: ReviewComment[];
+};
+
 export type PageSignals = {
   sources: string[];
   pageType: 'product' | 'catalog' | 'search' | 'category' | 'unknown';
@@ -76,6 +104,7 @@ export type PageSignals = {
   ogUrl: string | null;
   ogDescription: string | null;
   polycards: PolyItem[];
+  reviewsData: ScrapedReviews;
 };
 
 /** Seletores do PDP e da busca usados na leitura do HTML (classes do ML). */
@@ -1044,6 +1073,13 @@ function emptySignals(): PageSignals {
     ogUrl: null,
     ogDescription: null,
     polycards: [],
+    reviewsData: {
+      ratingAverage: null,
+      totalReviews: null,
+      distribution: [],
+      attributes: [],
+      comments: [],
+    },
   };
 }
 
@@ -1055,6 +1091,151 @@ function addUniqueImages(target: string[], candidates: (string | null | undefine
       seen.add(norm);
       target.push(norm);
     }
+  }
+}
+
+/**
+ * Extrai avaliações detalhadas (nota média, total, distribuição 5-1 estrelas, atributos avaliados
+ * e comentários reais dos compradores) a partir do estado da página (components.reviews_capability_v3 / reviews).
+ */
+function extractReviewsFromStateObj(s: PageSignals, state: AnyObj): void {
+  const components = obj(state.components) ?? {};
+  const revComp =
+    obj(components.reviews_capability_v3) ??
+    obj(components.reviews_capability) ??
+    obj(components.reviews) ??
+    obj(findDeep(components, 'reviews_capability_v3', 5_000)) ??
+    {};
+
+  const ratingObj = obj(revComp.rating) ?? revComp;
+  const avg = num(ratingObj.average) ?? num(revComp.rating) ?? num(revComp.rate);
+  const total = num(ratingObj.amount) ?? num(revComp.amount) ?? num(revComp.total) ?? num(revComp.count);
+  if (avg !== null && s.reviewsData.ratingAverage === null) s.reviewsData.ratingAverage = avg;
+  if (total !== null && s.reviewsData.totalReviews === null) s.reviewsData.totalReviews = total;
+
+  // Distribuição 5 a 1 estrelas
+  if (s.reviewsData.distribution.length === 0) {
+    const levelsRaw =
+      (Array.isArray(ratingObj.levels) ? ratingObj.levels : null) ??
+      (Array.isArray(revComp.levels) ? revComp.levels : null) ??
+      (Array.isArray(revComp.rating_levels) ? revComp.rating_levels : null);
+    if (levelsRaw && levelsRaw.length > 0) {
+      const dist: ReviewStarBreakdown[] = [];
+      levelsRaw.slice(0, 5).forEach((lv: unknown, idx: number) => {
+        const o = obj(lv);
+        if (!o) return;
+        const stars = (num(o.star) ?? num(o.stars) ?? (5 - idx)) as 5 | 4 | 3 | 2 | 1;
+        const count = num(o.count) ?? num(o.value) ?? num(o.amount) ?? 0;
+        const pct = num(o.percentage) ?? num(o.percent) ?? (total && total > 0 ? Math.round((count / total) * 100) : 0);
+        if (stars >= 1 && stars <= 5) {
+          dist.push({ stars, count, percentage: Math.min(100, Math.max(0, pct)) });
+        }
+      });
+      if (dist.length > 0) s.reviewsData.distribution = dist;
+    }
+  }
+
+  // Atributos avaliados (Custo-benefício, Qualidade dos materiais, etc.)
+  const featuresRaw =
+    (Array.isArray(revComp.features) ? revComp.features : null) ??
+    (Array.isArray(revComp.categories) ? revComp.categories : null) ??
+    (Array.isArray(revComp.attributes) ? revComp.attributes : null) ??
+    (Array.isArray(revComp.qualities) ? revComp.qualities : null);
+  if (featuresRaw && s.reviewsData.attributes.length === 0) {
+    for (const f of featuresRaw) {
+      const fo = obj(f);
+      if (!fo) continue;
+      const name = str(at(fo, 'name.text')) ?? str(fo.name) ?? str(at(fo, 'title.text')) ?? str(fo.title) ?? str(fo.label);
+      const val = num(fo.value) ?? num(fo.rating) ?? num(at(fo, 'rating.value'));
+      if (name && val !== null && val > 0 && val <= 5) {
+        s.reviewsData.attributes.push({ name, rating: Math.round(val * 10) / 10 });
+      }
+    }
+  }
+
+  // Comentários reais dos compradores
+  const tabs = Array.isArray(revComp.tabs) ? revComp.tabs : [];
+  const tabReviews = tabs.flatMap((t: unknown) => {
+    const to = obj(t);
+    return Array.isArray(to?.reviews) ? to.reviews : Array.isArray(to?.comments) ? to.comments : [];
+  });
+  const commentsRaw: unknown[] = [
+    ...(Array.isArray(revComp.reviews) ? revComp.reviews : []),
+    ...(Array.isArray(revComp.comments) ? revComp.comments : []),
+    ...tabReviews,
+  ];
+  const seenIds = new Set(s.reviewsData.comments.map((c) => c.id));
+  for (const item of commentsRaw) {
+    const co = obj(item);
+    if (!co) continue;
+    const content =
+      str(at(co, 'comment.content.text')) ??
+      str(at(co, 'content.text')) ??
+      str(co.content) ??
+      str(co.text) ??
+      str(co.review_body);
+    if (!content || content.length < 4) continue;
+    const id = str(co.id) ?? `rev-${s.reviewsData.comments.length + 1}-${content.slice(0, 16)}`;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    const title = str(at(co, 'title.text')) ?? str(co.title) ?? 'Opinião verificada';
+    const rating = num(co.rating) ?? num(co.rate) ?? num(at(co, 'comment.rating')) ?? 5;
+    const date =
+      str(at(co, 'comment.date.text')) ??
+      str(at(co, 'date.text')) ??
+      str(co.date) ??
+      str(co.date_created) ??
+      'Recente';
+    const likes = num(co.likes) ?? num(co.valorizations) ?? num(at(co, 'actions.like.value')) ?? 0;
+    s.reviewsData.comments.push({
+      id,
+      title,
+      content,
+      rating: Math.min(5, Math.max(1, Math.round(rating))),
+      date,
+      likes,
+    });
+  }
+}
+
+/**
+ * Extrai avaliações diretamente do DOM HTML (.ui-review-capability).
+ */
+function extractReviewsFromHtmlDom(s: PageSignals, html: string): void {
+  const avgTxt = textByClass(html, '.ui-review-capability__rating__average');
+  if (avgTxt && s.reviewsData.ratingAverage === null) {
+    const avg = num(avgTxt.replace(',', '.'));
+    if (avg !== null) s.reviewsData.ratingAverage = avg;
+  }
+  const labelTxt = textByClass(html, '.ui-review-capability__rating__label');
+  if (labelTxt && s.reviewsData.totalReviews === null) {
+    const m = labelTxt.match(/(\d[\d.]*)/);
+    if (m) s.reviewsData.totalReviews = Number(m[1].replace(/\./g, ''));
+  }
+
+  // Comentários no DOM (.ui-review-capability-comments__comment)
+  const commentBlocks = [
+    ...html.matchAll(
+      /<article[^>]*class=["'][^"']*ui-review-capability-comments__comment[^"']*["'][^>]*>([\s\S]*?)<\/article>/gi,
+    ),
+  ];
+  const seenContent = new Set(s.reviewsData.comments.map((c) => c.content.toLowerCase()));
+  for (const m of commentBlocks) {
+    const block = m[1];
+    const content = textByClass(block, '.ui-review-capability-comments__comment__content');
+    if (!content || content.length < 4 || seenContent.has(content.toLowerCase())) continue;
+    seenContent.add(content.toLowerCase());
+    const date = textByClass(block, '.ui-review-capability-comments__comment__date') ?? 'Compra verificada';
+    const ratingMatch = block.match(/Qualification\s+(\d)\s+out\s+of\s+5|Classifica[çc][ãa]o\s+(\d)\s+de\s+5/i);
+    const stars = ratingMatch ? Number(ratingMatch[1] ?? ratingMatch[2]) : 5;
+    s.reviewsData.comments.push({
+      id: `dom-rev-${s.reviewsData.comments.length + 1}`,
+      title: 'Compra verificada',
+      content,
+      rating: stars >= 1 && stars <= 5 ? stars : 5,
+      date,
+      likes: 0,
+    });
   }
 }
 
@@ -1135,6 +1316,7 @@ function applyInitialState(s: PageSignals, state: AnyObj | null, label: string):
   const reviews = obj(components.reviews_capability_v3) ?? obj(components.reviews) ?? obj(header.reviews) ?? {};
   s.rating ??= num(reviews.rating) ?? num(reviews.rate) ?? num(at(reviews, 'rating.average'));
   s.reviewsCount ??= num(reviews.amount) ?? num(reviews.count) ?? num(reviews.total);
+  extractReviewsFromStateObj(s, state);
 
   const seller = obj(components.seller_data) ?? obj(components.seller) ?? {};
   s.sellerName ??= str(at(seller, 'header.title.text')) ?? str(at(seller, 'title.text')) ?? str(seller.seller_name);
@@ -1188,6 +1370,34 @@ function applyLdJson(s: PageSignals, nodes: AnyObj[]): void {
   const agg = obj(product.aggregateRating) ?? {};
   s.rating ??= num(agg.ratingValue);
   s.reviewsCount ??= num(agg.reviewCount) ?? num(agg.ratingCount);
+  s.reviewsData.ratingAverage ??= s.rating;
+  s.reviewsData.totalReviews ??= s.reviewsCount;
+
+  const ldReviews = Array.isArray(product.review)
+    ? product.review
+    : product.review
+      ? [product.review]
+      : [];
+  const seenContent = new Set(s.reviewsData.comments.map((c) => c.content.toLowerCase()));
+  for (const rv of ldReviews) {
+    const ro = obj(rv);
+    if (!ro) continue;
+    const content = str(ro.reviewBody) ?? str(ro.description);
+    if (!content || content.length < 4 || seenContent.has(content.toLowerCase())) continue;
+    seenContent.add(content.toLowerCase());
+    const rating = num(at(ro, 'reviewRating.ratingValue')) ?? 5;
+    const title = str(ro.name) ?? str(at(ro, 'author.name')) ?? 'Opinião do comprador';
+    const date = str(ro.datePublished) ?? 'Recente';
+    s.reviewsData.comments.push({
+      id: `ld-rev-${s.reviewsData.comments.length + 1}`,
+      title,
+      content,
+      rating: Math.min(5, Math.max(1, Math.round(rating))),
+      date,
+      likes: 0,
+    });
+  }
+
   if (s.itemId === null) s.itemId = normalizeMlb(product.sku) ?? normalizeMlb(product.productID);
   if (s.startTime === null) {
     const d = str(product.releaseDate) ?? str(product.datePublished);
@@ -1258,6 +1468,11 @@ function applySelectors(s: PageSignals, html: string): void {
     const m = amount?.match(/(\d[\d.]*)/);
     s.reviewsCount = m ? Number(m[1].replace(/\./g, '')) : null;
   }
+  extractReviewsFromHtmlDom(s, html);
+  s.rating ??= s.reviewsData.ratingAverage;
+  s.reviewsCount ??= s.reviewsData.totalReviews;
+  s.reviewsData.ratingAverage ??= s.rating;
+  s.reviewsData.totalReviews ??= s.reviewsCount;
 
   if (s.startTime === null) {
     const meta = metaItemprop(html, 'datePublished') ?? metaProperty(html, 'product:release_date');
