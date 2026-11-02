@@ -363,6 +363,7 @@ function soldCountFromMatch(text: string | null): number | null {
 export function normalizeMlImageUrl(rawUrlOrId: string | null | undefined): string | null {
   const s = str(rawUrlOrId);
   if (!s || /^data:/i.test(s)) return null;
+  if (/frontend-assets|ui-navigation|pt_logo|mercadolibre\/logo|org-img/i.test(s)) return null;
   // Caso seja apenas o ID (ex.: "963201-MLB78912345_092024" ou "615190-MLA99501602606_112025")
   if (/^(?:2X_)?\d+-[A-Z]{2,4}\d+_\d{4,6}$/i.test(s)) {
     const cleanId = s.replace(/^2X_/i, '');

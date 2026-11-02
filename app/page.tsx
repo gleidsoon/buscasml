@@ -374,7 +374,7 @@ const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string; placeholder: stri
     value: 'categoria',
     label: 'Código MLB Categoria',
     placeholder: 'Ex.: MLB190433 ou nome da categoria (Arcos, Tiaras e Faixas)',
-    hint: 'Consulta os anúncios da categoria, árvore completa (/categories/MLB...), tendências (/trends/MLB/...) e taxas Clássico/Premium.',
+    hint: 'Consulta os anúncios da categoria, árvore completa, tendências de busca e taxas de Anúncio Clássico e Anúncio Premium.',
   },
 ];
 
@@ -466,8 +466,8 @@ function parseInputNumber(raw: string): number {
 
 function kindFromLabel(label: string | null): ListingKind | null {
   if (!label) return null;
-  if (/premium|gold_pro/i.test(label)) return 'premium';
-  if (/cl[aá]ssico|gold_special/i.test(label)) return 'classico';
+  if (/premium/i.test(label)) return 'premium';
+  if (/cl[aá]ssico/i.test(label)) return 'classico';
   return null;
 }
 
@@ -476,10 +476,10 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 /* =============================================================================
- * MOTOR DA CALCULADORA (Classe Ee da Avantpro)
+ * MOTOR DA CALCULADORA DE MARGEM E PREÇO
  * ============================================================================= */
 
-type EeOutput = {
+type MarginCalcOutput = {
   input: CalculatorInput;
   classic: CalculatorBreakdown;
   premium: CalculatorBreakdown;
@@ -499,7 +499,7 @@ function buildCategoryFees(classicPct: number, premiumPct: number): CategoryFees
   };
 }
 
-function computeEeCalculator(form: CalcForm): EeOutput {
+function computeMarginCalculator(form: CalcForm): MarginCalcOutput {
   const price = Math.max(0, parseInputNumber(form.salePrice));
   const productCost = Math.max(0, parseInputNumber(form.supplierCost));
   const extraCost = Math.max(0, parseInputNumber(form.packagingCost));
@@ -1086,12 +1086,12 @@ function Onboarding() {
     {
       icon: <Layers size={18} />,
       title: 'Raio-X de Categoria & Tendências',
-      text: 'Consulte qualquer código de categoria (ex.: MLB190433) para ver árvore completa, tendências oficiais (/trends/MLB) e taxas Clássico/Premium.',
+      text: 'Consulte qualquer código de categoria (ex.: MLB190433) para ver árvore completa, tendências oficiais e taxas de Anúncio Clássico e Anúncio Premium.',
     },
     {
       icon: <Calculator size={18} />,
-      title: 'Calculadora Classe Ee (10 iterações)',
-      text: 'Simule custo total, repasse líquido, margem de contribuição e preço sugerido em % ou R$ para Clássico e Premium.',
+      title: 'Calculadora de Margem e Preço',
+      text: 'Simule custo total, repasse líquido, margem de contribuição e preço sugerido em % ou R$ para Anúncio Clássico e Anúncio Premium.',
     },
   ];
   return (
@@ -1205,7 +1205,7 @@ function CategoryOverviewPanel({
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
-          <p className="font-medium text-slate-400">Comissão Clássico (gold_special)</p>
+          <p className="font-medium text-slate-400">Anúncio Clássico</p>
           <p className="mt-1 text-sm font-semibold text-slate-100">
             {r128?.gold_special !== undefined
               ? `${formatDecimal(r128.gold_special, 1)}%`
@@ -1215,7 +1215,7 @@ function CategoryOverviewPanel({
           </p>
         </div>
         <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
-          <p className="font-medium text-slate-400">Comissão Premium (gold_pro)</p>
+          <p className="font-medium text-slate-400">Anúncio Premium</p>
           <p className="mt-1 text-sm font-semibold text-slate-100">
             {r128?.gold_pro !== undefined
               ? `${formatDecimal(r128.gold_pro, 1)}%`
@@ -1225,7 +1225,7 @@ function CategoryOverviewPanel({
           </p>
         </div>
         <div className="rounded-xl border border-white/5 bg-[#0b1220] p-3 text-xs">
-          <p className="font-medium text-slate-400">Faixa &lt; R$ 79 (/listing_prices)</p>
+          <p className="font-medium text-slate-400">Faixa abaixo de R$ 79</p>
           <p className="mt-1 text-sm font-semibold text-slate-100">
             Clássico: {r64?.gold_special !== undefined ? `${formatDecimal(r64.gold_special, 1)}%` : HIDDEN} · Premium:{' '}
             {r64?.gold_pro !== undefined ? `${formatDecimal(r64.gold_pro, 1)}%` : HIDDEN}
@@ -1236,7 +1236,7 @@ function CategoryOverviewPanel({
       {category.trends.length > 0 && (
         <div>
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-            <Sparkles size={13} className="text-[#facc15]" /> Tendências Oficiais da Categoria (/trends/MLB/{category.id})
+            <Sparkles size={13} className="text-[#facc15]" /> Tendências Oficiais da Categoria ({category.id})
           </p>
           <div className="flex flex-wrap gap-2">
             {category.trends.slice(0, 18).map((t) => (
@@ -1721,7 +1721,7 @@ function KeywordView({
 }
 
 /* =============================================================================
- * RAIO-X: PAINÉIS ANALÍTICOS JOOMPULSE / AVANTPRO
+ * RAIO-X: PAINÉIS ANALÍTICOS COMERCIAIS
  * ============================================================================= */
 
 function VelocityRevenuePanel({
@@ -1737,7 +1737,7 @@ function VelocityRevenuePanel({
     <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <BarChart3 size={16} className="text-[#10b981]" /> Giro de Vendas &amp; Faturamento (Métricas JoomPulse Bc / Uc)
+          <BarChart3 size={16} className="text-[#10b981]" /> Giro de Vendas e Faturamento
         </p>
         <Pill tone="blue">{soldSource}</Pill>
       </div>
@@ -1793,45 +1793,45 @@ function SalesEstimatePanel({
     <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Sparkles size={16} className="text-[#facc15]" /> Motor de Vendas (Módulo 98069 Avantpro)
+          <Sparkles size={16} className="text-[#facc15]" /> Análise de Volume de Vendas
         </p>
         <Pill tone="yellow">{soldLabel}</Pill>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
-          label="Faixa pública ML"
+          label="Faixa Pública"
           value={rangeStr}
-          hint={`Centro da faixa: ${formatInt(est.rangeCenter)}`}
+          hint={`Referência central: ${formatInt(est.rangeCenter)}`}
         />
         <Stat
-          label="Centro ajustado (w)"
+          label="Média da Faixa"
           value={formatInt(est.rangeCenterAdjusted)}
           hint={
             est.ageMonths !== null
-              ? `Idade ~${formatDecimal(est.ageMonths, 1)} meses (${((est.ageAdjustment ?? 0) * 100).toFixed(0)}%)`
+              ? `Maturidade ~${formatDecimal(est.ageMonths, 1)} meses (${((est.ageAdjustment ?? 0) * 100).toFixed(0)}%)`
               : 'Sem ajuste por idade'
           }
         />
         <Stat
-          label="Por avaliações (A)"
+          label="Volume por Avaliações"
           value={est.reviewsEstimateAdjusted !== null ? formatInt(est.reviewsEstimateAdjusted) : 'Sem opiniões'}
           hint={
             est.reviewsEstimate !== null
-              ? `Base bruta (×15): ${formatInt(est.reviewsEstimate)}`
-              : 'Ponderação 100% na faixa'
+              ? `Volume base projetado: ${formatInt(est.reviewsEstimate)}`
+              : 'Ponderação integral pela faixa'
           }
         />
         <Stat
-          label="Estimativa Final"
+          label="Vendas Consolidadas"
           value={formatInt(est.final)}
-          hint={`Consolidada (0,6·A + 0,4·w): ${formatInt(est.consolidated)}`}
+          hint={`Volume consolidado: ${formatInt(est.consolidated)}`}
           valueClass="text-[#facc15]"
         />
         <Stat
-          label="Ritmo Atual / Mês"
+          label="Ritmo Mensal Recente"
           value={est.monthlyPace !== null ? `${formatInt(est.monthlyPace)} un./mês` : HIDDEN}
-          hint="Fórmula 0,4·C / (meses / 3)"
+          hint="Projeção de giro mensal recente"
           valueClass="text-[#10b981]"
         />
       </div>
@@ -1848,97 +1848,55 @@ function SalesEstimatePanel({
 
 function FeesAndSignalsPanel({
   fees,
-  signals,
   isSupermarket,
 }: {
   fees: FeeSnapshot;
-  signals: PageSignals | null;
+  signals?: PageSignals | null;
   isSupermarket: boolean;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-            <Layers size={16} className="text-[#3b82f6]" /> Tarifas Reais da Categoria &amp; Frete
-          </p>
-          {isSupermarket && <Pill tone="yellow">Supermercado</Pill>}
-        </div>
-        <p className="mb-3 text-xs text-slate-400">
-          Categoria: <span className="text-slate-200">{fees.categoryPath ?? fees.categoryId ?? HIDDEN}</span>
+    <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Layers size={16} className="text-[#3b82f6]" /> Tarifas da Categoria e Custo de Frete
         </p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Stat
-            label="Clássico (gold_special)"
-            value={fees.classic ? formatBRL(fees.classic.amount) : HIDDEN}
-            hint={
-              fees.classic
-                ? `${formatDecimal(fees.classic.percentage, 1)}% + fixa ${formatBRL(fees.classic.fixed)}`
-                : undefined
-            }
-          />
-          <Stat
-            label="Premium (gold_pro)"
-            value={fees.premium ? formatBRL(fees.premium.amount) : HIDDEN}
-            hint={
-              fees.premium
-                ? `${formatDecimal(fees.premium.percentage, 1)}% + fixa ${formatBRL(fees.premium.fixed)}`
-                : undefined
-            }
-          />
-          <Stat
-            label="Frete (list_cost)"
-            value={
-              fees.freeShippingByMeli
-                ? 'R$ 0,00 (coberto ML)'
-                : fees.shippingListCost !== null
-                  ? formatBRL(fees.shippingListCost)
-                  : 'Simular na aba'
-            }
-            hint={fees.shippingSource}
-          />
-        </div>
-        <p className="mt-2 text-[11px] text-slate-500">Origem das taxas: {fees.feeSource}</p>
+        {isSupermarket && <Pill tone="yellow">Supermercado</Pill>}
       </div>
-
-      <div className="rounded-2xl border border-white/5 bg-[#111827] p-5">
-        <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Code size={16} className="text-[#facc15]" /> Estado da Página Capturado
-        </p>
-        {signals && signals.sources.length > 0 ? (
-          <div className="space-y-3 text-xs">
-            <div className="flex flex-wrap gap-1.5">
-              {signals.sources.map((src) => (
-                <Pill key={src} tone="blue">
-                  {src}
-                </Pill>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Mini label="Tipo de página" value={signals.pageType} />
-              <Mini label="start_time" value={formatDate(signals.startTime)} sub={signals.startTimeSource ?? undefined} />
-              <Mini
-                label="tracks.sold_quantity"
-                value={signals.soldExact !== null ? formatInt(signals.soldExact) : signals.soldText ?? HIDDEN}
-              />
-              <Mini
-                label="Estoque no DOM"
-                value={signals.availableQuantity !== null ? formatInt(signals.availableQuantity) : HIDDEN}
-                sub={signals.stockText ?? undefined}
-              />
-              <Mini
-                label="Vendedores catálogo"
-                value={signals.catalogSellers !== null ? formatInt(signals.catalogSellers) : HIDDEN}
-              />
-              <Mini label="Polycards lidos" value={formatInt(signals.polycards.length)} />
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">
-            Dados carregados diretamente da API Oficial do Mercado Livre.
-          </p>
-        )}
+      <p className="mb-3 text-xs text-slate-400">
+        Categoria: <span className="text-slate-200">{fees.categoryPath ?? fees.categoryId ?? HIDDEN}</span>
+      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          label="Anúncio Clássico"
+          value={fees.classic ? formatBRL(fees.classic.amount) : HIDDEN}
+          hint={
+            fees.classic
+              ? `${formatDecimal(fees.classic.percentage, 1)}% + fixa ${formatBRL(fees.classic.fixed)}`
+              : undefined
+          }
+        />
+        <Stat
+          label="Anúncio Premium"
+          value={fees.premium ? formatBRL(fees.premium.amount) : HIDDEN}
+          hint={
+            fees.premium
+              ? `${formatDecimal(fees.premium.percentage, 1)}% + fixa ${formatBRL(fees.premium.fixed)}`
+              : undefined
+          }
+        />
+        <Stat
+          label="Custo de Frete"
+          value={
+            fees.freeShippingByMeli
+              ? 'R$ 0,00 (coberto ML)'
+              : fees.shippingListCost !== null
+                ? formatBRL(fees.shippingListCost)
+                : 'Simular na calculadora'
+          }
+          hint={fees.shippingSource}
+        />
       </div>
+      <p className="mt-2 text-[11px] text-slate-500">Origem das taxas: {fees.feeSource}</p>
     </div>
   );
 }
@@ -2168,9 +2126,8 @@ function DossierView({
   onOpenCategory: (categoryId: string) => void;
   onAnalyzeCompetitor: (itemId: string) => void;
 }) {
-  const [jsonOpen, setJsonOpen] = useState(false);
   const ratingCountText =
-    d.ratingCount === null ? 'Opiniões ocultas' : `${formatInt(d.ratingCount)} opiniões`;
+    d.ratingCount === null ? 'Avaliações verificadas' : `${formatInt(d.ratingCount)} opiniões`;
 
   return (
     <section className="space-y-6">
@@ -2183,11 +2140,8 @@ function DossierView({
           <span />
         )}
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setJsonOpen(true)} className={BTN_GHOST}>
-            <Code size={14} /> Ver JSON Puro da API
-          </button>
           <button type="button" onClick={onSimulate} className={BTN_SM_YELLOW}>
-            <Calculator size={14} /> Simular na Calculadora Ee
+            <Calculator size={14} /> Simular Margem
           </button>
           {d.permalink && (
             <a href={d.permalink} target="_blank" rel="noreferrer" className={BTN_GHOST}>
@@ -2332,23 +2286,12 @@ function DossierView({
           ))}
         </ul>
       )}
-
-      {jsonOpen && (
-        <Modal title="JSON puro da API e Estado da Página" onClose={() => setJsonOpen(false)} wide>
-          <p className="mb-3 text-xs text-slate-400">
-            Resposta completa combinando API oficial, estado da página e cálculos do Módulo 98069.
-          </p>
-          <pre className="max-h-[65vh] overflow-auto rounded-xl bg-[#070b14] p-4 text-xs leading-relaxed text-slate-300">
-            {JSON.stringify(d.raw, null, 2)}
-          </pre>
-        </Modal>
-      )}
     </section>
   );
 }
 
 /* =============================================================================
- * CALCULADORA COMPLETA DA CLASSE "Ee" (custo total, MC, líquido e preço sugerido)
+ * CALCULADORA DE MARGEM E PREÇO (custo total, MC, líquido e preço sugerido)
  * ============================================================================= */
 
 function BreakdownCard({
@@ -2478,7 +2421,7 @@ function CalculatorView({
 }: {
   calc: CalcForm;
   onChange: (patch: Partial<CalcForm>) => void;
-  ee: EeOutput;
+  ee: MarginCalcOutput;
 }) {
   const applySuggested = (price: number) => {
     onChange({ salePrice: formatInputNumber(price) });
@@ -2490,7 +2433,7 @@ function CalculatorView({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <Calculator size={18} className="text-[#facc15]" /> Calculadora de Precificação &amp; Margem (Classe Ee Avantpro)
+              <Calculator size={18} className="text-[#facc15]" /> Calculadora de Margem e Preço
             </h2>
             <p className="text-xs text-slate-400">
               Regras de comissão e taxa fixa por faixa (&lt;R$ 12,50 → 50%; &lt;R$ 29 → R$ 6,25; &lt;R$ 50 → R$ 6,50; &lt;R$ 79 → R$ 6,75; ≥R$ 79 → isento) e cálculo iterativo de até {MAX_PRICE_ITERATIONS} repetições.
@@ -2523,8 +2466,8 @@ function CalculatorView({
               value={calc.listing}
               onChange={(e) => onChange({ listing: e.target.value as ListingKind })}
             >
-              <option value="classico">Clássico (gold_special)</option>
-              <option value="premium">Premium (gold_pro)</option>
+              <option value="classico">Anúncio Clássico</option>
+              <option value="premium">Anúncio Premium</option>
             </select>
           </Field>
 
@@ -2555,7 +2498,7 @@ function CalculatorView({
               placeholder="6"
             />
           </Field>
-          <Field label="Custo de frete list_cost (R$)">
+          <Field label="Custo de Frete (R$)">
             <input
               inputMode="decimal"
               className={INPUT_CLASS}
@@ -2643,7 +2586,7 @@ function CalculatorView({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <BreakdownCard
-          title="Anúncio Clássico (gold_special)"
+          title="Anúncio Clássico"
           badge={`Taxa base: ${calc.classicPct || '12'}%`}
           active={calc.listing === 'classico'}
           b={ee.classic}
@@ -2653,7 +2596,7 @@ function CalculatorView({
           onApplySuggested={applySuggested}
         />
         <BreakdownCard
-          title="Anúncio Premium (gold_pro)"
+          title="Anúncio Premium"
           badge={`Taxa base: ${calc.premiumPct || '17'}% (parcelamento sem juros)`}
           active={calc.listing === 'premium'}
           b={ee.premium}
@@ -2749,7 +2692,7 @@ export default function BuscasMLPro() {
   const exchangeStartedRef = useRef(false);
   const searchSeqRef = useRef(0);
 
-  const ee = useMemo(() => computeEeCalculator(calc), [calc]);
+  const ee = useMemo(() => computeMarginCalculator(calc), [calc]);
 
   /* ---------- sessão ---------- */
 
@@ -3021,7 +2964,9 @@ export default function BuscasMLPro() {
               <p className="text-sm font-bold leading-tight">
                 BuscasML <span className="text-[#facc15]">Pro</span>
               </p>
-              <p className="text-[11px] leading-tight text-slate-500">Motor Analítico Avantpro + JoomPulse</p>
+              <p className="text-[11px] leading-tight text-slate-500">
+                Plataforma de Inteligência e Análise para Mercado Livre
+              </p>
             </div>
           </div>
 
@@ -3036,7 +2981,7 @@ export default function BuscasMLPro() {
               active={tab === 'calculadora'}
               onClick={() => setTab('calculadora')}
               icon={<Calculator size={15} />}
-              label="Calculadora Classe Ee"
+              label="Calculadora de Margem e Preço"
             />
           </nav>
 
@@ -3066,9 +3011,8 @@ export default function BuscasMLPro() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Busca &amp; Raio-X Analítico</h1>
               <p className="mt-1 max-w-3xl text-sm text-slate-400">
-                Extração de estado da página (<code>__PRELOADED_STATE__</code>, <code>_n.ctx.r</code>,{' '}
-                <code>melidata</code>, <code>ld+json</code>), vendas estimadas pelo Módulo 98069, giro JoomPulse e
-                tarifas reais de categoria.
+                Pesquisa avançada de nichos, análise completa de anúncios, volume de vendas, giro diário e mensal,
+                comparativo de concorrentes e tarifas oficiais por categoria.
               </p>
             </div>
 
