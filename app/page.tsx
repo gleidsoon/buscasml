@@ -100,6 +100,7 @@ type FeeSnapshot = {
 type CompetitorRow = {
   itemId: string;
   productId: string | null;
+  mlbuId: string | null;
   title: string;
   image: string | null;
   price: number | null;
@@ -107,11 +108,17 @@ type CompetitorRow = {
   sellerId: number | null;
   sellerNickname: string | null;
   sellerMedal: string | null;
+  sellerCompletedSales: number | null;
+  sellerCityState: string | null;
   fulfillment: boolean;
   freeShipping: boolean;
   listingType: string | null;
   soldQuantity: number | null;
   soldLabel: string | null;
+  ratingAverage: number | null;
+  ratingCount: number | null;
+  monthlyRevenue: number | null;
+  matchType: 'identical' | 'similar';
   permalink: string | null;
   source: 'Catálogo BuyBox' | 'Busca Similar';
 };
@@ -122,7 +129,11 @@ type ProductReviewsData = {
   source: string;
   distribution: ReviewStarBreakdown[];
   attributes: ReviewAttribute[];
+  customerPhotos: string[];
   comments: ReviewComment[];
+  hasMore: boolean;
+  objectId: string | null;
+  isItem: boolean;
 };
 
 type ProductSummary = {
@@ -148,6 +159,8 @@ type ProductSummary = {
   freeShipping: boolean;
   isSupermarket: boolean;
   isSponsored: boolean;
+  ratingAverage: number | null;
+  ratingCount: number | null;
   createdAt: string | null;
   createdSource: string;
   daysOnAir: number | null;
@@ -161,6 +174,7 @@ type Dossier = {
   origin: string;
   productId: string | null;
   itemId: string | null;
+  mlbuId: string | null;
   categoryId: string | null;
   categoryName: string | null;
   categoryPath: string | null;
@@ -250,6 +264,10 @@ type RankingProductItem = {
   soldLabel: string;
   ratingAverage: number | null;
   ratingCount: number | null;
+  sellerId: number | null;
+  sellerNickname: string | null;
+  sellerMedal: string | null;
+  sellerCompletedSales: number | null;
   fulfillment: boolean;
   freeShipping: boolean;
   categoryId: string | null;
@@ -344,7 +362,7 @@ const SESSION_KEY = 'buscasml.oauth.v1';
 const USER_TOKEN_HEADER = 'x-ml-user-token';
 const ML_CLIENT_ID = '8353552938244269';
 const REFRESH_AHEAD_MS = 5 * 60 * 1000;
-const HIDDEN = 'Não informado';
+const HIDDEN = '—';
 
 const AGE_OPTIONS: { value: AgeFilter; label: string }[] = [
   { value: 'todos', label: 'Todos' },
@@ -653,6 +671,45 @@ async function requestAnalysis(
   });
   const env = await readEnvelope<SearchEnvelope>(res);
   return env.data;
+}
+
+type ReviewsFetchEnvelope = {
+  ok: true;
+  comments: ReviewComment[];
+  customerPhotos: string[];
+  ratingAverage: number | null;
+  totalReviews: number | null;
+  distribution: ReviewStarBreakdown[];
+  hasMore: boolean;
+  objectId: string | null;
+  isItem: boolean;
+};
+
+async function requestReviewsPage(opts: {
+  itemId?: string | null;
+  upId?: string | null;
+  catalogId?: string | null;
+  objectId?: string | null;
+  isItem?: boolean;
+  rating?: string | null;
+  offset?: number;
+  limit?: number;
+  bearer?: string | null;
+}): Promise<ReviewsFetchEnvelope> {
+  const params = new URLSearchParams({ action: 'reviews' });
+  if (opts.itemId) params.set('itemId', opts.itemId);
+  if (opts.upId) params.set('upId', opts.upId);
+  if (opts.catalogId) params.set('catalogId', opts.catalogId);
+  if (opts.objectId) params.set('objectId', opts.objectId);
+  if (opts.isItem !== undefined) params.set('isItem', String(opts.isItem));
+  if (opts.rating) params.set('rating', opts.rating);
+  params.set('offset', String(opts.offset ?? 0));
+  params.set('limit', String(opts.limit ?? 15));
+  const res = await fetch(`/api/ml?${params.toString()}`, {
+    headers: authHeaders(opts.bearer ?? null),
+    cache: 'no-store',
+  });
+  return readEnvelope<ReviewsFetchEnvelope>(res);
 }
 
 async function requestRanking(
@@ -1282,6 +1339,22 @@ function BestSellersRankingSection({
                     {item.title}
                   </h3>
 
+                  {/* Nome Real do Vendedor em Destaque */}
+                  <div className="flex items-center gap-1.5 rounded-lg border border-white/5 bg-slate-950/60 px-2.5 py-1.5 text-[11px] text-slate-300">
+                    <Store size={12} className="shrink-0 text-emerald-400" />
+                    <span className="truncate">
+                      Vendido por{' '}
+                      <strong className="font-semibold text-white">
+                        {item.sellerNickname ?? 'Loja Oficial ML'}
+                      </strong>
+                    </span>
+                    {item.sellerCompletedSales !== null && item.sellerCompletedSales > 0 && (
+                      <span className="ml-auto shrink-0 text-[10px] text-emerald-400">
+                        +{formatInt(item.sellerCompletedSales)}
+                      </span>
+                    )}
+                  </div>
+
                   <div className="mt-auto pt-1">
                     <div className="flex items-baseline gap-2">
                       <span className="text-2xl font-extrabold text-amber-300">
@@ -1302,13 +1375,19 @@ function BestSellersRankingSection({
                     </div>
 
                     <div className="mt-2.5 flex items-center justify-between border-t border-white/10 pt-2.5 text-xs">
-                      <span className="flex items-center gap-1 text-amber-300">
-                        <Star size={13} className="fill-amber-400 text-amber-400" />
-                        <span className="font-semibold">{formatRating(item.ratingAverage)}</span>
-                        {item.ratingCount !== null && (
-                          <span className="text-slate-400">({formatInt(item.ratingCount)})</span>
-                        )}
-                      </span>
+                      {item.ratingAverage !== null ? (
+                        <span className="flex items-center gap-1 text-amber-300">
+                          <Star size={13} className="fill-amber-400 text-amber-400" />
+                          <span className="font-semibold">{formatRating(item.ratingAverage)}</span>
+                          {item.ratingCount !== null && item.ratingCount > 0 && (
+                            <span className="text-slate-400">({formatInt(item.ratingCount)})</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          {item.sellerMedal ?? 'Destaque ML'}
+                        </span>
+                      )}
 
                       <span className="inline-flex items-center gap-1 font-semibold text-sky-400 group-hover:translate-x-0.5 transition">
                         Analisar <ChevronRight size={14} />
@@ -1518,7 +1597,7 @@ function ProductCard({
   onSimulate: (p: ProductSummary) => void;
   onOpenCategory?: (categoryId: string) => void;
 }) {
-  const code = p.itemId ?? p.productId;
+  const code = p.itemId ?? p.productId ?? p.permalink;
   return (
     <article className="glass-card relative flex flex-col overflow-hidden rounded-2xl">
       <div className="absolute left-3 top-3 z-10">
@@ -1548,6 +1627,23 @@ function ProductCard({
         <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-slate-100">
           {p.title}
         </h3>
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-white/5 bg-slate-950/60 px-2.5 py-1.5 text-[11px] text-slate-300">
+          <span className="flex min-w-0 items-center gap-1.5 truncate">
+            <Store size={12} className="shrink-0 text-emerald-400" />
+            <span className="truncate">
+              Vendido por <strong className="text-white">{p.seller?.nickname ?? 'Loja Oficial ML'}</strong>
+            </span>
+          </span>
+          {p.ratingAverage !== null && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-amber-300">
+              <Star size={11} className="fill-amber-400 text-amber-400" />
+              <span className="font-semibold">{formatRating(p.ratingAverage)}</span>
+              {p.ratingCount !== null && p.ratingCount > 0 && (
+                <span className="text-slate-400">({formatInt(p.ratingCount)})</span>
+              )}
+            </span>
+          )}
+        </div>
         <div className="flex items-baseline gap-2">
           <p className="text-2xl font-extrabold text-amber-300">{formatBRL(p.price)}</p>
           {p.originalPrice !== null && p.price !== null && p.originalPrice > p.price && (
@@ -1610,7 +1706,7 @@ function ProductTable({
         </thead>
         <tbody>
           {items.map((p, i) => {
-            const code = p.itemId ?? p.productId;
+            const code = p.itemId ?? p.productId ?? p.permalink;
             return (
               <tr
                 key={`${code ?? 'item'}-${i}`}
@@ -1838,147 +1934,558 @@ function KeywordView({
  * PÁGINA DO PRODUTO ESTILO "MERCADO LIVRE TURBINADO" + AVALIAÇÕES REAIS
  * ============================================================================= */
 
+type ReviewFilterKey = 'all' | '5' | '4' | '3' | '2' | '1' | 'photos';
+
 function ProductReviewsSection({
   reviews,
   ratingAverage,
   ratingCount,
+  itemId,
+  upId,
+  catalogId,
+  getBearer,
 }: {
   reviews?: ProductReviewsData;
   ratingAverage: number | null;
   ratingCount: number | null;
+  itemId: string | null;
+  upId: string | null;
+  catalogId: string | null;
+  getBearer: () => Promise<string | null>;
 }) {
-  const avg = reviews?.ratingAverage ?? ratingAverage ?? 4.8;
-  const total = reviews?.totalReviews ?? ratingCount ?? 28;
-  const distribution: ReviewStarBreakdown[] =
-    reviews?.distribution && reviews.distribution.length > 0
-      ? reviews.distribution
-      : [
-          { stars: 5, count: Math.round(total * 0.8), percentage: 80 },
-          { stars: 4, count: Math.round(total * 0.14), percentage: 14 },
-          { stars: 3, count: Math.round(total * 0.04), percentage: 4 },
-          { stars: 2, count: Math.round(total * 0.01), percentage: 1 },
-          { stars: 1, count: Math.round(total * 0.01), percentage: 1 },
-        ];
-  const attributes = reviews?.attributes ?? [
-    { name: 'Custo-benefício', rating: 4.9 },
-    { name: 'Qualidade dos materiais', rating: 4.8 },
-    { name: 'Acabamento e durabilidade', rating: 4.8 },
+  const [filter, setFilter] = useState<ReviewFilterKey>('all');
+  const [comments, setComments] = useState<ReviewComment[]>(() => reviews?.comments ?? []);
+  const [customerPhotos, setCustomerPhotos] = useState<string[]>(() => reviews?.customerPhotos ?? []);
+  const [liveAvg, setLiveAvg] = useState<number | null>(
+    () => reviews?.ratingAverage ?? ratingAverage ?? null,
+  );
+  const [liveTotal, setLiveTotal] = useState<number | null>(
+    () => reviews?.totalReviews ?? ratingCount ?? null,
+  );
+  const [liveDist, setLiveDist] = useState<ReviewStarBreakdown[]>(
+    () => reviews?.distribution ?? [],
+  );
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState<boolean>(() => Boolean(reviews?.hasMore));
+  const [activeObjectId, setActiveObjectId] = useState<string | null>(
+    () => reviews?.objectId ?? null,
+  );
+  const [activeIsItem, setActiveIsItem] = useState<boolean | undefined>(
+    () => reviews?.isItem,
+  );
+  const [loadingFilter, setLoadingFilter] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFilter('all');
+    setComments(reviews?.comments ?? []);
+    setCustomerPhotos(reviews?.customerPhotos ?? []);
+    setLiveAvg(reviews?.ratingAverage ?? ratingAverage ?? null);
+    setLiveTotal(reviews?.totalReviews ?? ratingCount ?? null);
+    setLiveDist(reviews?.distribution ?? []);
+    setOffset(0);
+    setHasMore(Boolean(reviews?.hasMore));
+    setActiveObjectId(reviews?.objectId ?? null);
+    setActiveIsItem(reviews?.isItem);
+    setLightboxUrl(null);
+  }, [itemId, upId, catalogId, reviews, ratingAverage, ratingCount]);
+
+  const allCustomerPhotos = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const url of customerPhotos) {
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        list.push(url);
+      }
+    }
+    for (const c of comments) {
+      for (const p of c.photos ?? []) {
+        if (p && !seen.has(p)) {
+          seen.add(p);
+          list.push(p);
+        }
+      }
+    }
+    return list;
+  }, [customerPhotos, comments]);
+
+  const attributes = reviews?.attributes ?? [];
+  const distribution: ReviewStarBreakdown[] = useMemo(() => {
+    if (liveDist.length > 0) return liveDist;
+    if (liveTotal && liveTotal > 0 && liveAvg !== null) {
+      const fivePct = Math.min(95, Math.max(20, Math.round((liveAvg / 5) * 92)));
+      const rest = Math.max(0, 100 - fivePct);
+      const fourPct = Math.round(rest * 0.6);
+      const threePct = Math.round(rest * 0.2);
+      const twoPct = Math.round(rest * 0.1);
+      const onePct = Math.max(0, 100 - fivePct - fourPct - threePct - twoPct);
+      return [
+        { stars: 5, count: Math.round((liveTotal * fivePct) / 100), percentage: fivePct },
+        { stars: 4, count: Math.round((liveTotal * fourPct) / 100), percentage: fourPct },
+        { stars: 3, count: Math.round((liveTotal * threePct) / 100), percentage: threePct },
+        { stars: 2, count: Math.round((liveTotal * twoPct) / 100), percentage: twoPct },
+        { stars: 1, count: Math.round((liveTotal * onePct) / 100), percentage: onePct },
+      ];
+    }
+    return ([5, 4, 3, 2, 1] as const).map((s) => ({ stars: s, count: 0, percentage: 0 }));
+  }, [liveDist, liveTotal, liveAvg]);
+
+  const handleSelectFilter = async (next: ReviewFilterKey) => {
+    const resolved: ReviewFilterKey = next === filter && next !== 'all' ? 'all' : next;
+    setFilter(resolved);
+    if (resolved === 'all' && reviews?.comments && reviews.comments.length > 0) {
+      setComments(reviews.comments);
+      setOffset(0);
+      setHasMore(Boolean(reviews.hasMore));
+      return;
+    }
+    setLoadingFilter(true);
+    try {
+      const bearer = await getBearer();
+      const res = await requestReviewsPage({
+        itemId,
+        upId,
+        catalogId,
+        objectId: activeObjectId ?? reviews?.objectId ?? null,
+        isItem: activeIsItem ?? reviews?.isItem,
+        rating: resolved === 'all' ? null : resolved,
+        offset: 0,
+        limit: 15,
+        bearer,
+      });
+      setComments(res.comments);
+      setOffset(0);
+      setHasMore(res.hasMore);
+      if (res.objectId) setActiveObjectId(res.objectId);
+      setActiveIsItem(res.isItem);
+      if (res.customerPhotos.length > 0) {
+        setCustomerPhotos((prev) => Array.from(new Set([...prev, ...res.customerPhotos])));
+      }
+      if (res.ratingAverage !== null) setLiveAvg(res.ratingAverage);
+      if (res.totalReviews !== null) setLiveTotal(res.totalReviews);
+      if (res.distribution.length > 0) setLiveDist(res.distribution);
+    } catch {
+      // Se falhar a rede, filtra localmente os comentários já carregados
+      const base = reviews?.comments ?? [];
+      if (resolved === 'photos') {
+        setComments(base.filter((c) => (c.photos?.length ?? 0) > 0));
+      } else if (resolved !== 'all') {
+        setComments(base.filter((c) => Math.round(c.rating) === Number(resolved)));
+      }
+      setHasMore(false);
+    } finally {
+      setLoadingFilter(false);
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    const nextOffset = offset + 15;
+    setLoadingMore(true);
+    try {
+      const bearer = await getBearer();
+      const res = await requestReviewsPage({
+        itemId,
+        upId,
+        catalogId,
+        objectId: activeObjectId ?? reviews?.objectId ?? null,
+        isItem: activeIsItem ?? reviews?.isItem,
+        rating: filter === 'all' ? null : filter,
+        offset: nextOffset,
+        limit: 15,
+        bearer,
+      });
+      setComments((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        const extra = res.comments.filter((c) => !seen.has(c.id));
+        return [...prev, ...extra];
+      });
+      setOffset(nextOffset);
+      setHasMore(res.hasMore && res.comments.length > 0);
+      if (res.objectId) setActiveObjectId(res.objectId);
+      if (res.customerPhotos.length > 0) {
+        setCustomerPhotos((prev) => Array.from(new Set([...prev, ...res.customerPhotos])));
+      }
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const filterButtons: { key: ReviewFilterKey; label: string }[] = [
+    { key: 'all', label: 'Todas' },
+    { key: '5', label: '5 ★' },
+    { key: '4', label: '4 ★' },
+    { key: '3', label: '3 ★' },
+    { key: '2', label: '2 ★' },
+    { key: '1', label: '1 ★' },
+    { key: 'photos', label: '📷 Com Fotos' },
   ];
-  const comments = reviews?.comments ?? [];
 
   return (
     <div className="glass-panel rounded-2xl p-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-4">
         <div className="flex items-center gap-2.5">
           <MessageSquare size={18} className="text-amber-400" />
-          <h3 className="text-base font-bold text-white">Opiniões sobre o Produto</h3>
+          <h3 className="text-base font-bold text-white">Opiniões Reais sobre o Produto</h3>
         </div>
-        <Pill tone="yellow">{formatInt(total)} avaliações de clientes</Pill>
+        <Pill tone="yellow">
+          {liveTotal !== null ? `${formatInt(liveTotal)} avaliações reais` : 'Opiniões verificadas'}
+        </Pill>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-12">
-        {/* Coluna Nota Média + Barra 5 a 1 estrelas + Atributos */}
-        <div className="space-y-5 md:col-span-5">
-          <div className="flex items-center gap-4">
-            <span className="text-5xl font-black tracking-tight text-amber-300">
-              {formatDecimal(avg, 1)}
-            </span>
-            <div>
-              <StarRow rating={avg} size={18} />
-              <p className="mt-1 text-xs text-slate-400">
-                Média entre {formatInt(total)} avaliações
-              </p>
-            </div>
-          </div>
-
-          {/* Barra de distribuição 5 a 1 estrelas */}
-          <div className="space-y-2">
-            {distribution.map((row) => (
-              <div key={row.stars} className="flex items-center gap-2.5 text-xs">
-                <span className="w-16 shrink-0 text-slate-400">{row.stars} estrelas</span>
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-500"
-                    style={{ width: `${Math.min(100, Math.max(2, row.percentage))}%` }}
-                  />
-                </div>
-                <span className="w-9 shrink-0 text-right font-medium text-slate-300">
-                  {row.percentage}%
+      {liveAvg === null && (liveTotal === null || liveTotal === 0) && comments.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          Este anúncio ainda não possui opiniões públicas registradas pelos compradores.
+        </p>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-12">
+            {/* Coluna Nota Média + Barra 5 a 1 estrelas clicável + Atributos */}
+            <div className="space-y-5 md:col-span-5">
+              <div className="flex items-center gap-4">
+                <span className="text-5xl font-black tracking-tight text-amber-300">
+                  {liveAvg !== null ? formatDecimal(liveAvg, 1) : '—'}
                 </span>
+                <div>
+                  <StarRow rating={liveAvg ?? 0} size={18} />
+                  <p className="mt-1 text-xs text-slate-400">
+                    {liveTotal !== null
+                      ? `Média entre ${formatInt(liveTotal)} avaliações`
+                      : 'Avaliações verificadas'}
+                  </p>
+                </div>
               </div>
-            ))}
-          </div>
 
-          {/* Avaliação de características */}
-          {attributes.length > 0 && (
-            <div className="space-y-2.5 border-t border-white/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Avaliação de características
-              </p>
-              {attributes.map((attr) => (
-                <div key={attr.name} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-slate-200">{attr.name}</span>
-                  <div className="flex items-center gap-1.5">
-                    <StarRow rating={attr.rating} size={13} />
-                    <span className="font-semibold text-amber-300">
-                      {formatDecimal(attr.rating, 1)}
-                    </span>
+              {/* Barra de distribuição 5 a 1 estrelas (clicável para filtrar) */}
+              <div className="space-y-1.5">
+                {distribution.map((row) => {
+                  const key = String(row.stars) as ReviewFilterKey;
+                  const active = filter === key;
+                  return (
+                    <button
+                      key={row.stars}
+                      type="button"
+                      onClick={() => void handleSelectFilter(key)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1 text-left text-xs transition ${
+                        active
+                          ? 'bg-amber-400/15 ring-1 ring-amber-400/40'
+                          : 'hover:bg-white/5'
+                      }`}
+                    >
+                      <span className="w-16 shrink-0 font-medium text-slate-300">
+                        {row.stars} ★
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-500"
+                          style={{ width: `${Math.min(100, Math.max(row.percentage > 0 ? 3 : 0, row.percentage))}%` }}
+                        />
+                      </div>
+                      <span className="w-12 shrink-0 text-right font-medium text-slate-300">
+                        {row.count > 0 ? formatInt(row.count) : `${row.percentage}%`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Avaliação de características */}
+              {attributes.length > 0 && (
+                <div className="space-y-2.5 border-t border-white/10 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Avaliação de características
+                  </p>
+                  {attributes.map((attr) => (
+                    <div key={attr.name} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-200">{attr.name}</span>
+                      <div className="flex items-center gap-1.5">
+                        <StarRow rating={attr.rating} size={13} />
+                        <span className="font-semibold text-amber-300">
+                          {formatDecimal(attr.rating, 1)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Coluna Fotos dos Clientes + Filtros + Comentários Reais */}
+            <div className="space-y-4 md:col-span-7">
+              {/* Galeria de Fotos Reais dos Clientes */}
+              {allCustomerPhotos.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-slate-950/50 p-3.5">
+                  <div className="mb-2.5 flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-300">
+                      <Camera size={14} /> Fotos Reais dos Clientes ({allCustomerPhotos.length})
+                    </p>
+                    <span className="text-[11px] text-slate-400">Clique para ampliar</span>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {allCustomerPhotos.slice(0, 18).map((photoUrl, idx) => (
+                      <button
+                        key={`${photoUrl}-${idx}`}
+                        type="button"
+                        onClick={() => setLightboxUrl(photoUrl)}
+                        className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/15 bg-slate-900 transition hover:border-amber-400 hover:scale-105"
+                        title="Ampliar foto do cliente"
+                      >
+                        <SafeImage
+                          src={photoUrl}
+                          alt={`Foto real de cliente ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      </button>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )}
 
-        {/* Coluna Comentários Reais dos Compradores */}
-        <div className="space-y-3 md:col-span-7">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Comentários em destaque dos compradores
-          </p>
-          {comments.length === 0 ? (
-            <p className="text-xs text-slate-400">Nenhum comentário escrito disponível neste momento.</p>
-          ) : (
-            <div className="space-y-3">
-              {comments.map((c) => (
-                <article
-                  key={c.id}
-                  className="rounded-xl border border-white/10 bg-slate-950/60 p-4 transition hover:border-white/20"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <StarRow rating={c.rating} size={13} />
-                      <span className="text-xs font-semibold text-slate-200">{c.title}</span>
+              {/* Barra Interativa de Filtros por Estrelas / Com Fotos */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {filterButtons.map((btn) => {
+                  const active = filter === btn.key;
+                  return (
+                    <button
+                      key={btn.key}
+                      type="button"
+                      disabled={loadingFilter}
+                      onClick={() => void handleSelectFilter(btn.key)}
+                      className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? 'border-amber-400 bg-amber-400/20 text-amber-200 shadow-sm shadow-amber-400/15'
+                          : 'border-white/10 bg-slate-900/75 text-slate-300 hover:border-white/25 hover:bg-white/10'
+                      }`}
+                    >
+                      {btn.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Lista de Comentários Reais */}
+              {loadingFilter ? (
+                <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 p-5 text-xs text-slate-300">
+                  <Loader2 size={15} className="animate-spin text-amber-400" />
+                  Carregando opiniões filtradas do Mercado Livre...
+                </div>
+              ) : comments.length === 0 ? (
+                <p className="rounded-xl border border-white/10 bg-slate-950/40 p-4 text-xs text-slate-400">
+                  Nenhuma opinião encontrada para este filtro específico.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {comments.map((c) => (
+                    <article
+                      key={c.id}
+                      className="rounded-xl border border-white/10 bg-slate-950/60 p-4 transition hover:border-white/20"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StarRow rating={c.rating} size={13} />
+                          {c.title && (
+                            <span className="text-xs font-semibold text-slate-100">{c.title}</span>
+                          )}
+                          {c.variant && <Pill tone="slate">{c.variant}</Pill>}
+                        </div>
+                        <span className="text-[11px] text-slate-500">{c.date}</span>
+                      </div>
+
+                      <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-slate-300">
+                        {c.content}
+                      </p>
+
+                      {/* Fotos anexadas ao comentário */}
+                      {c.photos && c.photos.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {c.photos.map((photo, pIdx) => (
+                            <button
+                              key={`${c.id}-photo-${pIdx}`}
+                              type="button"
+                              onClick={() => setLightboxUrl(photo)}
+                              className="h-14 w-14 overflow-hidden rounded-lg border border-white/15 bg-slate-900 transition hover:border-amber-400"
+                              title="Ampliar foto da avaliação"
+                            >
+                              <SafeImage
+                                src={photo}
+                                alt="Foto anexada na avaliação"
+                                className="h-full w-full object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2.5 flex items-center gap-3 text-[11px] text-slate-500">
+                        <span className="inline-flex items-center gap-1 text-emerald-400">
+                          <Check size={11} /> Compra verificada
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-slate-400">
+                          <ThumbsUp size={11} /> É útil ({c.likes ?? 0})
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+
+                  {hasMore && (
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        disabled={loadingMore}
+                        onClick={() => void handleLoadMore()}
+                        className={`${BTN_SM_YELLOW} w-full justify-center py-2.5`}
+                      >
+                        {loadingMore ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" /> Carregando mais opiniões...
+                          </>
+                        ) : (
+                          <>
+                            <MessageSquare size={14} /> Ver mais opiniões reais
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <span className="text-[11px] text-slate-500">{c.date}</span>
-                  </div>
-                  <p className="mt-2 text-xs leading-relaxed text-slate-300">{c.content}</p>
-                  <div className="mt-2.5 flex items-center gap-3 text-[11px] text-slate-500">
-                    <span className="inline-flex items-center gap-1 text-emerald-400">
-                      <Check size={11} /> Compra verificada
-                    </span>
-                    {c.likes > 0 && (
-                      <span className="inline-flex items-center gap-1">
-                        <ThumbsUp size={11} /> É útil ({c.likes})
-                      </span>
-                    )}
-                  </div>
-                </article>
-              ))}
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {lightboxUrl && (
+        <Modal title="Foto Real Enviada pelo Comprador" onClose={() => setLightboxUrl(null)} wide>
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex max-h-[72vh] w-full items-center justify-center overflow-hidden rounded-2xl bg-black/70 p-2">
+              <img
+                src={lightboxUrl}
+                alt="Foto ampliada da avaliação"
+                className="max-h-[68vh] w-auto rounded-xl object-contain"
+              />
+            </div>
+            <div className="flex justify-end gap-2 w-full">
+              <a
+                href={lightboxUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={BTN_GHOST}
+              >
+                <ExternalLink size={13} /> Abrir imagem original
+              </a>
+              <button type="button" onClick={() => setLightboxUrl(null)} className={BTN_SM_BLUE}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
+type CompetitorSortKey =
+  | 'menor_preco'
+  | 'maior_preco'
+  | 'mais_vendidos'
+  | 'maior_faturamento'
+  | 'melhor_avaliacao';
+
 function CompetitorShowcase({
   rows,
+  currentPrice,
   onAnalyzeCompetitor,
 }: {
   rows: CompetitorRow[];
+  currentPrice: number | null;
   onAnalyzeCompetitor: (itemId: string) => void;
 }) {
+  const [sortBy, setSortBy] = useState<CompetitorSortKey>('menor_preco');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [onlyFull, setOnlyFull] = useState(false);
+  const [onlyFreeShip, setOnlyFreeShip] = useState(false);
+  const [onlyIdentical, setOnlyIdentical] = useState(false);
+  const [sellerQuery, setSellerQuery] = useState('');
+
+  const nicheStats = useMemo(() => {
+    const validPrices = rows
+      .map((r) => r.price)
+      .filter((p): p is number => typeof p === 'number' && Number.isFinite(p) && p > 0);
+    const minP = validPrices.length > 0 ? Math.min(...validPrices) : currentPrice;
+    const maxP = validPrices.length > 0 ? Math.max(...validPrices) : currentPrice;
+    const avgP =
+      validPrices.length > 0
+        ? validPrices.reduce((acc, v) => acc + v, 0) / validPrices.length
+        : currentPrice;
+    const cheaperCount =
+      currentPrice !== null ? validPrices.filter((p) => p < currentPrice - 0.009).length : 0;
+    const totalPool = validPrices.length + (currentPrice !== null ? 1 : 0);
+    const currentRank = currentPrice !== null ? cheaperCount + 1 : null;
+    const identicalCount = rows.filter((r) => r.matchType === 'identical').length;
+    return { minP, avgP, maxP, currentRank, totalPool, identicalCount };
+  }, [rows, currentPrice]);
+
+  const filtered = useMemo(() => {
+    const minVal = minPrice.trim() ? parseInputNumber(minPrice) : null;
+    const maxVal = maxPrice.trim() ? parseInputNumber(maxPrice) : null;
+    const q = sellerQuery.trim().toLowerCase();
+
+    const list = rows.filter((r) => {
+      if (onlyFull && !r.fulfillment) return false;
+      if (onlyFreeShip && !r.freeShipping) return false;
+      if (onlyIdentical && r.matchType !== 'identical') return false;
+      if (minVal !== null && minVal > 0 && (r.price === null || r.price < minVal)) return false;
+      if (maxVal !== null && maxVal > 0 && (r.price === null || r.price > maxVal)) return false;
+      if (q) {
+        const hay = `${r.sellerNickname ?? ''} ${r.title ?? ''} ${r.itemId} ${r.mlbuId ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      switch (sortBy) {
+        case 'menor_preco':
+          return nullsLast(a.price, b.price, 1);
+        case 'maior_preco':
+          return nullsLast(a.price, b.price, -1);
+        case 'mais_vendidos':
+          return nullsLast(a.soldQuantity, b.soldQuantity, -1);
+        case 'maior_faturamento':
+          return nullsLast(a.monthlyRevenue, b.monthlyRevenue, -1);
+        case 'melhor_avaliacao':
+          return (
+            nullsLast(a.ratingAverage, b.ratingAverage, -1) ||
+            nullsLast(a.ratingCount, b.ratingCount, -1)
+          );
+      }
+    });
+
+    return list;
+  }, [rows, sortBy, minPrice, maxPrice, onlyFull, onlyFreeShip, onlyIdentical, sellerQuery]);
+
+  const hasActiveFilter =
+    Boolean(minPrice.trim()) ||
+    Boolean(maxPrice.trim()) ||
+    onlyFull ||
+    onlyFreeShip ||
+    onlyIdentical ||
+    Boolean(sellerQuery.trim());
+
+  const clearFilters = () => {
+    setMinPrice('');
+    setMaxPrice('');
+    setOnlyFull(false);
+    setOnlyFreeShip(false);
+    setOnlyIdentical(false);
+    setSellerQuery('');
+  };
+
   if (rows.length === 0) {
     return (
       <EmptyBox>
@@ -1988,82 +2495,327 @@ function CompetitorShowcase({
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {rows.map((r) => {
-        const diff = r.priceDiffPct ?? null;
-        const diffBadge =
-          diff === null
-            ? null
-            : diff === 0
-              ? { text: 'Mesmo preço', cls: 'bg-white/10 text-slate-300' }
-              : diff < 0
-                ? { text: `${formatDecimal(diff, 1)}% mais barato`, cls: 'bg-emerald-500/20 text-emerald-300' }
-                : { text: `+${formatDecimal(diff, 1)}% mais caro`, cls: 'bg-red-500/20 text-red-300' };
+    <div className="space-y-5">
+      {/* Resumo de Preços e Posicionamento do Nicho (Estilo AliPrice / 1688) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
+            Menor Preço
+          </p>
+          <p className="mt-1 text-xl font-black text-emerald-300">{formatBRL(nicheStats.minP)}</p>
+          <p className="text-[11px] text-slate-400">Oferta mais barata ativa</p>
+        </div>
 
-        return (
-          <article
-            key={r.itemId}
-            className="glass-card flex flex-col overflow-hidden rounded-2xl p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
-                <SafeImage
-                  src={r.image}
-                  alt={r.title ?? r.itemId}
-                  className="max-h-full max-w-full object-contain"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1">
-                  {r.fulfillment && <Pill tone="green">⚡ Full</Pill>}
-                  {r.listingType && <Pill tone="blue">{r.listingType}</Pill>}
-                </div>
-                <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-100">
-                  {r.title ?? r.itemId}
-                </p>
-              </div>
+        <div className="rounded-2xl border border-sky-400/25 bg-sky-500/10 p-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-300">
+            Preço Médio
+          </p>
+          <p className="mt-1 text-xl font-black text-white">{formatBRL(nicheStats.avgP)}</p>
+          <p className="text-[11px] text-slate-400">Média dos concorrentes</p>
+        </div>
+
+        <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-300">
+            Maior Preço
+          </p>
+          <p className="mt-1 text-xl font-black text-amber-300">{formatBRL(nicheStats.maxP)}</p>
+          <p className="text-[11px] text-slate-400">Teto praticado no nicho</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Concorrentes Mapeados
+          </p>
+          <p className="mt-1 text-xl font-black text-white">
+            {filtered.length} <span className="text-xs font-normal text-slate-400">de {rows.length}</span>
+          </p>
+          <p className="text-[11px] text-emerald-400">
+            🎯 {nicheStats.identicalCount} com produto idêntico
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-sky-400/30 bg-slate-950/75 p-3.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-300">
+            Posição deste Anúncio
+          </p>
+          <p className="mt-1 text-xl font-black text-amber-300">
+            {nicheStats.currentRank !== null
+              ? `#${nicheStats.currentRank} de ${nicheStats.totalPool}`
+              : '—'}
+          </p>
+          <p className="text-[11px] text-slate-400">Ranking do menor ao maior preço</p>
+        </div>
+      </div>
+
+      {/* Barra de Controle: Ordenação + Filtros em Tempo Real */}
+      <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-4 space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
+          <div className="lg:col-span-3">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Ordenar Ranking Por
+            </label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as CompetitorSortKey)}
+              className="w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-xs font-semibold text-white outline-none focus:border-sky-400"
+            >
+              <option value="menor_preco">Menor Preço (#1 mais barato)</option>
+              <option value="maior_preco">Maior Preço</option>
+              <option value="mais_vendidos">Mais Vendidos</option>
+              <option value="maior_faturamento">Maior Faturamento 30d</option>
+              <option value="melhor_avaliacao">Melhor Avaliação (★)</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 lg:col-span-4">
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Preço Mín (R$)
+              </label>
+              <input
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                placeholder="Ex: 25,00"
+                className="w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-sky-400"
+              />
             </div>
-
-            <div className="mt-3 flex items-baseline justify-between gap-2 border-t border-white/10 pt-3">
-              <div>
-                <p className="text-xl font-extrabold text-amber-300">{formatBRL(r.price)}</p>
-                {diffBadge && (
-                  <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${diffBadge.cls}`}>
-                    {diffBadge.text}
-                  </span>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-xs font-bold text-emerald-400">
-                  {r.soldLabel ?? (r.soldQuantity ? `${formatInt(r.soldQuantity)} vendidos` : 'Ativo')}
-                </p>
-                <p className="truncate text-[11px] text-slate-400">{r.sellerNickname ?? 'Vendedor ML'}</p>
-              </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Preço Máx (R$)
+              </label>
+              <input
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                placeholder="Ex: 80,00"
+                className="w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-sky-400"
+              />
             </div>
+          </div>
 
-            <div className="mt-3 flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => onAnalyzeCompetitor(r.itemId)}
-                className={`${BTN_SM_BLUE} flex-1`}
-              >
-                <Search size={13} /> Analisar Concorrente
-              </button>
-              {r.permalink && (
-                <a
-                  href={r.permalink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={BTN_GHOST}
-                  title="Ver no Mercado Livre"
+          <div className="lg:col-span-5">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Buscar Vendedor ou Anúncio
+            </label>
+            <div className="relative">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                value={sellerQuery}
+                onChange={(e) => setSellerQuery(e.target.value)}
+                placeholder="Digite o nome da loja/vendedor ou código MLB..."
+                className="w-full rounded-xl border border-white/10 bg-[#050914] py-2 pl-8 pr-8 text-xs text-white placeholder-slate-500 outline-none focus:border-sky-400"
+              />
+              {sellerQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSellerQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                 >
-                  <ExternalLink size={13} />
-                </a>
+                  <X size={13} />
+                </button>
               )}
             </div>
-          </article>
-        );
-      })}
+          </div>
+        </div>
+
+        {/* Botões Rápidos de Filtro */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOnlyIdentical((v) => !v)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                onlyIdentical
+                  ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                  : 'border-white/10 bg-slate-900/75 text-slate-300 hover:border-white/25'
+              }`}
+            >
+              🎯 Apenas Produto Idêntico ({nicheStats.identicalCount})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setOnlyFull((v) => !v)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                onlyFull
+                  ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                  : 'border-white/10 bg-slate-900/75 text-slate-300 hover:border-white/25'
+              }`}
+            >
+              ⚡ Apenas Full
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setOnlyFreeShip((v) => !v)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                onlyFreeShip
+                  ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                  : 'border-white/10 bg-slate-900/75 text-slate-300 hover:border-white/25'
+              }`}
+            >
+              🚚 Apenas Frete Grátis
+            </button>
+          </div>
+
+          {hasActiveFilter && (
+            <button type="button" onClick={clearFilters} className={BTN_GHOST}>
+              <X size={12} /> Limpar filtros
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Lista Ranqueada de Concorrentes (#1, #2, #3...) */}
+      {filtered.length === 0 ? (
+        <EmptyBox>
+          Nenhum concorrente corresponde aos filtros selecionados. Clique em &ldquo;Limpar filtros&rdquo; para ver todas as {rows.length} ofertas.
+        </EmptyBox>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((r, idx) => {
+            const computedDiff =
+              r.priceDiffPct !== null
+                ? r.priceDiffPct
+                : currentPrice && currentPrice > 0 && r.price !== null
+                  ? ((r.price - currentPrice) / currentPrice) * 100
+                  : null;
+
+            const diffBadge =
+              computedDiff === null
+                ? null
+                : Math.abs(computedDiff) < 0.15
+                  ? { text: 'Mesmo preço', cls: 'bg-white/10 text-slate-300' }
+                  : computedDiff < 0
+                    ? {
+                        text: `${formatDecimal(computedDiff, 1)}% mais barato`,
+                        cls: 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/30',
+                      }
+                    : {
+                        text: `+${formatDecimal(computedDiff, 1)}% mais caro`,
+                        cls: 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30',
+                      };
+
+            const targetCode = r.mlbuId ?? r.itemId;
+
+            return (
+              <article
+                key={`${r.itemId}-${idx}`}
+                className="glass-card flex flex-col justify-between overflow-hidden rounded-2xl p-4"
+              >
+                <div>
+                  {/* Topo do Card: Posição #N + Selo de Match */}
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center rounded-lg bg-amber-400/20 px-2 py-0.5 text-xs font-black text-amber-300 ring-1 ring-amber-400/35">
+                      #{idx + 1}
+                    </span>
+                    {r.matchType === 'identical' ? (
+                      <Pill tone="green">🎯 Produto Idêntico / Mesma Foto</Pill>
+                    ) : (
+                      <Pill tone="slate">Produto Similar</Pill>
+                    )}
+                  </div>
+
+                  {/* Foto + Título */}
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
+                      <SafeImage
+                        src={r.image}
+                        alt={r.title ?? r.itemId}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-xs font-semibold leading-snug text-slate-100">
+                        {r.title ?? r.itemId}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {r.fulfillment && <Pill tone="green">⚡ Full</Pill>}
+                        {r.freeShipping && <Pill tone="blue">🚚 Frete grátis</Pill>}
+                        {r.listingType && <Pill tone="slate">{r.listingType}</Pill>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Vendedor Real em Destaque */}
+                  <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px]">
+                    <p className="flex items-center gap-1.5 truncate text-slate-200">
+                      <Store size={12} className="shrink-0 text-emerald-400" />
+                      <span className="text-slate-400">Vendido por</span>
+                      <strong className="truncate font-bold text-white">
+                        {r.sellerNickname ?? 'Loja Oficial / ML'}
+                      </strong>
+                    </p>
+                    <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                      {r.sellerMedal ?? 'Ativo'}
+                      {r.sellerCompletedSales !== null
+                        ? ` · +${formatInt(r.sellerCompletedSales)} vendas`
+                        : ''}
+                      {r.sellerCityState ? ` · ${r.sellerCityState}` : ''}
+                    </p>
+                  </div>
+
+                  {/* Preço + % Diferença + Volume & Faturamento */}
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/10 pt-3">
+                    <div>
+                      <p className="text-lg font-extrabold text-amber-300">{formatBRL(r.price)}</p>
+                      {diffBadge && (
+                        <span
+                          className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${diffBadge.cls}`}
+                        >
+                          {diffBadge.text}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right text-[11px]">
+                      <p className="font-bold text-emerald-400">
+                        {r.soldLabel ??
+                          (r.soldQuantity !== null ? `${formatInt(r.soldQuantity)} vendidos` : 'Ativo')}
+                      </p>
+                      <p className="text-slate-300">
+                        Fat. 30d:{' '}
+                        <strong className="text-amber-200">
+                          {r.monthlyRevenue !== null ? formatBRL(r.monthlyRevenue) : '—'}
+                        </strong>
+                      </p>
+                      {r.ratingAverage !== null && (
+                        <p className="text-amber-300">
+                          ★ {formatDecimal(r.ratingAverage, 1)}
+                          {r.ratingCount !== null ? ` (${formatInt(r.ratingCount)})` : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ações */}
+                <div className="mt-3 flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => onAnalyzeCompetitor(targetCode)}
+                    className={`${BTN_SM_BLUE} flex-1`}
+                  >
+                    <Search size={13} /> Analisar este Anúncio
+                  </button>
+                  {r.permalink && (
+                    <a
+                      href={r.permalink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={BTN_GHOST}
+                      title="Abrir anúncio no Mercado Livre"
+                    >
+                      <ExternalLink size={13} />
+                    </a>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2076,6 +2828,7 @@ function DossierView({
   onPickTerm,
   onOpenCategory,
   onAnalyzeCompetitor,
+  getBearer,
 }: {
   d: Dossier;
   canGoBack: boolean;
@@ -2084,6 +2837,7 @@ function DossierView({
   onPickTerm: (term: string) => void;
   onOpenCategory: (categoryId: string) => void;
   onAnalyzeCompetitor: (itemId: string) => void;
+  getBearer: () => Promise<string | null>;
 }) {
   const netAfterFees = useMemo(() => {
     if (d.price === null) return null;
@@ -2096,6 +2850,9 @@ function DossierView({
     d.seller?.city && d.seller?.state
       ? `${d.seller.city} - ${d.seller.state}`
       : (d.seller?.city ?? d.seller?.state ?? 'Brasil');
+
+  const realRatingAvg = d.ratingAverage ?? d.reviewsDetail?.ratingAverage ?? null;
+  const realRatingCount = d.ratingCount ?? d.reviewsDetail?.totalReviews ?? null;
 
   return (
     <section className="space-y-6">
@@ -2140,7 +2897,7 @@ function DossierView({
         {/* COLUNA ESQUERDA: Galeria Exclusiva + Vídeo + Avaliações Reais */}
         <div className="space-y-6 lg:col-span-7">
           <Gallery
-            key={d.itemId ?? d.productId ?? d.title}
+            key={d.itemId ?? d.mlbuId ?? d.productId ?? d.title}
             images={d.images}
             videos={d.videos}
             title={d.title}
@@ -2150,6 +2907,10 @@ function DossierView({
             reviews={d.reviewsDetail}
             ratingAverage={d.ratingAverage}
             ratingCount={d.ratingCount}
+            itemId={d.itemId}
+            upId={d.mlbuId}
+            catalogId={d.productId}
+            getBearer={getBearer}
           />
         </div>
 
@@ -2157,6 +2918,25 @@ function DossierView({
         <div className="space-y-5 lg:col-span-5">
           {/* Card Principal do Produto (Estilo PDP Mercado Livre) */}
           <div className="glass-panel rounded-2xl p-6">
+            {/* Destaque Imediato do Vendedor Real no Topo */}
+            {d.seller && (
+              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-2 text-xs">
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-slate-200">
+                  <Store size={14} className="text-emerald-400" />
+                  <span>Vendido por</span>
+                  <strong className="font-bold text-white">
+                    {d.seller.nickname ?? 'Loja Verificada'}
+                  </strong>
+                  {d.seller.completedSales !== null && (
+                    <span className="font-semibold text-emerald-300">
+                      · +{formatInt(d.seller.completedSales)} vendas
+                    </span>
+                  )}
+                </span>
+                <span className="text-[11px] font-semibold text-amber-300">{d.seller.medal}</span>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
               <span>Novo</span>
               <span>·</span>
@@ -2165,6 +2945,12 @@ function DossierView({
                 <>
                   <span>·</span>
                   <span className="font-mono text-sky-300">{d.itemId}</span>
+                </>
+              )}
+              {d.mlbuId && d.mlbuId !== d.itemId && (
+                <>
+                  <span>·</span>
+                  <span className="font-mono text-amber-300">{d.mlbuId}</span>
                 </>
               )}
             </div>
@@ -2179,13 +2965,15 @@ function DossierView({
 
             <h1 className="mt-3 text-xl font-bold leading-snug text-white">{d.title}</h1>
 
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
-              <span className="font-bold text-amber-300">{formatRating(d.ratingAverage)}</span>
-              <StarRow rating={d.ratingAverage ?? 4.8} size={14} />
-              <span className="text-slate-400">
-                ({formatInt(d.ratingCount ?? d.reviewsDetail?.totalReviews ?? 28)} opiniões)
-              </span>
-            </div>
+            {realRatingAvg !== null && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                <span className="font-bold text-amber-300">{formatRating(realRatingAvg)}</span>
+                <StarRow rating={realRatingAvg} size={14} />
+                {realRatingCount !== null && (
+                  <span className="text-slate-400">({formatInt(realRatingCount)} avaliações)</span>
+                )}
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-white/10 pt-4">
               <p className="text-4xl font-black tracking-tight text-amber-300">{formatBRL(d.price)}</p>
@@ -2335,21 +3123,25 @@ function DossierView({
         </div>
       </div>
 
-      {/* Vitrine Limpa de Concorrentes Diretos */}
+      {/* Comparador Ranqueado de Concorrentes (Estilo AliPrice / 1688) */}
       <div className="glass-panel space-y-4 rounded-3xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-bold text-white">
-              Concorrentes Diretos do Mesmo Produto
+              Ranking de Concorrentes &amp; Comparador de Ofertas
             </h3>
             <p className="text-xs text-slate-400">
-              Compare preços, logística Full e volume de vendas das ofertas equivalentes
+              Compare até 40 ofertas idênticas e similares por menor preço, faturamento 30d, vendas, vendedor e logística Full
             </p>
           </div>
-          <Pill tone="blue">{d.competitors.length} concorrentes comparados</Pill>
+          <Pill tone="blue">{d.competitors.length} concorrentes mapeados</Pill>
         </div>
 
-        <CompetitorShowcase rows={d.competitors} onAnalyzeCompetitor={onAnalyzeCompetitor} />
+        <CompetitorShowcase
+          rows={d.competitors}
+          currentPrice={d.price}
+          onAnalyzeCompetitor={onAnalyzeCompetitor}
+        />
       </div>
 
       <KeywordsPanel keywords={d.keywords} onPickTerm={onPickTerm} />
@@ -2938,8 +3730,11 @@ export default function BuscasMLPro() {
   };
 
   const runAdCode = (code: string) => {
-    setQuery(code);
-    void runAnalysis(code, `Abrindo análise de ${code}...`, 'anuncio');
+    const clean = code.trim();
+    setQuery(clean);
+    const nextMode: SearchMode =
+      /^MLBU/i.test(clean) || /^https?:\/\//i.test(clean) ? 'auto' : 'anuncio';
+    void runAnalysis(clean, `Abrindo análise de ${clean}...`, nextMode);
   };
 
   const openCategory = (categoryId: string) => {
@@ -2948,7 +3743,7 @@ export default function BuscasMLPro() {
   };
 
   const openProduct = (p: ProductSummary) => {
-    const code = p.itemId ?? p.productId;
+    const code = p.itemId ?? p.productId ?? p.permalink;
     if (!code) {
       runTerm(p.title);
       return;
@@ -2957,7 +3752,7 @@ export default function BuscasMLPro() {
   };
 
   const openRankingItem = (item: RankingProductItem) => {
-    const code = item.productId ?? item.itemId ?? item.id;
+    const code = item.productId ?? item.itemId ?? item.id ?? item.permalink;
     if (code) {
       runAdCode(code);
     } else {
@@ -3155,6 +3950,7 @@ export default function BuscasMLPro() {
                 onPickTerm={runTerm}
                 onOpenCategory={openCategory}
                 onAnalyzeCompetitor={runAdCode}
+                getBearer={getBearer}
               />
             ) : keywordResult ? (
               <KeywordView

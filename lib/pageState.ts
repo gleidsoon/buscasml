@@ -22,8 +22,12 @@ export type PolyItem = {
   permalink: string | null;
   image: string | null;
   isFull: boolean;
+  freeShipping?: boolean;
   isSponsored: boolean;
   productId: string | null;
+  mlbuId?: string | null;
+  sellerId?: number | null;
+  sellerName?: string | null;
 };
 
 export type ProductVideo = {
@@ -53,6 +57,8 @@ export type ReviewComment = {
   rating: number;
   date: string;
   likes: number;
+  variant?: string | null;
+  photos?: string[];
 };
 
 export type ScrapedReviews = {
@@ -61,6 +67,9 @@ export type ScrapedReviews = {
   distribution: ReviewStarBreakdown[];
   attributes: ReviewAttribute[];
   comments: ReviewComment[];
+  customerPhotos: string[];
+  resolvedItemId: string | null;
+  resolvedUpId: string | null;
 };
 
 export type PageSignals = {
@@ -68,6 +77,7 @@ export type PageSignals = {
   pageType: 'product' | 'catalog' | 'search' | 'category' | 'unknown';
   itemId: string | null;
   productId: string | null;
+  mlbuId: string | null;
   categoryId: string | null;
   categoryName: string | null;
   title: string | null;
@@ -796,17 +806,38 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     ? `${rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`}${urlParams}`
     : null;
 
+  const decodedFullUrl = fullUrl ? (() => { try { return decodeURIComponent(fullUrl); } catch { return fullUrl; } })() : null;
+
+  const mlbuId =
+    normalizeMlb(meta.user_product_id ?? r.user_product_id) ??
+    (decodedFullUrl?.match(/\/up\/(MLBU\d{6,})/i)?.[1]?.toUpperCase() ?? null);
+
   const productId =
     normalizeMlb(meta.product_id) ??
     normalizeMlb(r.catalog_product_id) ??
-    (fullUrl?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ?? null);
+    (decodedFullUrl?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ?? null);
 
   const id =
     normalizeMlb(meta.id ?? r.id ?? r.item_id) ??
-    mlbFromImageOrUrl(fullUrl) ??
+    mlbFromImageOrUrl(decodedFullUrl) ??
     mlbFromImageOrUrl(image) ??
-    productId;
+    productId ??
+    mlbuId;
   if (!id) return null;
+
+  const sellerId =
+    num(meta.seller_id) ??
+    num(r.seller_id) ??
+    num(at(r, 'seller.id')) ??
+    num(at(meta, 'tracks.melidata_track.event_data.seller_id')) ??
+    (decodedFullUrl?.match(/seller_id\s*[:=]\s*(\d{4,})/i)?.[1] ? Number(decodedFullUrl.match(/seller_id\s*[:=]\s*(\d{4,})/i)![1]) : null);
+
+  const sellerCompText =
+    str(at(comp('seller'), 'seller.text')) ??
+    str(at(comp('seller'), 'text')) ??
+    str(at(r, 'seller.nickname')) ??
+    str(r.official_store_name);
+  const sellerName = sellerCompText ? sellerCompText.replace(/^(?:Por|Vendido\s+por)\s+/i, '').trim() : null;
 
   const title =
     str(comp('title')?.title?.text) ??
@@ -901,6 +932,10 @@ function polyFromResult(r: AnyObj): PolyItem | null {
   const soldText = soldTextIn(soldLabel);
   const soldQuantity = exactTrackSold ?? soldCountFromMatch(soldText);
 
+  const shippingDump = JSON.stringify(comp('shipping') ?? r.shipping ?? {}).toLowerCase();
+  const isFull = shippingDump.includes('full') || shippingDump.includes('fulfillment');
+  const freeShipping = shippingDump.includes('grátis') || shippingDump.includes('gratis') || shippingDump.includes('"free_shipping":true');
+
   return {
     id,
     title,
@@ -912,9 +947,13 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     reviewsCount,
     permalink: fullUrl,
     image,
-    isFull: JSON.stringify(comp('shipping') ?? r.shipping ?? {}).toLowerCase().includes('full'),
+    isFull,
+    freeShipping,
     isSponsored: components.some((c) => obj(c)?.type === 'ads_promotions') || Boolean(r.is_pad),
     productId,
+    mlbuId,
+    sellerId,
+    sellerName,
   };
 }
 
@@ -965,18 +1004,24 @@ export function readHtmlPolycards(html: string): PolyItem[] {
       block.match(/<a\b[^>]*class=["'][^"']*poly-component__title[^"']*["'][^>]*href=["']([^"']+)["']/i) ??
       block.match(/<a\b[^>]*href=["'](https?:\/\/[^"']*mercadoli[vb]re[^"']+)["']/i);
     const rawHref = hrefMatch ? decode(hrefMatch[1].trim()) : null;
+    const decodedHref = rawHref ? (() => { try { return decodeURIComponent(rawHref); } catch { return rawHref; } })() : null;
     const image = extractHtmlImage(block);
 
+    const mlbuId = decodedHref?.match(/\/up\/(MLBU\d{6,})/i)?.[1]?.toUpperCase() ?? null;
+    const sellerIdMatch = decodedHref?.match(/seller_id\s*[:=]\s*(\d{4,})/i)?.[1];
+    const sellerId = sellerIdMatch ? Number(sellerIdMatch) : null;
+
     const productId =
-      rawHref?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ??
+      decodedHref?.match(/\/p\/(MLB\d{6,})/i)?.[1]?.toUpperCase() ??
       block.match(/data-product-id=["'](MLB\d+)["']/i)?.[1]?.toUpperCase() ??
       null;
 
     const itemId =
-      mlbFromImageOrUrl(rawHref) ??
+      mlbFromImageOrUrl(decodedHref) ??
       normalizeMlb(block.match(/data-item-id=["'](MLB\d+)["']/i)?.[1]) ??
       mlbFromImageOrUrl(image) ??
-      productId;
+      productId ??
+      mlbuId;
     if (!itemId || seen.has(itemId)) continue;
     seen.add(itemId);
 
@@ -989,6 +1034,9 @@ export function readHtmlPolycards(html: string): PolyItem[] {
 
     const price = parseAndesMoneyBlock(block);
     const originalPrice = parseOriginalAndesPrice(block);
+
+    const sellerRaw = textByClass(block, '.poly-component__seller, .ui-search-official-store-label');
+    const sellerName = sellerRaw ? sellerRaw.replace(/^(?:Por|Vendido\s+por)\s+/i, '').trim() : null;
 
     const reviewZone =
       textByClass(block, '.poly-reviews__total, .poly-phrase-label, .ui-search-item__group__element, .poly-component__reviews') ??
@@ -1007,6 +1055,7 @@ export function readHtmlPolycards(html: string): PolyItem[] {
     }
 
     const isFull = /poly_full|aria-label=["'][^"']*full[^"']*["']|fulfillment/i.test(block);
+    const freeShipping = /frete\s+gr[áa]tis/i.test(block);
     const isSponsored = /patrocinado|poly-component__ads-promotions/i.test(block);
 
     out.push({
@@ -1021,8 +1070,12 @@ export function readHtmlPolycards(html: string): PolyItem[] {
       permalink: rawHref,
       image,
       isFull,
+      freeShipping,
       isSponsored,
       productId,
+      mlbuId,
+      sellerId,
+      sellerName,
     });
   }
 
@@ -1037,6 +1090,7 @@ function emptySignals(): PageSignals {
     pageType: 'unknown',
     itemId: null,
     productId: null,
+    mlbuId: null,
     categoryId: null,
     categoryName: null,
     title: null,
@@ -1079,6 +1133,9 @@ function emptySignals(): PageSignals {
       distribution: [],
       attributes: [],
       comments: [],
+      customerPhotos: [],
+      resolvedItemId: null,
+      resolvedUpId: null,
     },
   };
 }
@@ -1094,9 +1151,263 @@ function addUniqueImages(target: string[], candidates: (string | null | undefine
   }
 }
 
+/** Extrai fotos anexadas em um item de review (`media` / `carousel.media` / `pictures`). */
+function extractPhotosFromReviewItem(co: AnyObj): string[] {
+  const photos: string[] = [];
+  const seen = new Set<string>();
+  const pushPic = (raw: string | null | undefined) => {
+    const norm = normalizeMlImageUrl(raw);
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      photos.push(norm);
+    }
+  };
+
+  if (Array.isArray(co.media)) {
+    for (const m of co.media) {
+      const mo = obj(m);
+      if (!mo) continue;
+      if (str(mo.id)) pushPic(str(mo.id));
+      if (str(mo.url)) pushPic(str(mo.url));
+      if (Array.isArray(mo.variations)) {
+        const bestVar =
+          mo.variations.find((v: unknown) => /800|1200/i.test(String(obj(v)?.size ?? ''))) ??
+          mo.variations[0];
+        pushPic(str(obj(bestVar)?.url) ?? str(obj(bestVar)?.secure_url));
+      }
+    }
+  }
+  const carouselMedia = at(co, 'carousel.media');
+  if (Array.isArray(carouselMedia)) {
+    for (const cm of carouselMedia) {
+      const cmo = obj(cm);
+      pushPic(str(cmo?.media_id) ?? str(cmo?.url));
+    }
+  }
+  const picIds = at(co, 'comment.denounce.track.event_data.review.media.pictures.picture_ids');
+  if (Array.isArray(picIds)) {
+    for (const pid of picIds) pushPic(str(pid));
+  }
+  return photos;
+}
+
+/** Extrai comentários, fotos dos clientes e item_id (denounce.url) de uma lista de reviews do ML. */
+function parseMlReviewItemsInto(target: ScrapedReviews, rawList: unknown[]): void {
+  const seenIds = new Set(target.comments.map((c) => c.id));
+  const seenPhotos = new Set(target.customerPhotos);
+
+  for (const item of rawList) {
+    const co = obj(item);
+    if (!co) continue;
+
+    // Captura item_id real (ex: MLB5625506238) presente na URL de denúncia de qualquer review MLBU!
+    const denounceUrl =
+      str(at(co, 'comment.denounce.url')) ??
+      str(at(co, 'comment.menu_options.items.0.url')) ??
+      null;
+    if (denounceUrl && !target.resolvedItemId) {
+      const mItem = denounceUrl.match(/item_id=(MLB\d{6,})/i);
+      if (mItem) target.resolvedItemId = mItem[1].toUpperCase();
+    }
+    if (!target.resolvedUpId) {
+      const upId =
+        str(at(co, 'comment.denounce.track.event_data.user_product_id')) ??
+        str(at(co, 'track_show.event_data.user_product_id'));
+      if (upId && /^MLBU\d+/i.test(upId)) target.resolvedUpId = upId.toUpperCase();
+    }
+
+    const reviewPhotos = extractPhotosFromReviewItem(co);
+    for (const p of reviewPhotos) {
+      if (!seenPhotos.has(p)) {
+        seenPhotos.add(p);
+        target.customerPhotos.push(p);
+      }
+    }
+
+    const content =
+      str(at(co, 'comment.content.text')) ??
+      str(at(co, 'content.text')) ??
+      str(co.content) ??
+      str(co.text) ??
+      str(co.review_body);
+    if (!content || content.length < 2) continue;
+
+    const id = str(co.id) ?? (num(co.id) !== null ? String(num(co.id)) : `rev-${target.comments.length + 1}-${content.slice(0, 16)}`);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const variant = str(co.variant);
+    const rawTitle = str(at(co, 'title.text')) ?? str(co.title);
+    const title = rawTitle && rawTitle.toLowerCase() !== 'opinião verificada' ? rawTitle : variant ?? 'Compra verificada';
+    const rating = num(co.rating) ?? num(co.rate) ?? num(at(co, 'comment.rating')) ?? 5;
+    const date =
+      str(at(co, 'comment.date.text')) ??
+      str(at(co, 'comment.date')) ??
+      str(at(co, 'date.text')) ??
+      str(co.date) ??
+      str(co.date_created) ??
+      'Compra verificada';
+
+    let likes = num(co.likes) ?? num(co.valorizations) ?? num(at(co, 'actions.like.value')) ?? 0;
+    if (likes === 0 && Array.isArray(co.actions)) {
+      const likeAct = co.actions.find((a: unknown) => str(obj(a)?.id)?.toUpperCase() === 'LIKE');
+      likes = num(obj(likeAct)?.value) ?? 0;
+    }
+
+    target.comments.push({
+      id,
+      title,
+      content,
+      rating: Math.min(5, Math.max(1, Math.round(rating))),
+      date,
+      likes,
+      variant,
+      photos: reviewPhotos,
+    });
+  }
+}
+
 /**
- * Extrai avaliações detalhadas (nota média, total, distribuição 5-1 estrelas, atributos avaliados
- * e comentários reais dos compradores) a partir do estado da página (components.reviews_capability_v3 / reviews).
+ * Faz o parse das respostas dos endpoints reais de avaliações do Mercado Livre:
+ * - `/noindex/catalog/reviews/{id}?noIndex=true&contextual=true` (HTML com `_n.ctx.r`)
+ * - `/noindex/catalog/reviews/{id}/search?...` (JSON direto com `{ reviews: [...] }`)
+ * - `/noindex/catalog/reviews/search?...`
+ */
+export function parseNoIndexReviewsPayload(rawText: string): ScrapedReviews {
+  const out: ScrapedReviews = {
+    ratingAverage: null,
+    totalReviews: null,
+    distribution: [],
+    attributes: [],
+    comments: [],
+    customerPhotos: [],
+    resolvedItemId: null,
+    resolvedUpId: null,
+  };
+  if (!rawText || !rawText.trim()) return out;
+
+  const trimmed = rawText.trim();
+
+  // Caso 1: JSON direto de `/noindex/catalog/reviews/.../search` ou `/reviews/item/...`
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as AnyObj;
+      out.ratingAverage = num(parsed.rating_average) ?? num(at(parsed, 'rating.average'));
+      out.totalReviews = num(at(parsed, 'paging.total')) ?? num(at(parsed, 'rating.amount'));
+      if (Array.isArray(parsed.reviews)) {
+        parseMlReviewItemsInto(out, parsed.reviews);
+      }
+      if (!out.resolvedItemId) {
+        const mItem = trimmed.match(/item_id=(MLB\d{6,})/i);
+        if (mItem) out.resolvedItemId = mItem[1].toUpperCase();
+      }
+      return out;
+    } catch {
+      // continua para fallback HTML
+    }
+  }
+
+  // Caso 2: HTML Nordic de `/noindex/catalog/reviews/{id}?noIndex=true&contextual=true`
+  const state = readNordicContext(rawText) ?? readPreloadedState(rawText);
+  if (state) {
+    const revRoot = obj(state.reviews) ?? state;
+    const ratingObj = obj(revRoot.rating) ?? {};
+    out.ratingAverage =
+      num(ratingObj.average) ??
+      num(at(revRoot, 'track.event_data.rate')) ??
+      num(revRoot.rating);
+    out.totalReviews =
+      num(ratingObj.amount) ??
+      num(at(revRoot, 'track.event_data.count')) ??
+      num(revRoot.total);
+
+    if (Array.isArray(ratingObj.levels) && ratingObj.levels.length > 0) {
+      ratingObj.levels.slice(0, 5).forEach((lv: unknown, idx: number) => {
+        const lo = obj(lv);
+        if (!lo) return;
+        const stars = (5 - idx) as 5 | 4 | 3 | 2 | 1;
+        const count = num(lo.value) ?? num(lo.count) ?? 0;
+        const pct = num(lo.percentage) ?? (out.totalReviews ? Math.round((count / out.totalReviews) * 100) : 0);
+        out.distribution.push({
+          stars,
+          count,
+          percentage: Math.min(100, Math.max(0, Math.round(pct))),
+        });
+      });
+    }
+
+    const quali = Array.isArray(revRoot.quali_attributes) ? revRoot.quali_attributes : [];
+    for (const q of quali) {
+      const qo = obj(q);
+      const name = str(at(qo, 'name.text')) ?? str(qo?.name) ?? str(qo?.label);
+      const val = num(qo?.value) ?? num(qo?.rating);
+      if (name && val !== null && val > 0 && val <= 5) {
+        out.attributes.push({ name, rating: Math.round(val * 10) / 10 });
+      }
+    }
+
+    const carouselMedia = at(revRoot, 'carousel.media');
+    if (Array.isArray(carouselMedia)) {
+      const seenP = new Set(out.customerPhotos);
+      for (const cm of carouselMedia) {
+        const cmo = obj(cm);
+        const norm = normalizeMlImageUrl(str(cmo?.media_id) ?? str(cmo?.url));
+        if (norm && !seenP.has(norm)) {
+          seenP.add(norm);
+          out.customerPhotos.push(norm);
+        }
+      }
+    }
+
+    const summaryPicIds = at(revRoot, 'track.event_data.summary_reviews.media.pictures.picture_ids');
+    if (Array.isArray(summaryPicIds)) {
+      const seenP = new Set(out.customerPhotos);
+      for (const pid of summaryPicIds) {
+        const norm = normalizeMlImageUrl(str(pid));
+        if (norm && !seenP.has(norm)) {
+          seenP.add(norm);
+          out.customerPhotos.push(norm);
+        }
+      }
+    }
+
+    if (Array.isArray(revRoot.reviews)) {
+      parseMlReviewItemsInto(out, revRoot.reviews);
+    }
+  }
+
+  if (!out.resolvedItemId) {
+    const mItem = rawText.match(/item_id=(MLB\d{6,})/i);
+    if (mItem) out.resolvedItemId = mItem[1].toUpperCase();
+  }
+  if (!out.resolvedUpId) {
+    const mUp = rawText.match(/"user_product_id"\s*:\s*"(MLBU\d+)"/i);
+    if (mUp) out.resolvedUpId = mUp[1].toUpperCase();
+  }
+
+  return out;
+}
+
+/** Extrai todas as fotos reais enviadas por clientes do modal `/noindex/catalog/reviews-photos/{id}`. */
+export function parseNoIndexPhotosHtml(html: string): string[] {
+  if (!html) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const matches = html.matchAll(/https:\/\/http2\.mlstatic\.com\/D_(?:NQ_NP_)?(?:2X_)?(\d+-[A-Z]{2,4}\d+_\d{4,6})-[A-Za-z]{1,2}\.(?:webp|jpe?g|png)/gi);
+  for (const m of matches) {
+    const cleanId = m[1];
+    const url = `https://http2.mlstatic.com/D_NQ_NP_${cleanId}-O.webp`;
+    if (!seen.has(url)) {
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
+/**
+ * Extrai avaliações detalhadas (nota média, total, distribuição 5-1 estrelas, atributos avaliados,
+ * fotos de clientes e comentários reais) a partir do estado da página (components.reviews_capability_v3 / reviews).
  */
 function extractReviewsFromStateObj(s: PageSignals, state: AnyObj): void {
   const components = obj(state.components) ?? {};
@@ -1153,6 +1464,14 @@ function extractReviewsFromStateObj(s: PageSignals, state: AnyObj): void {
     }
   }
 
+  const carouselMedia = at(revComp, 'carousel.media');
+  if (Array.isArray(carouselMedia)) {
+    addUniqueImages(
+      s.reviewsData.customerPhotos,
+      carouselMedia.map((cm: unknown) => str(obj(cm)?.media_id) ?? str(obj(cm)?.url)),
+    );
+  }
+
   // Comentários reais dos compradores
   const tabs = Array.isArray(revComp.tabs) ? revComp.tabs : [];
   const tabReviews = tabs.flatMap((t: unknown) => {
@@ -1164,38 +1483,7 @@ function extractReviewsFromStateObj(s: PageSignals, state: AnyObj): void {
     ...(Array.isArray(revComp.comments) ? revComp.comments : []),
     ...tabReviews,
   ];
-  const seenIds = new Set(s.reviewsData.comments.map((c) => c.id));
-  for (const item of commentsRaw) {
-    const co = obj(item);
-    if (!co) continue;
-    const content =
-      str(at(co, 'comment.content.text')) ??
-      str(at(co, 'content.text')) ??
-      str(co.content) ??
-      str(co.text) ??
-      str(co.review_body);
-    if (!content || content.length < 4) continue;
-    const id = str(co.id) ?? `rev-${s.reviewsData.comments.length + 1}-${content.slice(0, 16)}`;
-    if (seenIds.has(id)) continue;
-    seenIds.add(id);
-    const title = str(at(co, 'title.text')) ?? str(co.title) ?? 'Opinião verificada';
-    const rating = num(co.rating) ?? num(co.rate) ?? num(at(co, 'comment.rating')) ?? 5;
-    const date =
-      str(at(co, 'comment.date.text')) ??
-      str(at(co, 'date.text')) ??
-      str(co.date) ??
-      str(co.date_created) ??
-      'Recente';
-    const likes = num(co.likes) ?? num(co.valorizations) ?? num(at(co, 'actions.like.value')) ?? 0;
-    s.reviewsData.comments.push({
-      id,
-      title,
-      content,
-      rating: Math.min(5, Math.max(1, Math.round(rating))),
-      date,
-      likes,
-    });
-  }
+  parseMlReviewItemsInto(s.reviewsData, commentsRaw);
 }
 
 /**
@@ -1538,12 +1826,24 @@ export function extractPageSignals(html: string, url: string | null = null): Pag
   if (!html) return s;
 
   if (url) {
-    if (/lista\.mercadoli[vb]re/i.test(url)) s.pageType = 'search';
-    else if (/\/c\//.test(url)) s.pageType = 'category';
-    else if (/\/p\/MLB\d+/i.test(url)) s.pageType = 'catalog';
-    else if (/MLB-?\d+|\/up\/MLBU/i.test(url)) s.pageType = 'product';
+    const cleanUrl = (() => {
+      const noHash = url.split('#')[0];
+      try {
+        return decodeURIComponent(noHash);
+      } catch {
+        return noHash;
+      }
+    })();
 
-    const sellerInUrl = url.match(/seller_id\s*[:=]\s*(\d+)/i)?.[1];
+    if (/lista\.mercadoli[vb]re/i.test(cleanUrl)) s.pageType = 'search';
+    else if (/\/c\//.test(cleanUrl)) s.pageType = 'category';
+    else if (/\/p\/MLB\d+/i.test(cleanUrl)) s.pageType = 'catalog';
+    else if (/MLB-?\d+|\/up\/MLBU/i.test(cleanUrl)) s.pageType = 'product';
+
+    const mlbuInUrl = cleanUrl.match(/\/up\/(MLBU\d{6,})/i)?.[1];
+    if (mlbuInUrl) s.mlbuId = mlbuInUrl.toUpperCase();
+
+    const sellerInUrl = cleanUrl.match(/seller_id\s*[:=]\s*(\d+)/i)?.[1];
     if (sellerInUrl) {
       s.sellerIdFromUrl = Number(sellerInUrl);
       s.sellerId ??= s.sellerIdFromUrl;
@@ -1563,6 +1863,13 @@ export function extractPageSignals(html: string, url: string | null = null): Pag
 
   applyLdJson(s, readLdJson(html));
   applySelectors(s, html);
+
+  s.mlbuId ??=
+    s.reviewsData.resolvedUpId ??
+    s.alAndroidUrl?.match(/products\/(MLBU\d{6,})/i)?.[1]?.toUpperCase() ??
+    s.ogUrl?.match(/\/up\/(MLBU\d{6,})/i)?.[1]?.toUpperCase() ??
+    null;
+  s.itemId ??= s.reviewsData.resolvedItemId;
 
   if (s.logisticType === 'fulfillment') s.isFull = true;
   if (s.startTime && !s.startTimeSource) s.startTimeSource = 'Estado da página (start_time)';
