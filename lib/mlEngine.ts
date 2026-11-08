@@ -555,8 +555,9 @@ export function extractKeywords(titles: string[], limit = 20): { words: KeywordS
 }
 
 /* =============================================================================
- * ANÁLISE DE QUALIDADE DA LISTAGEM (Score 0 a 100 — inspirado em MlbListingsScores)
- * Checklist dos 6 pilares: Título, Fotos, Vídeo/Clipes, Ficha Técnica, Logística e Modalidade
+ * ANÁLISE DE QUALIDADE DA LISTAGEM (Auditor SEO & Conversão 0 a 100)
+ * Pesos oficiais mapeados: Título (20), Fotos (20), Vídeo/Clipes (15),
+ * Ficha Técnica & Descrição (20), Logística (15), Modalidade & Reputação (10)
  * ============================================================================= */
 
 export type ListingQualityStatus = 'ok' | 'warning' | 'missing';
@@ -587,8 +588,13 @@ export type ListingQualityReport = {
   levelLabel: string;
   summary: string;
   passedCount: number;
+  warningCount: number;
+  criticalCount: number;
   totalCriteria: 6;
   potentialGain: number;
+  conversionSignal: string;
+  reputationSignal: string;
+  actionPlan: string[];
   criteria: ListingQualityCriterion[];
 };
 
@@ -609,6 +615,7 @@ export type ListingQualityInput = {
   reputationLevel: string | null;
   ratingAverage: number | null;
   ratingCount: number | null;
+  dailySales?: number | null;
 };
 
 export function evaluateListingQuality(input: ListingQualityInput): ListingQualityReport {
@@ -617,131 +624,144 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
   const titleWords = cleanTitle.split(/\s+/).filter((w) => w.length >= 2).length;
   const hasSpamSymbols = /[!?*]{2,}|[\u{1F300}-\u{1FAFF}]/u.test(cleanTitle);
 
-  // 1. Título SEO (0 a 20 pts)
-  let titleScore = 6;
+  // 1. Título Otimizado (0 a 20 pts — >= 50 chars: 20; 35..49: 14; 20..34: 8; < 20: 4)
+  let titleScore = 4;
   let titleStatus: ListingQualityStatus = 'missing';
-  let titleRec = 'Amplie o título para 50–60 caracteres incluindo Produto + Marca + Modelo + atributo principal.';
-  if (titleLen >= 45 && titleWords >= 6 && !hasSpamSymbols) {
+  let titleRec = 'Amplie o título para 50–60 caracteres estruturando: Produto + Marca + Modelo + Especificação Principal.';
+  if (titleLen >= 50 && titleWords >= 6 && !hasSpamSymbols) {
     titleScore = 20;
     titleStatus = 'ok';
-    titleRec = 'Título bem estruturado para indexação orgânica nas buscas do Mercado Livre.';
-  } else if (titleLen >= 32 && titleWords >= 4) {
-    titleScore = hasSpamSymbols ? 12 : 14;
+    titleRec = 'Título completo (50+ caracteres) com excelente densidade semântica para o buscador do Mercado Livre.';
+  } else if (titleLen >= 35 && titleWords >= 4) {
+    titleScore = hasSpamSymbols ? 11 : 14;
     titleStatus = 'warning';
     titleRec = hasSpamSymbols
-      ? 'Remova símbolos promocionais/emojis e aproveite os 60 caracteres com palavras-chave de busca.'
-      : 'Aproveite o espaço até ~60 caracteres adicionando variações, material ou aplicação principal.';
+      ? 'Remova emojis/pontuação repetida e aproveite até 60 caracteres com termos reais de busca do comprador.'
+      : `Faltam ~${Math.max(5, 55 - titleLen)} caracteres para o tamanho ideal (55–60). Adicione cor, medida, voltagem ou aplicação.`;
+  } else if (titleLen >= 20) {
+    titleScore = 8;
+    titleStatus = 'missing';
+    titleRec = 'Título curto desperdiça tráfego orgânico de cauda longa. Expanda para 50–60 caracteres sem repetir palavras.';
   }
 
-  // 2. Galeria de Fotos (0 a 20 pts — imagesScorePercent)
+  // 2. Galeria de Fotos e Resolução HD (0 a 20 pts — >= 7 fotos: 20; 5..6: 15; 3..4: 10; 1..2: 5; 0: 0)
   const imgs = Math.max(0, Math.round(input.imagesCount));
   let photoScore = 0;
   let photoStatus: ListingQualityStatus = 'missing';
-  let photoRec = 'Adicione ao menos 6 fotos em alta resolução (1200x1200px), com capa em fundo branco puro.';
-  if (imgs >= 6) {
+  let photoRec = 'Suba ao menos 7 imagens em alta resolução (1200x1200px), sendo a 1ª em fundo branco puro.';
+  if (imgs >= 7) {
     photoScore = 20;
     photoStatus = 'ok';
-    photoRec = 'Galeria completa! Mantenha a 1ª foto em fundo branco e as demais mostrando detalhes e medidas.';
-  } else if (imgs >= 4) {
+    photoRec = 'Galeria rica (7+ fotos em alta definição). Mantenha capa em fundo branco, foto ambientada e tabela de medidas.';
+  } else if (imgs >= 5) {
     photoScore = 15;
     photoStatus = 'warning';
-    photoRec = `Adicione mais ${6 - imgs} foto(s) (ângulos de uso, tabela de medidas e itens inclusos) para nota máxima.`;
-  } else if (imgs >= 2) {
-    photoScore = 9;
+    photoRec = `Boa galeria (${imgs} fotos), mas adicionar mais ${7 - imgs} imagem(ns) (detalhes, medidas e embalagem) garante pontuação máxima.`;
+  } else if (imgs >= 3) {
+    photoScore = 10;
     photoStatus = 'warning';
-    photoRec = `Galeria curta (${imgs} fotos). Suba para 6–10 imagens HD para aumentar a taxa de conversão.`;
-  } else if (imgs === 1) {
-    photoScore = 4;
+    photoRec = `Apenas ${imgs} fotos cadastradas. Suba para 7–10 imagens HD (1200x1200px) para elevar a taxa de conversão.`;
+  } else if (imgs >= 1) {
+    photoScore = 5;
     photoStatus = 'missing';
-    photoRec = 'Anúncio com apenas 1 foto perde cliques e conversão. Inclua pelo menos 6 fotos reais e de escala.';
+    photoRec = `Crítico: apenas ${imgs} foto(s). Compradores evitam anúncios sem ângulos reais, medidas e conteúdo da caixa.`;
   }
 
-  // 3. Vídeo / Clipes (0 a 15 pts — clipsScorePercent / hasClips)
+  // 3. Vídeo / Clipe no Anúncio (0 a 15 pts — com vídeo/clip: 15; sem vídeo: 0)
   const vids = Math.max(0, Math.round(input.videosCount));
   const videoScore = vids >= 1 ? 15 : 0;
   const videoStatus: ListingQualityStatus = vids >= 1 ? 'ok' : 'missing';
   const videoRec =
     vids >= 1
-      ? 'Anúncio conta com vídeo/clipe ativo, aumentando a retenção na página e tráfego do ML Clips.'
-      : 'Publique um vídeo/clipe vertical (15s a 60s) no Mercado Livre Clips para ganhar +15 pts de exposição.';
+      ? 'Anúncio possui vídeo/clipe ativo, destravando distribuição gratuita na aba Clips e maior retenção no anúncio.'
+      : 'Sem vídeo/clipe (-15 pts). Publique um vídeo vertical de 15s a 60s demonstrando o produto em uso no ML Clips.';
 
-  // 4. Ficha Técnica & Descrição (0 a 15 pts — hasDescription + attributes)
+  // 4. Ficha Técnica Estruturada & Descrição (0 a 20 pts — >= 8 attrs + desc: 20; 5..7: 14; 2..4: 8; < 2: 3)
   const hasRealBrand = Boolean(input.brand && !/^(gen[eé]rica|linha\s)/i.test(input.brand));
   const hasRealModel = Boolean(input.model && input.model.trim().length >= 2);
   const attrCount = Math.max(
     0,
-    Math.round(input.attributesCount) + (input.attributesCount === 0 ? (hasRealBrand ? 1 : 0) + (hasRealModel ? 1 : 0) : 0),
+    Math.round(input.attributesCount) +
+      (input.attributesCount === 0 ? (hasRealBrand ? 1 : 0) + (hasRealModel ? 1 : 0) : 0),
   );
-  const hasDesc = input.descriptionLength >= 80;
-  let specsScore = 5;
+  const hasDesc = input.descriptionLength >= 100;
+  let specsScore = 3;
   let specsStatus: ListingQualityStatus = 'missing';
-  let specsRec = 'Preencha todos os atributos da Ficha Técnica (Marca, Modelo, EAN/GTIN, medidas) e descrição completa.';
-  if (attrCount >= 6 || (attrCount >= 4 && hasDesc)) {
-    specsScore = 15;
+  let specsRec = 'Preencha ao menos 8 atributos da Ficha Técnica (Marca, Modelo, EAN/GTIN, dimensões, material) e descrição completa.';
+  if (attrCount >= 8 && hasDesc) {
+    specsScore = 20;
     specsStatus = 'ok';
-    specsRec = 'Ficha técnica bem preenchida, habilitando os filtros laterais da categoria na busca.';
-  } else if (attrCount >= 2 || hasDesc) {
-    specsScore = 10;
-    specsStatus = 'warning';
+    specsRec = 'Ficha técnica completa (8+ atributos) aliada à descrição detalhada, indexando o anúncio nos filtros laterais.';
+  } else if (attrCount >= 8 || (attrCount >= 5 && hasDesc)) {
+    specsScore = 16;
+    specsStatus = 'ok';
     specsRec = hasDesc
-      ? 'Complete mais atributos estruturados na Ficha Técnica (EAN/GTIN, dimensões, material) para filtrar melhor.'
-      : 'Enriqueça a Ficha Técnica e adicione uma descrição textual quebrando objeções frequentes.';
+      ? 'Boa cobertura técnica! Revise campos opcionais como código universal (EAN/GTIN) e garantia.'
+      : 'Atributos preenchidos, mas a descrição textual está curta — adicione benefícios, modo de uso e itens inclusos.';
+  } else if (attrCount >= 5 || (attrCount >= 3 && hasDesc)) {
+    specsScore = 14;
+    specsStatus = 'warning';
+    specsRec = `Complete mais ${Math.max(2, 8 - attrCount)} atributos na Ficha Técnica para aparecer quando o comprador filtrar especificações.`;
+  } else if (attrCount >= 2 || hasDesc) {
+    specsScore = 8;
+    specsStatus = 'missing';
+    specsRec = 'Ficha técnica incompleta reduz drasticamente o alcance orgânico. Preencha Marca, Modelo, EAN e medidas exatas.';
   }
 
-  // 5. Logística & Frete (0 a 15 pts — shippingFullScorePercent + freeShippingScorePercent)
-  let logScore = 5;
-  let logStatus: ListingQualityStatus = 'warning';
-  let logValue = 'Envio padrão (frete por conta do comprador)';
-  let logRec = 'Ative Mercado Envios Full ou Frete Grátis competitivo para subir posições no ranking.';
+  // 5. Logística Competitiva (0 a 15 pts — Full + Frete Grátis: 15; só Full ou só Frete Grátis: 10; frete pago padrão: 3)
+  let logScore = 3;
+  let logStatus: ListingQualityStatus = 'missing';
+  let logValue = 'Envio padrão (frete pago pelo comprador)';
+  let logRec = 'Anúncio sem Full e sem Frete Grátis perde prioridade de exposição. Avalie envio ao Full ou kits acima de R$ 79.';
   if (input.fulfillment && input.freeShipping) {
     logScore = 15;
     logStatus = 'ok';
-    logValue = '⚡ Mercado Envios Full + Frete Grátis';
-    logRec = 'Configuração logística máxima (Full + Frete Grátis), com prioridade no BuyBox e entrega rápida.';
+    logValue = 'Mercado Envios Full + Frete Grátis';
+    logRec = 'Configuração logística máxima! Selo Full + Frete Grátis garante máxima conversão e prioridade no BuyBox.';
   } else if (input.fulfillment) {
-    logScore = 13;
-    logStatus = 'ok';
-    logValue = '⚡ Mercado Envios Full';
-    logRec = 'Estoque no Full garante selo raio e entrega rápida; avalie kits ≥ R$ 79 para ativar Frete Grátis.';
-  } else if (input.freeShipping) {
     logScore = 11;
+    logStatus = 'ok';
+    logValue = 'Mercado Envios Full (ticket < R$ 79)';
+    logRec = 'Estoque no Full entrega rápido e converte bem; teste variação em kit ≥ R$ 79 para destravar Frete Grátis.';
+  } else if (input.freeShipping) {
+    logScore = 10;
     logStatus = 'warning';
-    logValue = '🚚 Frete Grátis (Agência / Coleta)';
-    logRec = 'Já oferece Frete Grátis; migrar o giro ao Mercado Envios Full destrava o topo das buscas.';
+    logValue = 'Frete Grátis (Coleta / Agência)';
+    logRec = 'Oferece Frete Grátis, mas migrar os SKUs campeões para o Mercado Envios Full multiplica a exposição orgânica.';
   }
 
-  // 6. Modalidade & Reputação (0 a 15 pts — listingType + medalScorePercent + reputationScorePercent)
+  // 6. Modalidade & Reputação (0 a 10 pts — Premium ou Clássico com reputação verde: 8–10; básico: 4)
   const isPremium = input.listingTypeId === 'gold_pro' || /premium/i.test(input.listingTypeLabel ?? '');
   const medalTxt = input.sellerMedal ?? '';
   const hasTopRep =
-    /platinum|gold|l[ií]der|loja oficial/i.test(medalTxt) ||
+    /platinum|gold|l[ií]der|loja oficial|verde/i.test(medalTxt) ||
     input.reputationLevel === '5_green' ||
     input.reputationLevel === '4_light_green';
-  let modScore = 7;
-  let modStatus: ListingQualityStatus = 'warning';
+  let modScore = 4;
+  let modStatus: ListingQualityStatus = 'missing';
   const modLabel = isPremium ? 'Premium (Sem juros)' : 'Clássico';
-  let modRec = 'Mantenha reputação verde e avalie Anúncio Premium para oferecer parcelamento sem juros.';
+  let modRec = 'Recupere o termômetro verde entregando no prazo e avalie modalidade Premium para tickets acima de R$ 100.';
   if (isPremium && hasTopRep) {
-    modScore = 15;
+    modScore = 10;
     modStatus = 'ok';
-    modRec = 'Exposição máxima Premium com parcelamento sem juros aliada à reputação verde do vendedor.';
+    modRec = 'Exposição máxima Premium com parcelamento sem juros combinada com reputação verde do vendedor.';
   } else if (!isPremium && hasTopRep) {
-    modScore = 12;
-    modStatus = input.price !== null && input.price < 79 ? 'ok' : 'warning';
+    modScore = input.price !== null && input.price < 100 ? 9 : 8;
+    modStatus = input.price !== null && input.price < 100 ? 'ok' : 'warning';
     modRec =
-      input.price !== null && input.price < 79
-        ? 'Modalidade Clássico adequada para ticket acessível com reputação forte do vendedor.'
-        : 'Boa reputação no Clássico; teste um anúncio espelho no Premium para capturar compradores parcelados.';
+      input.price !== null && input.price < 100
+        ? 'Modalidade Clássico bem ajustada ao ticket acessível com termômetro verde.'
+        : 'Termômetro forte no Clássico; avalie espelhar o item no Premium para capturar compradores que buscam 10x–12x sem juros.';
   } else if (isPremium) {
-    modScore = 11;
+    modScore = 7;
     modStatus = 'warning';
-    modRec = 'Anúncio Premium ativo; evolua termômetro/medalha para maximizar a relevância orgânica.';
+    modRec = 'Modalidade Premium ativa, porém a reputação da conta precisa atingir verde escuro para destravar todo o tráfego.';
   }
 
   const criteria: ListingQualityCriterion[] = [
     {
       id: 'title',
-      label: 'Título SEO',
+      label: 'Título & Palavras-Chave (SEO)',
       score: titleScore,
       maxScore: 20,
       percentage: Math.round((titleScore / 20) * 100),
@@ -751,37 +771,37 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
     },
     {
       id: 'photos',
-      label: 'Galeria de Fotos',
+      label: 'Galeria de Fotos & Resolução',
       score: photoScore,
       maxScore: 20,
       percentage: Math.round((photoScore / 20) * 100),
       status: photoStatus,
-      currentValue: `${imgs} ${imgs === 1 ? 'foto exclusiva' : 'fotos exclusivas'}`,
+      currentValue: `${imgs} ${imgs === 1 ? 'foto em alta definição' : 'fotos em alta definição'}`,
       recommendation: photoRec,
     },
     {
       id: 'video',
-      label: 'Vídeo / Clipes',
+      label: 'Vídeo / Clipe Demonstrativo',
       score: videoScore,
       maxScore: 15,
       percentage: Math.round((videoScore / 15) * 100),
       status: videoStatus,
-      currentValue: vids >= 1 ? `${vids} vídeo/clipe ativo` : 'Sem vídeo ou clipe',
+      currentValue: vids >= 1 ? `${vids} vídeo/clipe publicado` : 'Ausente (sem vídeo/clipe)',
       recommendation: videoRec,
     },
     {
       id: 'specs',
-      label: 'Ficha Técnica',
+      label: 'Ficha Técnica & Descrição',
       score: specsScore,
-      maxScore: 15,
-      percentage: Math.round((specsScore / 15) * 100),
+      maxScore: 20,
+      percentage: Math.round((specsScore / 20) * 100),
       status: specsStatus,
       currentValue:
         attrCount > 0
-          ? `${attrCount} atributo(s)${hasDesc ? ' + Descrição completa' : ''}`
+          ? `${attrCount} atributo(s)${hasDesc ? ` · Descrição (${input.descriptionLength} caract.)` : ' · Descrição curta'}`
           : hasDesc
-            ? 'Descrição presente · Poucos atributos'
-            : 'Atributos básicos',
+            ? `Poucos atributos · Descrição (${input.descriptionLength} caract.)`
+            : 'Ficha técnica incompleta',
       recommendation: specsRec,
     },
     {
@@ -798,8 +818,8 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
       id: 'modality',
       label: 'Modalidade & Reputação',
       score: modScore,
-      maxScore: 15,
-      percentage: Math.round((modScore / 15) * 100),
+      maxScore: 10,
+      percentage: Math.round((modScore / 10) * 100),
       status: modStatus,
       currentValue: `${modLabel}${medalTxt ? ` · ${medalTxt}` : ''}`,
       recommendation: modRec,
@@ -809,23 +829,46 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
   const rawScore = criteria.reduce((sum, c) => sum + c.score, 0);
   const score = Math.min(100, Math.max(0, Math.round(rawScore)));
   const passedCount = criteria.filter((c) => c.status === 'ok').length;
+  const warningCount = criteria.filter((c) => c.status === 'warning').length;
+  const criticalCount = criteria.filter((c) => c.status === 'missing').length;
   const potentialGain = Math.max(0, 100 - score);
+
+  const actionPlan = criteria
+    .filter((c) => c.status !== 'ok')
+    .sort((a, b) => (b.maxScore - b.score) - (a.maxScore - a.score))
+    .map((c) => `(+${c.maxScore - c.score} pts em ${c.label}) ${c.recommendation}`);
+
+  const daily = input.dailySales ?? null;
+  const ratingAvg = input.ratingAverage ?? null;
+  const ratingCnt = input.ratingCount ?? 0;
+  const conversionSignal =
+    daily !== null && daily >= 3
+      ? `Conversão forte (~${daily.toFixed(1).replace('.', ',')} vendas/dia)`
+      : daily !== null && daily >= 0.5
+        ? `Conversão moderada (~${daily.toFixed(1).replace('.', ',')} vendas/dia)`
+        : (ratingCnt ?? 0) >= 25 && (ratingAvg ?? 0) >= 4.6
+          ? `Boa prova social (${ratingCnt} avaliações · nota ${ratingAvg?.toFixed(1).replace('.', ',')})`
+          : 'Baixa tração/prova social — priorize melhorias visuais, preço competitivo e Ads inicial';
+
+  const reputationSignal = hasTopRep
+    ? `Conta saudável (${medalTxt || 'Termômetro Verde'})`
+    : 'Atenção à reputação do vendedor — atrasos e reclamações penalizam o posicionamento orgânico';
 
   let level: ListingQualityLevel = 'Critical';
   let levelLabel = 'Crítico';
-  let summary = 'Anúncio com lacunas importantes de mídia, ficha técnica ou logística que limitam o tráfego.';
+  let summary = 'Anúncio com falhas críticas de cadastro, mídia ou logística que travam impressões e vendas.';
   if (score >= 85) {
     level = 'Great';
     levelLabel = 'Excelente';
-    summary = 'Anúncio altamente competitivo e otimizado nos principais fatores de ranqueamento do Mercado Livre.';
+    summary = 'Anúncio altamente otimizado nos 6 pilares de SEO e conversão do Mercado Livre.';
   } else if (score >= 70) {
     level = 'Good';
     levelLabel = 'Bom';
-    summary = 'Boa estrutura de anúncio! Ajustes pontuais (como vídeo/clipe ou mais fotos) podem levá-lo a 90+ pts.';
+    summary = 'Estrutura competitiva! Corrigir os pontos pendentes abaixo pode elevar o anúncio acima de 90 pontos.';
   } else if (score >= 50) {
     level = 'NeedAttention';
     levelLabel = 'Requer Atenção';
-    summary = 'Existem oportunidades claras de otimização para ganhar relevância orgânica e conversão.';
+    summary = 'Anúncio perde cliques e posições para concorrentes mais completos. Siga o plano de ação prioritário.';
   }
 
   return {
@@ -835,8 +878,492 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
     levelLabel,
     summary,
     passedCount,
+    warningCount,
+    criticalCount,
     totalCriteria: 6,
     potentialGain,
+    conversionSignal,
+    reputationSignal,
+    actionPlan,
     criteria,
   };
 }
+
+/* =============================================================================
+ * ESTADOS BRASILEIROS (UF) — NORMALIZAÇÃO PARA PRODUTOS LOCAIS
+ * ============================================================================= */
+
+export const BRAZIL_UFS: { code: string; name: string; region: string }[] = [
+  { code: 'SP', name: 'São Paulo', region: 'Sudeste' },
+  { code: 'PR', name: 'Paraná', region: 'Sul' },
+  { code: 'SC', name: 'Santa Catarina', region: 'Sul' },
+  { code: 'MG', name: 'Minas Gerais', region: 'Sudeste' },
+  { code: 'RJ', name: 'Rio de Janeiro', region: 'Sudeste' },
+  { code: 'RS', name: 'Rio Grande do Sul', region: 'Sul' },
+  { code: 'GO', name: 'Goiás', region: 'Centro-Oeste' },
+  { code: 'ES', name: 'Espírito Santo', region: 'Sudeste' },
+  { code: 'BA', name: 'Bahia', region: 'Nordeste' },
+  { code: 'PE', name: 'Pernambuco', region: 'Nordeste' },
+  { code: 'CE', name: 'Ceará', region: 'Nordeste' },
+  { code: 'DF', name: 'Distrito Federal', region: 'Centro-Oeste' },
+  { code: 'MT', name: 'Mato Grosso', region: 'Centro-Oeste' },
+  { code: 'MS', name: 'Mato Grosso do Sul', region: 'Centro-Oeste' },
+  { code: 'PB', name: 'Paraíba', region: 'Nordeste' },
+  { code: 'RN', name: 'Rio Grande do Norte', region: 'Nordeste' },
+  { code: 'PA', name: 'Pará', region: 'Norte' },
+  { code: 'AM', name: 'Amazonas', region: 'Norte' },
+  { code: 'AL', name: 'Alagoas', region: 'Nordeste' },
+  { code: 'SE', name: 'Sergipe', region: 'Nordeste' },
+  { code: 'MA', name: 'Maranhão', region: 'Nordeste' },
+  { code: 'PI', name: 'Piauí', region: 'Nordeste' },
+  { code: 'RO', name: 'Rondônia', region: 'Norte' },
+  { code: 'TO', name: 'Tocantins', region: 'Norte' },
+  { code: 'AC', name: 'Acre', region: 'Norte' },
+  { code: 'AP', name: 'Amapá', region: 'Norte' },
+  { code: 'RR', name: 'Roraima', region: 'Norte' },
+];
+
+const UF_CODE_SET = new Set(BRAZIL_UFS.map((u) => u.code));
+const UF_BY_NORMALIZED_NAME = new Map<string, string>(
+  BRAZIL_UFS.map((u) => [
+    u.name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''),
+    u.code,
+  ]),
+);
+
+/** Normaliza "BR-SP", "São Paulo", "SP", etc. para a sigla oficial de 2 letras ("SP"). */
+export function normalizeUf(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(/^BR[-_\s]/i, '').trim();
+  if (!cleaned) return null;
+  const upper = cleaned.toUpperCase();
+  if (UF_CODE_SET.has(upper)) return upper;
+  const normName = cleaned
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return UF_BY_NORMALIZED_NAME.get(normName) ?? null;
+}
+
+/* =============================================================================
+ * PESO FÍSICO vs. PESO CUBADO (CALCULADORA DE MARGEM EXPANDIDA)
+ * ============================================================================= */
+
+export type ShippingWeightAnalysis = {
+  physicalWeightGrams: number;
+  volumetricWeightGrams: number;
+  billableWeightGrams: number;
+  weightType: 'físico' | 'cubado';
+  suggestedMeliShippingBrl: number;
+};
+
+/**
+ * Calcula Peso Cubado = (C × L × A em cm) / 6000 (em kg) -> gramas
+ * e retorna o peso faturável (maior entre físico e cubado) + estimativa de frete Mercado Envios (Líder/Verde).
+ */
+export function computeShippingWeight(
+  physicalWeightGrams: number,
+  lengthCm: number,
+  widthCm: number,
+  heightCm: number,
+): ShippingWeightAnalysis {
+  const phys = Math.max(0, Math.round(physicalWeightGrams));
+  const hasDims = lengthCm > 0 && widthCm > 0 && heightCm > 0;
+  const volKg = hasDims ? (lengthCm * widthCm * heightCm) / 6000 : 0;
+  const volGrams = Math.max(0, Math.round(volKg * 1000));
+  const billable = Math.max(phys, volGrams);
+  const weightType: 'físico' | 'cubado' = volGrams > phys ? 'cubado' : 'físico';
+
+  // Tabela de referência Mercado Envios (50% desconto reputação verde/Líder em itens ≥ R$ 79)
+  let suggested = 21.45;
+  if (billable <= 300) suggested = 18.95;
+  else if (billable <= 500) suggested = 19.95;
+  else if (billable <= 1000) suggested = 21.45;
+  else if (billable <= 2000) suggested = 23.45;
+  else if (billable <= 5000) suggested = 28.95;
+  else if (billable <= 9000) suggested = 42.9;
+  else if (billable <= 13000) suggested = 63.9;
+  else suggested = 84.9;
+
+  return {
+    physicalWeightGrams: phys,
+    volumetricWeightGrams: volGrams,
+    billableWeightGrams: billable,
+    weightType,
+    suggestedMeliShippingBrl: suggested,
+  };
+}
+
+/* =============================================================================
+ * ANÁLISE CONSOLIDADA DE CATEGORIA / NICHO
+ * Monopólio (Top 5 Vendedores e Top 5 Marcas), Faixas de Preço e Logística
+ * ============================================================================= */
+
+export type CategorySampleInput = {
+  id: string;
+  title: string;
+  brand: string | null;
+  price: number | null;
+  monthlySales: number;
+  monthlyRevenue: number;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  isCatalog: boolean;
+  isInternational: boolean;
+  listingTypeId: string | null;
+  sellerId: number | null;
+  sellerNickname: string | null;
+};
+
+export type CategoryLeaderRow = {
+  name: string;
+  id: string | null;
+  listingsCount: number;
+  monthlySales: number;
+  monthlyRevenue: number;
+  sharePct: number;
+};
+
+export type CategoryPriceBucket = {
+  label: string;
+  min: number;
+  max: number;
+  count: number;
+  sharePct: number;
+  revenue: number;
+  revenueSharePct: number;
+};
+
+export type MonopolyLevel = 'Baixa' | 'Moderada' | 'Alta';
+
+export type CategoryAnalyticsSummary = {
+  sampleSize: number;
+  estimatedMonthlyRevenue: number;
+  estimatedMonthlySales: number;
+  averageTicket: number;
+  medianPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  uniqueSellersCount: number;
+  uniqueBrandsCount: number;
+  revenuePerSeller: number;
+  monopolyIndexPct: number;
+  brandConcentrationPct: number;
+  monopolyLevel: MonopolyLevel;
+  monopolySummary: string;
+  topSellers: CategoryLeaderRow[];
+  topBrands: CategoryLeaderRow[];
+  priceBuckets: CategoryPriceBucket[];
+  classicPct: number;
+  premiumPct: number;
+  fullPct: number;
+  standardShippingPct: number;
+  freeShippingPct: number;
+  catalogPct: number;
+  commonPct: number;
+  nationalPct: number;
+  internationalPct: number;
+};
+
+export function computeCategoryAnalytics(items: CategorySampleInput[]): CategoryAnalyticsSummary {
+  const valid = items.filter((x) => finite(x.price) && (x.price as number) > 0);
+  const n = Math.max(1, valid.length);
+  const prices = valid.map((x) => x.price as number).sort((a, b) => a - b);
+  const minPrice = prices[0] ?? 0;
+  const maxPrice = prices[prices.length - 1] ?? 0;
+  const medianPrice = prices.length > 0 ? prices[Math.floor(prices.length / 2)] : 0;
+  const averageTicket = prices.length > 0 ? roundMoney(prices.reduce((s, p) => s + p, 0) / prices.length) : 0;
+
+  const estimatedMonthlyRevenue = roundMoney(valid.reduce((s, x) => s + Math.max(0, x.monthlyRevenue), 0));
+  const estimatedMonthlySales = Math.round(valid.reduce((s, x) => s + Math.max(0, x.monthlySales), 0));
+  const revDenom = Math.max(1, estimatedMonthlyRevenue);
+
+  // Agregação por Vendedor (Top 5 Vendedores)
+  const sellerMap = new Map<string, { name: string; id: string | null; count: number; sales: number; rev: number }>();
+  for (const it of valid) {
+    const rawName = (it.sellerNickname ?? '').trim();
+    const key = it.sellerId ? `ID:${it.sellerId}` : rawName ? `NAME:${rawName.toLowerCase()}` : `ANON:${it.id}`;
+    const display =
+      rawName && !/^lojista|^loja oficial\s*\/\s*mercadol/i.test(rawName)
+        ? rawName
+        : it.sellerId
+          ? `Lojista #${it.sellerId}`
+          : rawName || 'Vendedor Mercado Livre';
+    const cur = sellerMap.get(key) ?? {
+      name: display,
+      id: it.sellerId ? String(it.sellerId) : null,
+      count: 0,
+      sales: 0,
+      rev: 0,
+    };
+    cur.count += 1;
+    cur.sales += Math.max(0, it.monthlySales);
+    cur.rev += Math.max(0, it.monthlyRevenue);
+    sellerMap.set(key, cur);
+  }
+
+  const allSellers = [...sellerMap.values()].sort((a, b) => b.rev - a.rev || b.sales - a.sales);
+  const topSellers: CategoryLeaderRow[] = allSellers.slice(0, 5).map((s) => ({
+    name: s.name,
+    id: s.id,
+    listingsCount: s.count,
+    monthlySales: Math.round(s.sales),
+    monthlyRevenue: roundMoney(s.rev),
+    sharePct: roundMoney((s.rev / revDenom) * 100),
+  }));
+
+  // Agregação por Marca (Top 5 Marcas)
+  const brandMap = new Map<string, { name: string; count: number; sales: number; rev: number }>();
+  for (const it of valid) {
+    const rawBrand = (it.brand ?? '').trim();
+    const cleanBrand =
+      rawBrand && !/^(gen[eé]rica|sem marca|outros|importado|linha\s)/i.test(rawBrand)
+        ? rawBrand
+        : 'Marca Própria / Genérica';
+    const key = cleanBrand.toLowerCase();
+    const cur = brandMap.get(key) ?? { name: cleanBrand, count: 0, sales: 0, rev: 0 };
+    cur.count += 1;
+    cur.sales += Math.max(0, it.monthlySales);
+    cur.rev += Math.max(0, it.monthlyRevenue);
+    brandMap.set(key, cur);
+  }
+
+  const allBrands = [...brandMap.values()].sort((a, b) => b.rev - a.rev || b.sales - a.sales);
+  const topBrands: CategoryLeaderRow[] = allBrands.slice(0, 5).map((b) => ({
+    name: b.name,
+    id: null,
+    listingsCount: b.count,
+    monthlySales: Math.round(b.sales),
+    monthlyRevenue: roundMoney(b.rev),
+    sharePct: roundMoney((b.rev / revDenom) * 100),
+  }));
+
+  const top5SellerRev = topSellers.reduce((s, r) => s + r.monthlyRevenue, 0);
+  const top5BrandRev = topBrands
+    .filter((b) => b.name !== 'Marca Própria / Genérica')
+    .reduce((s, r) => s + r.monthlyRevenue, 0);
+
+  const monopolyIndexPct =
+    valid.length > 0 ? Math.min(100, roundMoney((top5SellerRev / revDenom) * 100)) : 0;
+  const brandConcentrationPct =
+    valid.length > 0 ? Math.min(100, roundMoney((top5BrandRev / revDenom) * 100)) : 0;
+
+  let monopolyLevel: MonopolyLevel = 'Moderada';
+  let monopolySummary = 'Competitividade equilibrada: há espaço para novos sellers com boa oferta e Full.';
+  if (monopolyIndexPct < 42) {
+    monopolyLevel = 'Baixa';
+    monopolySummary = 'Nicho pulverizado! As vendas estão bem distribuídas entre diversos vendedores — excelente janela de entrada.';
+  } else if (monopolyIndexPct > 68) {
+    monopolyLevel = 'Alta';
+    monopolySummary = 'Alta concentração nos Top 5 vendedores. Exige diferenciação clara (kits, marca própria, Full ou preço agressivo).';
+  }
+
+  // Distribuição em 4 faixas dinâmicas de preço
+  const priceBuckets: CategoryPriceBucket[] = [];
+  if (prices.length > 0) {
+    const span = Math.max(20, maxPrice - minPrice);
+    const step = span / 4;
+    const cuts = [
+      minPrice,
+      roundMoney(minPrice + step),
+      roundMoney(minPrice + step * 2),
+      roundMoney(minPrice + step * 3),
+      maxPrice,
+    ];
+    for (let i = 0; i < 4; i++) {
+      const bMin = cuts[i];
+      const bMax = cuts[i + 1];
+      const inBucket = valid.filter((it) => {
+        const p = it.price as number;
+        return i === 3 ? p >= bMin && p <= bMax + 0.01 : p >= bMin && p < bMax;
+      });
+      const bRev = inBucket.reduce((s, x) => s + Math.max(0, x.monthlyRevenue), 0);
+      priceBuckets.push({
+        label: `R$ ${Math.round(bMin)} – R$ ${Math.round(bMax)}`,
+        min: bMin,
+        max: bMax,
+        count: inBucket.length,
+        sharePct: roundMoney((inBucket.length / n) * 100),
+        revenue: roundMoney(bRev),
+        revenueSharePct: roundMoney((bRev / revDenom) * 100),
+      });
+    }
+  }
+
+  const premiumCount = valid.filter((x) => x.listingTypeId === 'gold_pro').length;
+  const fullCount = valid.filter((x) => x.fulfillment).length;
+  const freeCount = valid.filter((x) => x.freeShipping).length;
+  const catalogCount = valid.filter((x) => x.isCatalog).length;
+  const intlCount = valid.filter((x) => x.isInternational).length;
+
+  const premiumPct = roundMoney((premiumCount / n) * 100);
+  const classicPct = roundMoney(Math.max(0, 100 - premiumPct));
+  const fullPct = roundMoney((fullCount / n) * 100);
+  const standardShippingPct = roundMoney(Math.max(0, 100 - fullPct));
+  const freeShippingPct = roundMoney((freeCount / n) * 100);
+  const catalogPct = roundMoney((catalogCount / n) * 100);
+  const commonPct = roundMoney(Math.max(0, 100 - catalogPct));
+  const internationalPct = roundMoney((intlCount / n) * 100);
+  const nationalPct = roundMoney(Math.max(0, 100 - internationalPct));
+
+  const uniqueSellersCount = Math.max(1, allSellers.length);
+  const uniqueBrandsCount = Math.max(1, allBrands.length);
+
+  return {
+    sampleSize: valid.length,
+    estimatedMonthlyRevenue,
+    estimatedMonthlySales,
+    averageTicket,
+    medianPrice,
+    minPrice,
+    maxPrice,
+    uniqueSellersCount,
+    uniqueBrandsCount,
+    revenuePerSeller: roundMoney(estimatedMonthlyRevenue / uniqueSellersCount),
+    monopolyIndexPct,
+    brandConcentrationPct,
+    monopolyLevel,
+    monopolySummary,
+    topSellers,
+    topBrands,
+    priceBuckets,
+    classicPct,
+    premiumPct,
+    fullPct,
+    standardShippingPct,
+    freeShippingPct,
+    catalogPct,
+    commonPct,
+    nationalPct,
+    internationalPct,
+  };
+}
+
+/* =============================================================================
+ * RAIO-X DE VENDEDOR — PORTFÓLIO E CURVA ABC (80 / 15 / 5)
+ * ============================================================================= */
+
+export type AbcClass = 'A' | 'B' | 'C';
+
+export type SellerPortfolioItemInput = {
+  id: string;
+  productId: string | null;
+  title: string;
+  brand: string | null;
+  image: string | null;
+  price: number | null;
+  soldQuantity: number;
+  monthlySales: number;
+  monthlyRevenue: number;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  isCatalog: boolean;
+  listingTypeId: string | null;
+  listingType: string | null;
+  ratingAverage: number | null;
+  ratingCount: number | null;
+  daysOnAir: number | null;
+  permalink: string | null;
+};
+
+export type SellerPortfolioItem = SellerPortfolioItemInput & {
+  rank: number;
+  abcClass: AbcClass;
+  revenueSharePct: number;
+  cumulativeSharePct: number;
+};
+
+export type SellerPortfolioAnalytics = {
+  portfolioSampleCount: number;
+  estimatedMonthlyRevenue: number;
+  estimatedMonthlySales: number;
+  averageTicket: number;
+  abcCounts: { A: number; B: number; C: number };
+  abcRevenue: { A: number; B: number; C: number };
+  fullPct: number;
+  freeShippingPct: number;
+  premiumPct: number;
+  classicPct: number;
+  catalogPct: number;
+  topBrands: { name: string; count: number; sharePct: number }[];
+  items: SellerPortfolioItem[];
+};
+
+export function computeSellerPortfolioAnalytics(rawItems: SellerPortfolioItemInput[]): SellerPortfolioAnalytics {
+  const sorted = [...rawItems].sort(
+    (a, b) => b.monthlyRevenue - a.monthlyRevenue || b.soldQuantity - a.soldQuantity,
+  );
+  const n = Math.max(1, sorted.length);
+  const totalRev = sorted.reduce((s, x) => s + Math.max(0, x.monthlyRevenue), 0);
+  const totalSales = sorted.reduce((s, x) => s + Math.max(0, x.monthlySales), 0);
+  const validPrices = sorted.map((x) => x.price).filter((p): p is number => finite(p) && p > 0);
+  const averageTicket =
+    validPrices.length > 0 ? roundMoney(validPrices.reduce((s, p) => s + p, 0) / validPrices.length) : 0;
+
+  const revDenom = Math.max(1, totalRev);
+  let cumulative = 0;
+  const abcCounts = { A: 0, B: 0, C: 0 };
+  const abcRevenue = { A: 0, B: 0, C: 0 };
+
+  const items: SellerPortfolioItem[] = sorted.map((item, idx) => {
+    const prevCumPct = (cumulative / revDenom) * 100;
+    cumulative += Math.max(0, item.monthlyRevenue);
+    const cumPct = Math.min(100, (cumulative / revDenom) * 100);
+    const sharePct = (Math.max(0, item.monthlyRevenue) / revDenom) * 100;
+
+    let abcClass: AbcClass = 'C';
+    if (idx === 0 || prevCumPct < 80) abcClass = 'A';
+    else if (prevCumPct < 95) abcClass = 'B';
+
+    abcCounts[abcClass] += 1;
+    abcRevenue[abcClass] = roundMoney(abcRevenue[abcClass] + Math.max(0, item.monthlyRevenue));
+
+    return {
+      ...item,
+      rank: idx + 1,
+      abcClass,
+      revenueSharePct: roundMoney(sharePct),
+      cumulativeSharePct: roundMoney(cumPct),
+    };
+  });
+
+  const fullPct = roundMoney((sorted.filter((x) => x.fulfillment).length / n) * 100);
+  const freeShippingPct = roundMoney((sorted.filter((x) => x.freeShipping).length / n) * 100);
+  const premiumPct = roundMoney((sorted.filter((x) => x.listingTypeId === 'gold_pro').length / n) * 100);
+  const classicPct = roundMoney(Math.max(0, 100 - premiumPct));
+  const catalogPct = roundMoney((sorted.filter((x) => x.isCatalog).length / n) * 100);
+
+  const bMap = new Map<string, { name: string; count: number }>();
+  for (const x of sorted) {
+    const b = (x.brand ?? '').trim();
+    if (!b || /^gen[eé]rica|^linha\s/i.test(b)) continue;
+    const k = b.toLowerCase();
+    const cur = bMap.get(k) ?? { name: b, count: 0 };
+    cur.count += 1;
+    bMap.set(k, cur);
+  }
+  const topBrands = [...bMap.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+    .map((b) => ({ name: b.name, count: b.count, sharePct: roundMoney((b.count / n) * 100) }));
+
+  return {
+    portfolioSampleCount: sorted.length,
+    estimatedMonthlyRevenue: roundMoney(totalRev),
+    estimatedMonthlySales: Math.round(totalSales),
+    averageTicket,
+    abcCounts,
+    abcRevenue,
+    fullPct,
+    freeShippingPct,
+    premiumPct,
+    classicPct,
+    catalogPct,
+    topBrands,
+    items,
+  };
+}
+

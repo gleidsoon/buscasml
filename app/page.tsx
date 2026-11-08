@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   Award,
   BarChart3,
+  Bookmark,
+  BookmarkCheck,
   Boxes,
   Calculator,
   Calendar,
@@ -22,6 +24,7 @@ import {
   Film,
   Flame,
   Hash,
+  Home,
   Info,
   Key,
   Layers,
@@ -29,7 +32,11 @@ import {
   List,
   Loader2,
   LogOut,
+  MapPin,
+  Menu,
   MessageSquare,
+  Package,
+  Scale,
   Search,
   Sparkles,
   Star,
@@ -38,6 +45,7 @@ import {
   ThumbsUp,
   TrendingUp,
   Truck,
+  Users,
   X,
   Zap,
 } from 'lucide-react';
@@ -45,6 +53,7 @@ import {
   AGE_ALERT_LABEL,
   DEFAULT_COMMISSION_PCT,
   breakdownAt,
+  computeShippingWeight,
   evaluateListingQuality,
   extractKeywords,
   suggestPrice,
@@ -52,266 +61,58 @@ import {
   type CalculatorBreakdown,
   type CalculatorInput,
   type CategoryFees,
-  type Commission,
   type KeywordStat,
   type ListingQualityCriterionId,
   type ListingQualityReport,
-  type Periods,
-  type SalesEstimate,
   type SuggestedPrice,
 } from '@/lib/mlEngine';
 import type {
-  PageSignals,
   ProductVideo,
-  ReviewAttribute,
   ReviewComment,
   ReviewStarBreakdown,
-  SpecAttribute,
 } from '@/lib/pageState';
+import {
+  DEFAULT_ADVANCED_FILTERS,
+  DEFAULT_LOCAL_FILTERS,
+  readMonitorStore,
+  writeMonitorStore,
+  type AdvancedFilterState,
+  type Analysis,
+  type CategoryOverview,
+  type CompetitorRow,
+  type Dossier,
+  type KeywordAnalysis,
+  type MediaExtractorPayload,
+  type ModuleId,
+  type MonitorStoreState,
+  type MonitoredProduct,
+  type MonitoredSeller,
+  type ProductReviewsData,
+  type ProductSummary,
+  type RankingCategoryTab,
+  type RankingPayload,
+  type RankingProductItem,
+  type RootCategoryItem,
+  type SearchMode,
+  type SellerDossierPayload,
+  type TrendsModulePayload,
+} from '@/lib/platformTypes';
+import {
+  AdvancedProductSearchModule,
+  CategoryAnalysisModule,
+  HomeOverviewModule,
+  TrendsModuleView,
+} from '@/components/SearchAndCategoryModules';
+import {
+  ClipsAndImagesModule,
+  ListingAuditorModule,
+  MonitorModuleView,
+  SellersAndCompetitorsModule,
+} from '@/components/SellerMonitorMediaModules';
 
 /* =============================================================================
- * TIPOS (espelham as respostas de app/api/ml/route.ts)
+ * TIPOS LOCAIS DE SESSÃO E CALCULADORA
  * ============================================================================= */
-
-type SellerInfo = {
-  id: number | null;
-  nickname: string | null;
-  registrationDate: string | null;
-  accountYears: number | null;
-  city: string | null;
-  state: string | null;
-  medal: string;
-  reputationLevel: string | null;
-  completedSales: number | null;
-  canceledSales: number | null;
-  cancellationRate: number | null;
-  claimsRate: number | null;
-  delayedHandlingRate: number | null;
-  positiveRatingPct: number | null;
-  officialStoreId: number | null;
-};
-
-type FeeSnapshot = {
-  categoryId: string | null;
-  categoryName: string | null;
-  categoryPath: string | null;
-  categoryFees: CategoryFees;
-  classic: Commission | null;
-  premium: Commission | null;
-  current: Commission | null;
-  shippingListCost: number | null;
-  freeShippingByMeli: boolean;
-  shippingSource: string;
-  feeSource: string;
-};
-
-type CompetitorRow = {
-  itemId: string;
-  productId: string | null;
-  mlbuId: string | null;
-  title: string;
-  image: string | null;
-  price: number | null;
-  priceDiffPct: number | null;
-  sellerId: number | null;
-  sellerNickname: string | null;
-  sellerMedal: string | null;
-  sellerCompletedSales: number | null;
-  sellerCityState: string | null;
-  fulfillment: boolean;
-  freeShipping: boolean;
-  listingType: string | null;
-  soldQuantity: number | null;
-  soldLabel: string | null;
-  ratingAverage: number | null;
-  ratingCount: number | null;
-  monthlyRevenue: number | null;
-  matchType: 'identical' | 'similar';
-  permalink: string | null;
-  source: 'Catálogo BuyBox' | 'Busca Similar';
-};
-
-type ProductReviewsData = {
-  ratingAverage: number;
-  totalReviews: number;
-  source: string;
-  distribution: ReviewStarBreakdown[];
-  attributes: ReviewAttribute[];
-  customerPhotos: string[];
-  comments: ReviewComment[];
-  hasMore: boolean;
-  objectId: string | null;
-  isItem: boolean;
-};
-
-type ProductSummary = {
-  productId: string | null;
-  itemId: string | null;
-  categoryId: string | null;
-  title: string;
-  brand: string | null;
-  model: string | null;
-  image: string | null;
-  price: number | null;
-  originalPrice: number | null;
-  soldQuantity: number | null;
-  soldText: string | null;
-  soldSource: string;
-  salesEstimate: SalesEstimate | null;
-  velocity: Periods | null;
-  revenue: Periods | null;
-  availableQuantity: number | null;
-  listingType: string | null;
-  listingTypeId: string | null;
-  fulfillment: boolean;
-  freeShipping: boolean;
-  isSupermarket: boolean;
-  isSponsored: boolean;
-  ratingAverage: number | null;
-  ratingCount: number | null;
-  createdAt: string | null;
-  createdSource: string;
-  daysOnAir: number | null;
-  ageAlert: AgeAlert | null;
-  firstPhotoDate: string | null;
-  seller: SellerInfo | null;
-  permalink: string | null;
-};
-
-type Dossier = {
-  origin: string;
-  productId: string | null;
-  itemId: string | null;
-  mlbuId: string | null;
-  categoryId: string | null;
-  categoryName: string | null;
-  categoryPath: string | null;
-  permalink: string | null;
-  title: string;
-  brand: string | null;
-  model: string | null;
-  images: string[];
-  videos: ProductVideo[];
-  attributes?: SpecAttribute[];
-  listingQuality?: ListingQualityReport;
-  price: number | null;
-  originalPrice: number | null;
-  discountPct: number | null;
-  currency: string;
-  listingType: string | null;
-  listingTypeId: string | null;
-  isSupermarket: boolean;
-  availableQuantity: number | null;
-  stockText: string | null;
-  stockSource: string;
-  soldValue: number | null;
-  soldLabel: string;
-  soldSource: string;
-  salesEstimate: SalesEstimate | null;
-  velocity: Periods | null;
-  revenue: Periods | null;
-  ratingAverage: number | null;
-  ratingCount: number | null;
-  reviewsDetail?: ProductReviewsData;
-  fulfillment: boolean;
-  freeShipping: boolean;
-  logisticType: string | null;
-  createdAt: string | null;
-  createdSource: string;
-  daysOnAir: number | null;
-  ageAlert: AgeAlert | null;
-  ageAlertLabel: string | null;
-  firstPhotoDate: string | null;
-  firstPhotoSource: string;
-  seller: SellerInfo | null;
-  competitors: CompetitorRow[];
-  fees: FeeSnapshot;
-  keywords: { words: KeywordStat[]; phrases: KeywordStat[] };
-  pageSignals: PageSignals | null;
-  notes: string[];
-  raw: Record<string, unknown>;
-};
-
-type CategoryTrend = {
-  keyword: string;
-  url: string;
-};
-
-type CategoryChild = {
-  id: string;
-  name: string;
-  totalItems: number | null;
-};
-
-type CategoryOverview = {
-  id: string;
-  name: string;
-  path: string;
-  totalItems: number | null;
-  childrenCategories: CategoryChild[];
-  trends: CategoryTrend[];
-  fees: FeeSnapshot;
-};
-
-type RankingCategoryTab = {
-  id: string;
-  name: string;
-  shortName: string;
-  icon: string;
-};
-
-type RankingProductItem = {
-  position: number;
-  id: string;
-  productId: string | null;
-  itemId: string | null;
-  title: string;
-  image: string | null;
-  price: number | null;
-  originalPrice: number | null;
-  discountPct: number | null;
-  soldQuantity: number | null;
-  soldLabel: string;
-  ratingAverage: number | null;
-  ratingCount: number | null;
-  sellerId: number | null;
-  sellerNickname: string | null;
-  sellerMedal: string | null;
-  sellerCompletedSales: number | null;
-  fulfillment: boolean;
-  freeShipping: boolean;
-  categoryId: string | null;
-  categoryName: string;
-  permalink: string | null;
-};
-
-type RankingTrendItem = {
-  position: number;
-  keyword: string;
-  url: string;
-  categoryName: string;
-};
-
-type RankingPayload = {
-  categories: RankingCategoryTab[];
-  selectedCategory: RankingCategoryTab;
-  items: RankingProductItem[];
-  trends: RankingTrendItem[];
-  updatedAt: string;
-};
-
-type SearchMode = 'auto' | 'termo' | 'anuncio' | 'categoria';
-
-type KeywordAnalysis = {
-  mode: 'keyword';
-  query: string;
-  products: ProductSummary[];
-  keywords?: { words: KeywordStat[]; phrases: KeywordStat[] };
-  category?: CategoryOverview | null;
-  note: string | null;
-};
-type DossierAnalysis = { mode: 'dossier'; dossier: Dossier };
-type Analysis = KeywordAnalysis | DossierAnalysis;
 
 type OAuthTokens = {
   accessToken: string;
@@ -331,6 +132,10 @@ type StatusEnvelope = {
 
 type SearchEnvelope = { ok: true; data: Analysis };
 type RankingEnvelope = { ok: true; ranking: RankingPayload };
+type CategoriesEnvelope = { ok: true; categories: RootCategoryItem[] };
+type TrendsEnvelope = { ok: true; trendsData: TrendsModulePayload };
+type SellerEnvelope = { ok: true; sellerDossier: SellerDossierPayload };
+type MediaEnvelope = { ok: true; media: MediaExtractorPayload };
 type TokenEnvelope = { ok: true; tokens: OAuthTokens };
 
 type ListingKind = 'classico' | 'premium';
@@ -338,7 +143,6 @@ type AgeFilter = 'todos' | '30' | '60' | '90' | '180';
 type LogisticFilter = 'todos' | 'full' | 'frete';
 type SortKey = 'relevancia' | 'menor_preco' | 'maior_preco' | 'mais_vendidos' | 'mais_recentes';
 type ViewMode = 'grid' | 'table';
-type TabKey = 'busca' | 'calculadora';
 
 type FilterState = { age: AgeFilter; logistic: LogisticFilter; sort: SortKey; view: ViewMode };
 
@@ -358,6 +162,11 @@ type CalcForm = {
   isSupermarket: boolean;
   marginMode: 'pct' | 'brl';
   marginTarget: string;
+  physicalWeightGrams: string;
+  lengthCm: string;
+  widthCm: string;
+  heightCm: string;
+  monthlyUnits: string;
 };
 
 type Notice = { kind: 'ok' | 'erro' | 'aviso'; text: string };
@@ -403,7 +212,7 @@ const INITIAL_CALC: CalcForm = {
   categoryLabel: '',
   salePrice: '99,90',
   supplierCost: '35,00',
-  packagingCost: '0',
+  packagingCost: '2,50',
   taxPct: '6',
   classicPct: String(DEFAULT_COMMISSION_PCT.gold_special),
   premiumPct: String(DEFAULT_COMMISSION_PCT.gold_pro),
@@ -414,6 +223,11 @@ const INITIAL_CALC: CalcForm = {
   isSupermarket: false,
   marginMode: 'pct',
   marginTarget: '20',
+  physicalWeightGrams: '450',
+  lengthCm: '24',
+  widthCm: '16',
+  heightCm: '10',
+  monthlyUnits: '100',
 };
 
 const INPUT_CLASS =
@@ -675,14 +489,66 @@ async function requestAnalysis(
   input: string,
   bearer: string | null,
   mode: SearchMode = 'auto',
+  hints?: { origin?: string | null; uf?: string | null; limit?: number },
 ): Promise<Analysis> {
   const params = new URLSearchParams({ q: input, mode });
+  if (hints?.origin) params.set('origin', hints.origin);
+  if (hints?.uf) params.set('uf', hints.uf);
+  if (hints?.limit) params.set('limit', String(hints.limit));
   const res = await fetch(`/api/ml?${params.toString()}`, {
     headers: authHeaders(bearer),
     cache: 'no-store',
   });
   const env = await readEnvelope<SearchEnvelope>(res);
   return env.data;
+}
+
+async function requestRootCategories(bearer: string | null): Promise<RootCategoryItem[]> {
+  const res = await fetch('/api/ml?action=categories', {
+    headers: authHeaders(bearer),
+    cache: 'no-store',
+  });
+  const env = await readEnvelope<CategoriesEnvelope>(res);
+  return env.categories;
+}
+
+async function requestTrendsModule(
+  category: string,
+  bearer: string | null,
+): Promise<TrendsModulePayload> {
+  const params = new URLSearchParams({ action: 'trends', category });
+  const res = await fetch(`/api/ml?${params.toString()}`, {
+    headers: authHeaders(bearer),
+    cache: 'no-store',
+  });
+  const env = await readEnvelope<TrendsEnvelope>(res);
+  return env.trendsData;
+}
+
+async function requestSellerDossier(
+  q: string,
+  bearer: string | null,
+): Promise<SellerDossierPayload> {
+  const params = new URLSearchParams({ action: 'seller', q });
+  const res = await fetch(`/api/ml?${params.toString()}`, {
+    headers: authHeaders(bearer),
+    cache: 'no-store',
+  });
+  const env = await readEnvelope<SellerEnvelope>(res);
+  return env.sellerDossier;
+}
+
+async function requestMediaExtractor(
+  q: string,
+  bearer: string | null,
+): Promise<MediaExtractorPayload> {
+  const params = new URLSearchParams({ action: 'media', q });
+  const res = await fetch(`/api/ml?${params.toString()}`, {
+    headers: authHeaders(bearer),
+    cache: 'no-store',
+  });
+  const env = await readEnvelope<MediaEnvelope>(res);
+  return env.media;
 }
 
 type ReviewsFetchEnvelope = {
@@ -3059,21 +2925,31 @@ function ListingQualitySection({
 
 function DossierView({
   d,
-  canGoBack,
+  backLabel,
   onBack,
   onSimulate,
   onPickTerm,
   onOpenCategory,
   onAnalyzeCompetitor,
+  onInspectSeller,
+  onToggleMonitor,
+  isMonitored,
+  onOpenAuditor,
+  onExtractMedia,
   getBearer,
 }: {
   d: Dossier;
-  canGoBack: boolean;
+  backLabel: string;
   onBack: () => void;
   onSimulate: () => void;
   onPickTerm: (term: string) => void;
   onOpenCategory: (categoryId: string) => void;
   onAnalyzeCompetitor: (itemId: string) => void;
+  onInspectSeller: (sellerQuery: string) => void;
+  onToggleMonitor: () => void;
+  isMonitored: boolean;
+  onOpenAuditor: () => void;
+  onExtractMedia: () => void;
   getBearer: () => Promise<string | null>;
 }) {
   const netAfterFees = useMemo(() => {
@@ -3090,14 +2966,17 @@ function DossierView({
 
   const realRatingAvg = d.ratingAverage ?? d.reviewsDetail?.ratingAverage ?? null;
   const realRatingCount = d.ratingCount ?? d.reviewsDetail?.totalReviews ?? null;
+  const sellerQueryKey = d.seller?.id
+    ? String(d.seller.id)
+    : d.seller?.nickname ?? d.mlbuId ?? d.itemId ?? '';
 
   return (
     <section className="space-y-6">
-      {/* Barra superior de navegação e ações rápidas */}
+      {/* Barra superior de navegação e ações rápidas integradas aos módulos */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={onBack} className={BTN_GHOST}>
-            <ChevronLeft size={15} /> {canGoBack ? 'Voltar aos resultados' : 'Voltar ao Ranking'}
+            <ChevronLeft size={15} /> {backLabel}
           </button>
           {d.categoryId && (
             <button
@@ -3111,12 +2990,30 @@ function DossierView({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onToggleMonitor}
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
+              isMonitored
+                ? 'border-emerald-400/45 bg-emerald-500/20 text-emerald-300'
+                : 'border-white/15 bg-slate-900/90 text-slate-200 hover:border-amber-400/40 hover:text-amber-300'
+            }`}
+          >
+            {isMonitored ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+            {isMonitored ? 'Produto Monitorado' : 'Monitorar Produto'}
+          </button>
+          <button type="button" onClick={onOpenAuditor} className={BTN_GHOST}>
+            <ClipboardCheck size={14} className="text-teal-400" /> Auditor 0–100
+          </button>
+          <button type="button" onClick={onExtractMedia} className={BTN_GHOST}>
+            <Film size={14} className="text-pink-400" /> Clipes &amp; Fotos HD
+          </button>
           <button type="button" onClick={onSimulate} className={BTN_SM_YELLOW}>
-            <Calculator size={14} /> Simular Margem na Calculadora
+            <Calculator size={14} /> Simular Margem
           </button>
           {d.permalink && (
             <a href={d.permalink} target="_blank" rel="noreferrer" className={BTN_GHOST}>
-              <ExternalLink size={14} /> Ver no Mercado Livre
+              <ExternalLink size={14} /> Ver no ML
             </a>
           )}
         </div>
@@ -3158,10 +3055,14 @@ function DossierView({
             {/* Destaque Imediato do Vendedor Real no Topo */}
             {d.seller && (
               <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-2 text-xs">
-                <span className="inline-flex flex-wrap items-center gap-1.5 text-slate-200">
+                <button
+                  type="button"
+                  onClick={() => sellerQueryKey && onInspectSeller(sellerQueryKey)}
+                  className="inline-flex flex-wrap items-center gap-1.5 text-left text-slate-200 hover:text-amber-300"
+                >
                   <Store size={14} className="text-emerald-400" />
                   <span>Vendido por</span>
-                  <strong className="font-bold text-white">
+                  <strong className="font-bold text-white underline decoration-white/30 underline-offset-2">
                     {d.seller.nickname ?? 'Loja Verificada'}
                   </strong>
                   {d.seller.completedSales !== null && (
@@ -3169,7 +3070,7 @@ function DossierView({
                       · +{formatInt(d.seller.completedSales)} vendas
                     </span>
                   )}
-                </span>
+                </button>
                 <span className="text-[11px] font-semibold text-amber-300">{d.seller.medal}</span>
               </div>
             )}
@@ -3316,7 +3217,7 @@ function DossierView({
             </div>
           </div>
 
-          {/* Card do Vendedor Real */}
+          {/* Card do Vendedor Real + Atalho Raio-X Completo da Loja */}
           {d.seller && (
             <div className="glass-panel rounded-2xl p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -3327,10 +3228,23 @@ function DossierView({
                   <Award size={12} /> {d.seller.medal}
                 </Pill>
               </div>
-              <p className="text-base font-bold text-white">{d.seller.nickname ?? 'Loja Verificada'}</p>
-              <p className="mt-0.5 text-xs text-slate-400">
-                {location} · {formatAccountAge(d.seller.accountYears)}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-base font-bold text-white">{d.seller.nickname ?? 'Loja Verificada'}</p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {location} · {formatAccountAge(d.seller.accountYears)}
+                  </p>
+                </div>
+                {sellerQueryKey && (
+                  <button
+                    type="button"
+                    onClick={() => onInspectSeller(sellerQueryKey)}
+                    className="rounded-xl border border-purple-400/40 bg-purple-500/15 px-3 py-1.5 text-xs font-bold text-purple-200 transition hover:bg-purple-500/25"
+                  >
+                    Raio-X desta Loja →
+                  </button>
+                )}
+              </div>
               <div className="mt-3 grid grid-cols-2 gap-2.5 text-xs">
                 <Mini
                   label="Vendas concluídas"
@@ -3363,7 +3277,7 @@ function DossierView({
       {/* Módulo de Análise de Qualidade da Listagem (Score 0 a 100 + Checklist) */}
       <ListingQualitySection d={d} />
 
-      {/* Comparador Ranqueado de Concorrentes (Estilo AliPrice / 1688) */}
+      {/* Comparador Ranqueado de Concorrentes */}
       <div className="glass-panel space-y-4 rounded-3xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -3544,25 +3458,42 @@ function CalculatorView({
 
   const quickPctTargets = ['10', '15', '20', '25', '30'];
 
+  const weightCalc = useMemo(
+    () =>
+      computeShippingWeight(
+        parseInputNumber(calc.physicalWeightGrams),
+        parseInputNumber(calc.lengthCm),
+        parseInputNumber(calc.widthCm),
+        parseInputNumber(calc.heightCm),
+      ),
+    [calc.physicalWeightGrams, calc.lengthCm, calc.widthCm, calc.heightCm],
+  );
+
+  const batchUnits = Math.max(1, Math.round(parseInputNumber(calc.monthlyUnits) || 1));
+  const monthlyGross = ee.classic.price * batchUnits;
+  const monthlyNetClassic = ee.classic.contribution * batchUnits;
+  const monthlyNetPremium = ee.premium.contribution * batchUnits;
+
   return (
     <section className="space-y-6">
-      {/* Painel de Entradas Simples e Diretas */}
+      {/* Painel Principal de Entradas */}
       <div className="glass-panel rounded-3xl p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="flex items-center gap-2.5 text-xl font-bold text-white">
-              <Calculator size={22} className="text-amber-400" /> Calculadora de Margem e Preço
-            </h2>
+            <h1 className="flex items-center gap-2.5 text-xl font-extrabold text-white sm:text-2xl">
+              <Calculator size={22} className="text-amber-400" /> Calculadora de Margem, Tarifas &amp; Peso Cubado
+            </h1>
             <p className="mt-0.5 text-xs text-slate-400">
-              Preencha os 4 campos abaixo para ver na hora quanto sobra no bolso no Clássico e no Premium
+              Simule repasse líquido no Clássico e Premium, calcule Peso Físico vs. Cubado e projete o lucro mensal por lote.
             </p>
           </div>
-          {calc.title && (
-            <Pill tone="blue">Produto: {calc.title.slice(0, 55)}</Pill>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {calc.title && <Pill tone="blue">Produto: {calc.title.slice(0, 50)}</Pill>}
+            {calc.categoryLabel && <Pill tone="yellow">{calc.categoryLabel.slice(0, 40)}</Pill>}
+          </div>
         </div>
 
-        {/* 4 Campos Principais Lado a Lado */}
+        {/* 4 Campos Principais */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
             <label className="block text-xs font-bold uppercase tracking-wide text-amber-300">
@@ -3629,8 +3560,133 @@ function CalculatorView({
           </div>
         </div>
 
+        {/* Linha Complementar: Embalagem/Extras, Comissões da Categoria e Volume Mensal */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              Embalagem / Custo Extra (R$)
+            </label>
+            <input
+              inputMode="decimal"
+              value={calc.packagingCost}
+              onChange={(e) => onChange({ packagingCost: e.target.value })}
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-white outline-none focus:border-sky-400"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              Comissão Clássico (%)
+            </label>
+            <input
+              inputMode="decimal"
+              value={calc.classicPct}
+              onChange={(e) => onChange({ classicPct: e.target.value })}
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-white outline-none focus:border-sky-400"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              Comissão Premium (%)
+            </label>
+            <input
+              inputMode="decimal"
+              value={calc.premiumPct}
+              onChange={(e) => onChange({ premiumPct: e.target.value })}
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-amber-300 outline-none focus:border-amber-400"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-emerald-300">
+              Volume Mensal Projetado (un.)
+            </label>
+            <input
+              inputMode="numeric"
+              value={calc.monthlyUnits}
+              onChange={(e) => onChange({ monthlyUnits: e.target.value })}
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-emerald-300 outline-none focus:border-emerald-400"
+            />
+          </div>
+        </div>
+
+        {/* Simulador de Peso Físico vs. Peso Cubado (C × L × A / 6000) */}
+        <div className="mt-4 rounded-2xl border border-sky-400/25 bg-sky-500/[0.06] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-300">
+                <Scale size={14} /> Cálculo de Peso Físico vs. Peso Cubado (Mercado Envios)
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Fórmula volumétrica: (Comprimento × Largura × Altura em cm) / 6000. Prevalece o maior peso.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  mlCoversShipping: false,
+                  shippingCost: formatInputNumber(weightCalc.suggestedMeliShippingBrl),
+                })
+              }
+              className="rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-extrabold text-white transition hover:bg-sky-400"
+            >
+              Aplicar Frete Sugerido ({formatBRL(weightCalc.suggestedMeliShippingBrl)})
+            </button>
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <label className="space-y-1 text-xs">
+              <span className="text-slate-400">Peso Físico (g)</span>
+              <input
+                inputMode="numeric"
+                value={calc.physicalWeightGrams}
+                onChange={(e) => onChange({ physicalWeightGrams: e.target.value })}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="text-slate-400">Comprimento (cm)</span>
+              <input
+                inputMode="decimal"
+                value={calc.lengthCm}
+                onChange={(e) => onChange({ lengthCm: e.target.value })}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="text-slate-400">Largura (cm)</span>
+              <input
+                inputMode="decimal"
+                value={calc.widthCm}
+                onChange={(e) => onChange({ widthCm: e.target.value })}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="text-slate-400">Altura (cm)</span>
+              <input
+                inputMode="decimal"
+                value={calc.heightCm}
+                onChange={(e) => onChange({ heightCm: e.target.value })}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
+              />
+            </label>
+            <div className="rounded-xl border border-white/10 bg-slate-950/80 p-2.5 text-xs lg:col-span-2">
+              <p className="text-[10px] uppercase text-slate-400">Peso Faturável Cobrado</p>
+              <p className="mt-0.5 text-sm font-extrabold text-amber-300">
+                {formatInt(weightCalc.billableWeightGrams)} g ({weightCalc.weightType})
+              </p>
+              <p className="text-[10px] text-slate-400">
+                Físico: {formatInt(weightCalc.physicalWeightGrams)}g · Cubado: {formatInt(weightCalc.volumetricWeightGrams)}g
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Seletor Rápido de Meta de Margem */}
-        <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
               <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
@@ -3692,6 +3748,28 @@ function CalculatorView({
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Projeção de Escala Mensal do Lote */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="glass-panel rounded-2xl p-4">
+          <p className="flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+            <Package size={14} className="text-sky-400" /> Faturamento Bruto ({formatInt(batchUnits)} un.)
+          </p>
+          <p className="mt-1.5 text-2xl font-black text-white">{formatBRL(monthlyGross)}</p>
+        </div>
+        <div className="glass-panel rounded-2xl p-4">
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Lucro Líquido do Lote no Clássico
+          </p>
+          <p className="mt-1.5 text-2xl font-black text-emerald-400">{formatBRL(monthlyNetClassic)}</p>
+        </div>
+        <div className="glass-panel rounded-2xl p-4">
+          <p className="text-xs font-bold uppercase text-amber-300">
+            Lucro Líquido do Lote no Premium
+          </p>
+          <p className="mt-1.5 text-2xl font-black text-amber-300">{formatBRL(monthlyNetPremium)}</p>
         </div>
       </div>
 
@@ -3772,23 +3850,152 @@ function OAuthModal({
 }
 
 /* =============================================================================
- * COMPONENTE PRINCIPAL
+ * MENU LATERAL (SIDEBAR) E PLATAFORMA PRINCIPAL (10 MÓDULOS INTEGRADOS)
  * ============================================================================= */
 
+type SidebarNavItem = {
+  id: Exclude<ModuleId, 'raiox'>;
+  label: string;
+  shortDesc: string;
+  group: 'mercado' | 'competitividade' | 'conversao';
+  icon: ReactNode;
+};
+
+const SIDEBAR_MODULES: SidebarNavItem[] = [
+  {
+    id: 'home',
+    label: 'Home',
+    shortDesc: 'Visão Geral & Ranking',
+    group: 'mercado',
+    icon: <Home size={17} />,
+  },
+  {
+    id: 'produtos',
+    label: 'Busca de Produtos',
+    shortDesc: 'Pesquisa multi-filtros',
+    group: 'mercado',
+    icon: <Search size={17} />,
+  },
+  {
+    id: 'locais',
+    label: 'Produtos Locais',
+    shortDesc: 'Brasil vs. CBT & UF',
+    group: 'mercado',
+    icon: <MapPin size={17} />,
+  },
+  {
+    id: 'categorias',
+    label: 'Análise de Categoria',
+    shortDesc: 'Nicho & Monopólio',
+    group: 'mercado',
+    icon: <Layers size={17} />,
+  },
+  {
+    id: 'tendencias',
+    label: 'Tendências',
+    shortDesc: 'Sazonalidade & Alta',
+    group: 'mercado',
+    icon: <TrendingUp size={17} />,
+  },
+  {
+    id: 'vendedores',
+    label: 'Concorrência & Lojas',
+    shortDesc: 'Raio-X & Curva ABC',
+    group: 'competitividade',
+    icon: <Store size={17} />,
+  },
+  {
+    id: 'monitor',
+    label: 'Monitor',
+    shortDesc: 'Snapshots & Variação Δ',
+    group: 'competitividade',
+    icon: <Bookmark size={17} />,
+  },
+  {
+    id: 'auditor',
+    label: 'Análise da Listagem',
+    shortDesc: 'Score SEO 0 a 100',
+    group: 'conversao',
+    icon: <ClipboardCheck size={17} />,
+  },
+  {
+    id: 'midias',
+    label: 'Clipes e Imagens',
+    shortDesc: 'Vídeos & Galeria HD',
+    group: 'conversao',
+    icon: <Film size={17} />,
+  },
+  {
+    id: 'calculadora',
+    label: 'Calculadora de Margem',
+    shortDesc: 'Lucro & Peso Cubado',
+    group: 'conversao',
+    icon: <Calculator size={17} />,
+  },
+];
+
+const MODULE_TITLES: Record<ModuleId, string> = {
+  home: 'Home · Visão Geral do Mercado',
+  produtos: 'Busca Avançada de Produtos',
+  locais: 'Produtos Locais · Brasil vs. Internacional (CBT)',
+  categorias: 'Análise de Categoria & Monopólio',
+  tendencias: 'Tendências & Sazonalidade',
+  vendedores: 'Concorrência & Busca de Vendedores',
+  monitor: 'Monitor de Produtos & Vendedores',
+  auditor: 'Análise da Listagem · Score 0–100',
+  midias: 'Clipes e Imagens de Alta Resolução',
+  calculadora: 'Calculadora de Margem & Peso Cubado',
+  raiox: 'Raio-X Completo do Produto',
+};
+
 export default function BuscasMLPro() {
-  const [tab, setTab] = useState<TabKey>('busca');
-  const [query, setQuery] = useState('');
+  const [activeModule, setActiveModule] = useState<ModuleId>('home');
+  const [returnModule, setReturnModule] = useState<Exclude<ModuleId, 'raiox'>>('home');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const [universalQuery, setUniversalQuery] = useState('');
   const [loading, setLoading] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [keywordResult, setKeywordResult] = useState<KeywordAnalysis | null>(null);
+
+  // Estados de Busca de Produtos & Produtos Locais
+  const [productSearchResult, setProductSearchResult] = useState<KeywordAnalysis | null>(null);
+  const [localSearchResult, setLocalSearchResult] = useState<KeywordAnalysis | null>(null);
+  const [productFilters, setProductFilters] = useState<AdvancedFilterState>(DEFAULT_ADVANCED_FILTERS);
+  const [localFilters, setLocalFilters] = useState<AdvancedFilterState>(DEFAULT_LOCAL_FILTERS);
+
+  // Estado de Análise de Categoria
+  const [rootCategories, setRootCategories] = useState<RootCategoryItem[]>([]);
+  const [categoryAnalysisResult, setCategoryAnalysisResult] = useState<KeywordAnalysis | null>(null);
+
+  // Estado de Tendências Dedicado
+  const [trendsCat, setTrendsCat] = useState<string>('all');
+  const [trendsPayload, setTrendsPayload] = useState<TrendsModulePayload | null>(null);
+  const [loadingTrends, setLoadingTrends] = useState<boolean>(false);
+
+  // Estado de Concorrência & Raio-X de Vendedores
+  const [sellerDossier, setSellerDossier] = useState<SellerDossierPayload | null>(null);
+  const [loadingSeller, setLoadingSeller] = useState<boolean>(false);
+  const [competitorDossier, setCompetitorDossier] = useState<Dossier | null>(null);
+  const [loadingCompetitor, setLoadingCompetitor] = useState<boolean>(false);
+
+  // Estado do Raio-X do Produto & Auditor 0–100
   const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [auditorDossier, setAuditorDossier] = useState<Dossier | null>(null);
+
+  // Estado de Clipes e Imagens HD
+  const [mediaData, setMediaData] = useState<MediaExtractorPayload | null>(null);
+  const [loadingMedia, setLoadingMedia] = useState<boolean>(false);
+
+  // Estado do Monitor (localStorage)
+  const [monitorStore, setMonitorStore] = useState<MonitorStoreState>({ products: [], sellers: [] });
+  const [refreshingMonitor, setRefreshingMonitor] = useState<boolean>(false);
+
+  // Calculadora + Sessão OAuth + Ranking da Home
   const [calc, setCalc] = useState<CalcForm>(INITIAL_CALC);
   const [session, setSession] = useState<StoredSession | null>(null);
   const [envStatus, setEnvStatus] = useState<StatusEnvelope | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
 
-  // Estado do Ranking Mais Vendidos & Em Alta
   const [rankingCat, setRankingCat] = useState<string>('all');
   const [rankingData, setRankingData] = useState<RankingPayload | null>(null);
   const [loadingRanking, setLoadingRanking] = useState<boolean>(false);
@@ -3800,7 +4007,7 @@ export default function BuscasMLPro() {
 
   const ee = useMemo(() => computeMarginCalculator(calc), [calc]);
 
-  /* ---------- sessão ---------- */
+  /* ---------- Persistência de Sessão OAuth & Monitor ---------- */
 
   const persistSession = useCallback((next: StoredSession | null) => {
     sessionRef.current = next;
@@ -3809,11 +4016,18 @@ export default function BuscasMLPro() {
     else clearSession();
   }, []);
 
+  const persistMonitor = useCallback((updater: (prev: MonitorStoreState) => MonitorStoreState) => {
+    setMonitorStore((prev) => {
+      const next = updater(prev);
+      writeMonitorStore(next);
+      return next;
+    });
+  }, []);
+
   const getBearer = useCallback(async (): Promise<string | null> => {
     const current = sessionRef.current;
     if (!current) return null;
     const { tokens } = current;
-
     if (!needsRefresh(tokens)) return tokens.accessToken;
 
     if (!tokens.refreshToken) {
@@ -3848,6 +4062,7 @@ export default function BuscasMLPro() {
       sessionRef.current = stored;
       setSession(stored);
     }
+    setMonitorStore(readMonitorStore());
   }, []);
 
   useEffect(() => {
@@ -3870,10 +4085,7 @@ export default function BuscasMLPro() {
     requestExchange(code, window.location.origin)
       .then((tokens) => {
         persistSession({ tokens, savedAt: Date.now() });
-        setNotice({
-          kind: 'ok',
-          text: 'Conta do Mercado Livre autorizada com sucesso.',
-        });
+        setNotice({ kind: 'ok', text: 'Conta do Mercado Livre autorizada com sucesso.' });
       })
       .catch((err: unknown) => {
         setNotice({ kind: 'erro', text: errorMessage(err, 'Falha ao trocar o código de autorização.') });
@@ -3888,12 +4100,20 @@ export default function BuscasMLPro() {
         if (active) setEnvStatus(s);
       })
       .catch(() => undefined);
+
+    getBearer()
+      .then((bearer) => requestRootCategories(bearer))
+      .then((cats) => {
+        if (active) setRootCategories(cats);
+      })
+      .catch(() => undefined);
+
     return () => {
       active = false;
     };
-  }, []);
+  }, [getBearer]);
 
-  /* ---------- Carregamento do Ranking Mais Vendidos ---------- */
+  /* ---------- Carregamento do Ranking da Home ---------- */
 
   useEffect(() => {
     let active = true;
@@ -3912,313 +4132,1087 @@ export default function BuscasMLPro() {
     };
   }, [rankingCat, getBearer]);
 
-  /* ---------- Buscas (Detecção Automática Única) ---------- */
+  /* ---------- Carregamento Automático do Módulo Tendências ---------- */
 
-  const applyAnalysis = useCallback((a: Analysis) => {
-    if (a.mode === 'keyword') {
-      setKeywordResult(a);
-      setDossier(null);
-    } else {
-      setDossier(a.dossier);
+  useEffect(() => {
+    if (activeModule !== 'tendencias') return;
+    let active = true;
+    setLoadingTrends(true);
+    getBearer()
+      .then((bearer) => requestTrendsModule(trendsCat, bearer))
+      .then((payload) => {
+        if (active) setTrendsPayload(payload);
+      })
+      .catch((err) => {
+        if (active) setNotice({ kind: 'erro', text: errorMessage(err, 'Erro ao consultar tendências.') });
+      })
+      .finally(() => {
+        if (active) setLoadingTrends(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeModule, trendsCat, getBearer]);
+
+  /* ---------- Navegação entre Módulos ---------- */
+
+  const navigateTo = useCallback((mod: ModuleId) => {
+    setActiveModule((prev) => {
+      if (mod === 'raiox' && prev !== 'raiox') {
+        setReturnModule(prev);
+      }
+      return mod;
+    });
+    setMobileSidebarOpen(false);
+    setNotice(null);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, []);
 
-  const runAnalysis = useCallback(
-    async (input: string, label: string, modeOverride: SearchMode = 'auto') => {
+  /* ---------- Ações de Busca por Módulo ---------- */
+
+  const runProductSearch = useCallback(
+    async (
+      q: string,
+      targetVariant: 'produtos' | 'locais',
+      hints?: { origin?: string | null; uf?: string | null },
+    ) => {
       const seq = ++searchSeqRef.current;
-      setLoading(label);
-      setNotice(null);
-      setTab('busca');
+      navigateTo(targetVariant);
+      setLoading(`Pesquisando anúncios de "${q}"...`);
       try {
         const bearer = await getBearer();
-        const analysis = await requestAnalysis(input, bearer, modeOverride);
-        if (seq === searchSeqRef.current) applyAnalysis(analysis);
+        const data = await requestAnalysis(q, bearer, 'termo', {
+          origin: hints?.origin ?? (targetVariant === 'locais' ? 'nacional' : null),
+          uf: hints?.uf ?? null,
+          limit: 24,
+        });
+        if (seq !== searchSeqRef.current) return;
+        if (data.mode === 'keyword') {
+          if (targetVariant === 'locais') setLocalSearchResult(data);
+          else setProductSearchResult(data);
+        } else {
+          setDossier(data.dossier);
+          setAuditorDossier(data.dossier);
+          navigateTo('raiox');
+        }
       } catch (err) {
         if (seq === searchSeqRef.current) {
-          setNotice({ kind: 'erro', text: errorMessage(err, 'Falha na consulta. Tente novamente.') });
+          setNotice({ kind: 'erro', text: errorMessage(err, 'Falha ao buscar produtos.') });
         }
       } finally {
         if (seq === searchSeqRef.current) setLoading(null);
       }
     },
-    [applyAnalysis, getBearer],
+    [getBearer, navigateTo],
   );
 
-  const submitSearch = (e: FormEvent<HTMLFormElement>) => {
+  const openAdDossier = useCallback(
+    async (codeOrUrl: string, openInAuditor = false) => {
+      const clean = codeOrUrl.trim();
+      if (!clean) return;
+      const seq = ++searchSeqRef.current;
+      const currentOrigin = activeModule !== 'raiox' ? activeModule : returnModule;
+      setReturnModule(currentOrigin);
+      setActiveModule(openInAuditor ? 'auditor' : 'raiox');
+      setMobileSidebarOpen(false);
+      setLoading(`Carregando dossiê completo de ${clean.slice(0, 42)}...`);
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const mode: SearchMode =
+          /^MLBU/i.test(clean) || /^https?:\/\//i.test(clean) ? 'auto' : 'anuncio';
+        const data = await requestAnalysis(clean, bearer, mode);
+        if (seq !== searchSeqRef.current) return;
+        if (data.mode === 'dossier') {
+          setDossier(data.dossier);
+          setAuditorDossier(data.dossier);
+          setCompetitorDossier(data.dossier);
+        } else {
+          setProductSearchResult(data);
+          setActiveModule('produtos');
+        }
+      } catch (err) {
+        if (seq === searchSeqRef.current) {
+          setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível carregar este anúncio.') });
+        }
+      } finally {
+        if (seq === searchSeqRef.current) setLoading(null);
+      }
+    },
+    [activeModule, getBearer, returnModule],
+  );
+
+  const openCategoryAnalysis = useCallback(
+    async (catOrTerm: string, isCategoryId = true) => {
+      const clean = catOrTerm.trim();
+      if (!clean) return;
+      const seq = ++searchSeqRef.current;
+      navigateTo('categorias');
+      setLoading(`Analisando nicho e concentração de ${clean}...`);
+      try {
+        const bearer = await getBearer();
+        const data = await requestAnalysis(
+          clean,
+          bearer,
+          isCategoryId ? 'categoria' : 'termo',
+          { limit: 24 },
+        );
+        if (seq !== searchSeqRef.current) return;
+        if (data.mode === 'keyword') {
+          setCategoryAnalysisResult(data);
+        }
+      } catch (err) {
+        if (seq === searchSeqRef.current) {
+          setNotice({ kind: 'erro', text: errorMessage(err, 'Falha ao analisar a categoria.') });
+        }
+      } finally {
+        if (seq === searchSeqRef.current) setLoading(null);
+      }
+    },
+    [getBearer, navigateTo],
+  );
+
+  const inspectSeller = useCallback(
+    async (sellerQuery: string) => {
+      const clean = sellerQuery.trim();
+      if (!clean) return;
+      navigateTo('vendedores');
+      setLoadingSeller(true);
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const payload = await requestSellerDossier(clean, bearer);
+        setSellerDossier(payload);
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível mapear este vendedor.') });
+      } finally {
+        setLoadingSeller(false);
+      }
+    },
+    [getBearer, navigateTo],
+  );
+
+  const compareCompetitorsForAd = useCallback(
+    async (adQuery: string) => {
+      const clean = adQuery.trim();
+      if (!clean) return;
+      setLoadingCompetitor(true);
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const data = await requestAnalysis(clean, bearer, 'auto');
+        if (data.mode === 'dossier') {
+          setCompetitorDossier(data.dossier);
+        } else if (data.products[0]) {
+          const firstCode =
+            data.products[0].mlbuId ?? data.products[0].itemId ?? data.products[0].productId;
+          if (firstCode) {
+            const sub = await requestAnalysis(firstCode, bearer, 'auto');
+            if (sub.mode === 'dossier') setCompetitorDossier(sub.dossier);
+          }
+        }
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Falha ao carregar comparativo de ofertas.') });
+      } finally {
+        setLoadingCompetitor(false);
+      }
+    },
+    [getBearer],
+  );
+
+  const extractMediaFor = useCallback(
+    async (q: string) => {
+      const clean = q.trim();
+      if (!clean) return;
+      navigateTo('midias');
+      setLoadingMedia(true);
+      setNotice(null);
+      try {
+        const bearer = await getBearer();
+        const media = await requestMediaExtractor(clean, bearer);
+        setMediaData(media);
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Erro ao extrair mídias e clipes.') });
+      } finally {
+        setLoadingMedia(false);
+      }
+    },
+    [getBearer, navigateTo],
+  );
+
+  const handleUniversalSearch = (e: FormEvent) => {
     e.preventDefault();
-    const input = query.trim();
-    if (!input) {
-      setNotice({
-        kind: 'aviso',
-        text: 'Digite uma palavra-chave, cole o link de um anúncio ou informe um código MLB / MLBU.',
+    const q = universalQuery.trim();
+    if (!q) return;
+    if (/^MLB\d{3,7}$/i.test(q)) {
+      void openCategoryAnalysis(q.toUpperCase(), true);
+      return;
+    }
+    if (
+      /^MLBU?-?\d{6,}$/i.test(q) ||
+      /mercadolivre\.com\.br|mercadolivre\.com|meli\.la/i.test(q)
+    ) {
+      void openAdDossier(q, false);
+      return;
+    }
+    void runProductSearch(q, activeModule === 'locais' ? 'locais' : 'produtos');
+  };
+
+  /* ---------- Monitoramento (Produtos & Vendedores em localStorage) ---------- */
+
+  const isProductMonitored = useCallback(
+    (code: string | null) => {
+      if (!code) return false;
+      const norm = code.trim().toUpperCase();
+      return monitorStore.products.some((p) => p.code.toUpperCase() === norm);
+    },
+    [monitorStore.products],
+  );
+
+  const isSellerMonitored = useCallback(
+    (sellerId: number | null, nickname: string | null) => {
+      return monitorStore.sellers.some(
+        (s) =>
+          (sellerId !== null && s.sellerId === sellerId) ||
+          (nickname && s.nickname.toLowerCase() === nickname.toLowerCase()),
+      );
+    },
+    [monitorStore.sellers],
+  );
+
+  const toggleMonitorProduct = useCallback(
+    (p: ProductSummary) => {
+      const code = (p.mlbuId ?? p.itemId ?? p.productId ?? '').trim();
+      if (!code) return;
+      const nowIso = new Date().toISOString();
+      persistMonitor((prev) => {
+        const exists = prev.products.some((x) => x.code.toUpperCase() === code.toUpperCase());
+        if (exists) {
+          return {
+            ...prev,
+            products: prev.products.filter((x) => x.code.toUpperCase() !== code.toUpperCase()),
+          };
+        }
+        const entry: MonitoredProduct = {
+          code,
+          title: p.title,
+          image: p.image,
+          sellerNickname: p.seller?.nickname ?? null,
+          sellerId: p.seller?.id ?? null,
+          fulfillment: p.fulfillment,
+          listingType: p.listingType,
+          permalink: p.permalink,
+          addedAt: nowIso,
+          lastUpdatedAt: nowIso,
+          snapshots: [
+            {
+              capturedAt: nowIso,
+              price: p.price,
+              stock: p.availableQuantity,
+              soldTotal: p.soldQuantity,
+              dailySales: p.velocity?.daily ?? null,
+              monthlyRevenue: p.revenue?.monthly ?? null,
+            },
+          ],
+        };
+        return { ...prev, products: [entry, ...prev.products] };
       });
-      return;
+    },
+    [persistMonitor],
+  );
+
+  const toggleMonitorDossier = useCallback(
+    (d: Dossier) => {
+      const code = (d.mlbuId ?? d.itemId ?? d.productId ?? '').trim();
+      if (!code) return;
+      const nowIso = new Date().toISOString();
+      persistMonitor((prev) => {
+        const exists = prev.products.some((x) => x.code.toUpperCase() === code.toUpperCase());
+        if (exists) {
+          return {
+            ...prev,
+            products: prev.products.filter((x) => x.code.toUpperCase() !== code.toUpperCase()),
+          };
+        }
+        const entry: MonitoredProduct = {
+          code,
+          title: d.title,
+          image: d.images[0] ?? null,
+          sellerNickname: d.seller?.nickname ?? null,
+          sellerId: d.seller?.id ?? null,
+          fulfillment: d.fulfillment,
+          listingType: d.listingType,
+          permalink: d.permalink,
+          addedAt: nowIso,
+          lastUpdatedAt: nowIso,
+          snapshots: [
+            {
+              capturedAt: nowIso,
+              price: d.price,
+              stock: d.availableQuantity,
+              soldTotal: d.soldValue,
+              dailySales: d.velocity?.daily ?? null,
+              monthlyRevenue: d.revenue?.monthly ?? null,
+            },
+          ],
+        };
+        return { ...prev, products: [entry, ...prev.products] };
+      });
+    },
+    [persistMonitor],
+  );
+
+  const toggleMonitorSeller = useCallback(
+    (s: SellerDossierPayload) => {
+      const keyId = s.seller.id ? String(s.seller.id) : (s.seller.nickname ?? 'loja').toUpperCase();
+      const nowIso = new Date().toISOString();
+      persistMonitor((prev) => {
+        const exists = prev.sellers.some(
+          (x) => x.id === keyId || (s.seller.id !== null && x.sellerId === s.seller.id),
+        );
+        if (exists) {
+          return {
+            ...prev,
+            sellers: prev.sellers.filter(
+              (x) => x.id !== keyId && (s.seller.id === null || x.sellerId !== s.seller.id),
+            ),
+          };
+        }
+        const entry: MonitoredSeller = {
+          id: keyId,
+          sellerId: s.seller.id,
+          nickname: s.seller.nickname ?? `Lojista #${keyId}`,
+          medal: s.seller.medal,
+          cityState:
+            s.seller.city && s.seller.state
+              ? `${s.seller.city} - ${s.seller.state}`
+              : s.seller.state ?? 'Brasil',
+          storePermalink: s.seller.storePermalink,
+          addedAt: nowIso,
+          lastUpdatedAt: nowIso,
+          snapshots: [
+            {
+              capturedAt: nowIso,
+              completedSales: s.seller.completedSales,
+              monthlyRevenue: s.portfolio.estimatedMonthlyRevenue,
+              avgTicket: s.portfolio.averageTicket,
+              claimsRate: s.seller.claimsRate,
+              reputationLevel: s.seller.reputationLevel,
+            },
+          ],
+        };
+        return { ...prev, sellers: [entry, ...prev.sellers] };
+      });
+    },
+    [persistMonitor],
+  );
+
+  const refreshSingleMonitoredProduct = useCallback(
+    async (code: string) => {
+      setRefreshingMonitor(true);
+      try {
+        const bearer = await getBearer();
+        const res = await requestAnalysis(code, bearer, 'auto');
+        if (res.mode === 'dossier') {
+          const d = res.dossier;
+          const nowIso = new Date().toISOString();
+          persistMonitor((prev) => ({
+            ...prev,
+            products: prev.products.map((item) =>
+              item.code.toUpperCase() === code.toUpperCase()
+                ? {
+                    ...item,
+                    title: d.title || item.title,
+                    image: d.images[0] ?? item.image,
+                    sellerNickname: d.seller?.nickname ?? item.sellerNickname,
+                    lastUpdatedAt: nowIso,
+                    snapshots: [
+                      ...item.snapshots.slice(-29),
+                      {
+                        capturedAt: nowIso,
+                        price: d.price,
+                        stock: d.availableQuantity,
+                        soldTotal: d.soldValue,
+                        dailySales: d.velocity?.daily ?? null,
+                        monthlyRevenue: d.revenue?.monthly ?? null,
+                      },
+                    ],
+                  }
+                : item,
+            ),
+          }));
+        }
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, `Erro ao atualizar ${code}.`) });
+      } finally {
+        setRefreshingMonitor(false);
+      }
+    },
+    [getBearer, persistMonitor],
+  );
+
+  const refreshSingleMonitoredSeller = useCallback(
+    async (idOrNick: string) => {
+      setRefreshingMonitor(true);
+      try {
+        const bearer = await getBearer();
+        const s = await requestSellerDossier(idOrNick, bearer);
+        const nowIso = new Date().toISOString();
+        persistMonitor((prev) => ({
+          ...prev,
+          sellers: prev.sellers.map((sel) =>
+            sel.id === idOrNick ||
+            (s.seller.id !== null && sel.sellerId === s.seller.id) ||
+            sel.nickname.toLowerCase() === idOrNick.toLowerCase()
+              ? {
+                  ...sel,
+                  nickname: s.seller.nickname ?? sel.nickname,
+                  medal: s.seller.medal,
+                  lastUpdatedAt: nowIso,
+                  snapshots: [
+                    ...sel.snapshots.slice(-29),
+                    {
+                      capturedAt: nowIso,
+                      completedSales: s.seller.completedSales,
+                      monthlyRevenue: s.portfolio.estimatedMonthlyRevenue,
+                      avgTicket: s.portfolio.averageTicket,
+                      claimsRate: s.seller.claimsRate,
+                      reputationLevel: s.seller.reputationLevel,
+                    },
+                  ],
+                }
+              : sel,
+          ),
+        }));
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Erro ao atualizar vendedor.') });
+      } finally {
+        setRefreshingMonitor(false);
+      }
+    },
+    [getBearer, persistMonitor],
+  );
+
+  const refreshAllMonitored = useCallback(async () => {
+    setRefreshingMonitor(true);
+    try {
+      const bearer = await getBearer();
+      const nowIso = new Date().toISOString();
+
+      const updatedProducts = await Promise.all(
+        monitorStore.products.map(async (item) => {
+          try {
+            const res = await requestAnalysis(item.code, bearer, 'auto');
+            if (res.mode !== 'dossier') return item;
+            const d = res.dossier;
+            return {
+              ...item,
+              title: d.title || item.title,
+              image: d.images[0] ?? item.image,
+              sellerNickname: d.seller?.nickname ?? item.sellerNickname,
+              lastUpdatedAt: nowIso,
+              snapshots: [
+                ...item.snapshots.slice(-29),
+                {
+                  capturedAt: nowIso,
+                  price: d.price,
+                  stock: d.availableQuantity,
+                  soldTotal: d.soldValue,
+                  dailySales: d.velocity?.daily ?? null,
+                  monthlyRevenue: d.revenue?.monthly ?? null,
+                },
+              ],
+            };
+          } catch {
+            return item;
+          }
+        }),
+      );
+
+      const updatedSellers = await Promise.all(
+        monitorStore.sellers.map(async (sel) => {
+          try {
+            const q = sel.sellerId ? String(sel.sellerId) : sel.nickname;
+            const s = await requestSellerDossier(q, bearer);
+            return {
+              ...sel,
+              nickname: s.seller.nickname ?? sel.nickname,
+              medal: s.seller.medal,
+              lastUpdatedAt: nowIso,
+              snapshots: [
+                ...sel.snapshots.slice(-29),
+                {
+                  capturedAt: nowIso,
+                  completedSales: s.seller.completedSales,
+                  monthlyRevenue: s.portfolio.estimatedMonthlyRevenue,
+                  avgTicket: s.portfolio.averageTicket,
+                  claimsRate: s.seller.claimsRate,
+                  reputationLevel: s.seller.reputationLevel,
+                },
+              ],
+            };
+          } catch {
+            return sel;
+          }
+        }),
+      );
+
+      persistMonitor(() => ({ products: updatedProducts, sellers: updatedSellers }));
+      setNotice({
+        kind: 'ok',
+        text: 'Snapshots atualizados com sucesso para todos os itens monitorados!',
+      });
+    } finally {
+      setRefreshingMonitor(false);
     }
-    void runAnalysis(input, `Analisando "${input}" no Mercado Livre...`, 'auto');
-  };
+  }, [getBearer, monitorStore.products, monitorStore.sellers, persistMonitor]);
 
-  const resetHome = () => {
-    setDossier(null);
-    setKeywordResult(null);
-    setNotice(null);
-    setTab('busca');
-  };
+  const addMonitorProductByQuery = useCallback(
+    async (q: string) => {
+      setRefreshingMonitor(true);
+      try {
+        const bearer = await getBearer();
+        const res = await requestAnalysis(q, bearer, 'auto');
+        if (res.mode === 'dossier') {
+          toggleMonitorDossier(res.dossier);
+          setNotice({ kind: 'ok', text: `Anúncio "${res.dossier.title.slice(0, 45)}..." adicionado ao Monitor!` });
+        } else if (res.products[0]) {
+          toggleMonitorProduct(res.products[0]);
+          setNotice({ kind: 'ok', text: `Produto "${res.products[0].title.slice(0, 45)}..." adicionado ao Monitor!` });
+        }
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível adicionar este produto ao Monitor.') });
+      } finally {
+        setRefreshingMonitor(false);
+      }
+    },
+    [getBearer, toggleMonitorDossier, toggleMonitorProduct],
+  );
 
-  const runTerm = (text: string) => {
-    setQuery(text);
-    void runAnalysis(text, `Analisando "${text}"...`, 'termo');
-  };
+  const addMonitorSellerByQuery = useCallback(
+    async (q: string) => {
+      setRefreshingMonitor(true);
+      try {
+        const bearer = await getBearer();
+        const s = await requestSellerDossier(q, bearer);
+        toggleMonitorSeller(s);
+        setNotice({
+          kind: 'ok',
+          text: `Vendedor "${s.seller.nickname ?? s.seller.id}" salvo no Monitor!`,
+        });
+      } catch (err) {
+        setNotice({ kind: 'erro', text: errorMessage(err, 'Não foi possível localizar o vendedor para monitorar.') });
+      } finally {
+        setRefreshingMonitor(false);
+      }
+    },
+    [getBearer, toggleMonitorSeller],
+  );
 
-  const runAdCode = (code: string) => {
-    const clean = code.trim();
-    setQuery(clean);
-    const nextMode: SearchMode =
-      /^MLBU/i.test(clean) || /^https?:\/\//i.test(clean) ? 'auto' : 'anuncio';
-    void runAnalysis(clean, `Abrindo análise de ${clean}...`, nextMode);
-  };
+  /* ---------- Calculadora Integrada ---------- */
 
-  const openCategory = (categoryId: string) => {
-    setQuery(categoryId);
-    void runAnalysis(categoryId, `Consultando categoria ${categoryId}...`, 'categoria');
-  };
+  const simulateFromSummary = useCallback(
+    (src: ProductSummary) => {
+      setCalc((prev) => ({
+        ...prev,
+        title: src.title,
+        categoryLabel: src.categoryId ?? '',
+        salePrice: src.price !== null ? formatInputNumber(src.price) : prev.salePrice,
+        listing: kindFromLabel(src.listingType ?? src.listingTypeId) ?? 'classico',
+        isSupermarket: src.isSupermarket,
+        mlCoversShipping: false,
+      }));
+      navigateTo('calculadora');
+    },
+    [navigateTo],
+  );
 
-  const openProduct = (p: ProductSummary) => {
-    const code = p.itemId ?? p.productId ?? p.permalink;
-    if (!code) {
-      runTerm(p.title);
-      return;
-    }
-    runAdCode(code);
-  };
+  const simulateFromDossier = useCallback(
+    (d: Dossier) => {
+      const cPct =
+        d.fees.categoryFees.range_128?.gold_special ?? DEFAULT_COMMISSION_PCT.gold_special;
+      const pPct = d.fees.categoryFees.range_128?.gold_pro ?? DEFAULT_COMMISSION_PCT.gold_pro;
+      setCalc((prev) => ({
+        ...prev,
+        title: d.title,
+        categoryLabel: d.categoryPath ?? d.categoryId ?? '',
+        salePrice: d.price !== null ? formatInputNumber(d.price) : prev.salePrice,
+        listing: kindFromLabel(d.listingType ?? d.listingTypeId) ?? 'classico',
+        classicPct: String(cPct).replace('.', ','),
+        premiumPct: String(pPct).replace('.', ','),
+        shippingCost:
+          d.fees.shippingListCost !== null
+            ? formatInputNumber(d.fees.shippingListCost)
+            : prev.shippingCost,
+        mlCoversShipping: d.fees.freeShippingByMeli,
+        isSupermarket: d.isSupermarket,
+      }));
+      navigateTo('calculadora');
+    },
+    [navigateTo],
+  );
 
-  const openRankingItem = (item: RankingProductItem) => {
-    const code = item.productId ?? item.itemId ?? item.id ?? item.permalink;
-    if (code) {
-      runAdCode(code);
-    } else {
-      runTerm(item.title);
-    }
-  };
-
-  /* ---------- Calculadora e Filtros ---------- */
-
-  const simulateFromSummary = (src: ProductSummary) => {
-    setCalc((prev) => ({
-      ...prev,
-      title: src.title,
-      categoryLabel: src.categoryId ?? '',
-      salePrice: src.price !== null ? formatInputNumber(src.price) : prev.salePrice,
-      listing: kindFromLabel(src.listingType ?? src.listingTypeId) ?? 'classico',
-      isSupermarket: src.isSupermarket,
-      mlCoversShipping: false,
-    }));
-    setTab('calculadora');
-  };
-
-  const simulateFromDossier = (d: Dossier) => {
-    const cPct =
-      d.fees.categoryFees.range_128?.gold_special ?? DEFAULT_COMMISSION_PCT.gold_special;
-    const pPct = d.fees.categoryFees.range_128?.gold_pro ?? DEFAULT_COMMISSION_PCT.gold_pro;
-    setCalc((prev) => ({
-      ...prev,
-      title: d.title,
-      categoryLabel: d.categoryPath ?? d.categoryId ?? '',
-      salePrice: d.price !== null ? formatInputNumber(d.price) : prev.salePrice,
-      listing: kindFromLabel(d.listingType ?? d.listingTypeId) ?? 'classico',
-      classicPct: String(cPct).replace('.', ','),
-      premiumPct: String(pPct).replace('.', ','),
-      shippingCost:
-        d.fees.shippingListCost !== null
-          ? formatInputNumber(d.fees.shippingListCost)
-          : prev.shippingCost,
-      mlCoversShipping: d.fees.freeShippingByMeli,
-      isSupermarket: d.isSupermarket,
-    }));
-    setTab('calculadora');
-  };
-
-  const simulateCategoryFees = (category: CategoryOverview) => {
-    const cf = category.fees.categoryFees;
-    const cPct =
-      cf.range_128?.gold_special ??
-      cf.range_64?.gold_special ??
-      category.fees.classic?.percentage ??
-      DEFAULT_COMMISSION_PCT.gold_special;
-    const pPct =
-      cf.range_128?.gold_pro ??
-      cf.range_64?.gold_pro ??
-      category.fees.premium?.percentage ??
-      DEFAULT_COMMISSION_PCT.gold_pro;
-    setCalc((prev) => ({
-      ...prev,
-      title: prev.title || `Simulação · ${category.name}`,
-      categoryLabel: `${category.id} · ${category.path}`,
-      classicPct: String(cPct).replace('.', ','),
-      premiumPct: String(pPct).replace('.', ','),
-    }));
-    setTab('calculadora');
-  };
+  const simulateCategoryFees = useCallback(
+    (category: CategoryOverview) => {
+      const cf = category.fees.categoryFees;
+      const cPct =
+        cf.range_128?.gold_special ??
+        cf.range_64?.gold_special ??
+        category.fees.classic?.percentage ??
+        DEFAULT_COMMISSION_PCT.gold_special;
+      const pPct =
+        cf.range_128?.gold_pro ??
+        cf.range_64?.gold_pro ??
+        category.fees.premium?.percentage ??
+        DEFAULT_COMMISSION_PCT.gold_pro;
+      setCalc((prev) => ({
+        ...prev,
+        title: prev.title || `Simulação · ${category.name}`,
+        categoryLabel: `${category.id} · ${category.path}`,
+        classicPct: String(cPct).replace('.', ','),
+        premiumPct: String(pPct).replace('.', ','),
+      }));
+      navigateTo('calculadora');
+    },
+    [navigateTo],
+  );
 
   const patchCalc = useCallback((patch: Partial<CalcForm>) => {
     setCalc((c) => ({ ...c, ...patch }));
   }, []);
 
-  const patchFilters = useCallback((patch: Partial<FilterState>) => {
-    setFilters((f) => ({ ...f, ...patch }));
-  }, []);
-
   const disconnect = () => {
     persistSession(null);
     setAuthOpen(false);
-    setNotice({
-      kind: 'aviso',
-      text: 'Conta desconectada com sucesso.',
-    });
+    setNotice({ kind: 'aviso', text: 'Conta desconectada com sucesso.' });
   };
 
-  const dossierKey = dossier ? (dossier.itemId ?? dossier.productId ?? dossier.title) : '';
+  const totalMonitoredCount = monitorStore.products.length + monitorStore.sellers.length;
+  const dossierCode = dossier ? (dossier.mlbuId ?? dossier.itemId ?? dossier.productId ?? null) : null;
+
+  const renderSidebarContent = () => (
+    <div className="flex h-full flex-col justify-between p-4">
+      <div className="space-y-5">
+        {/* Marca */}
+        <button
+          type="button"
+          onClick={() => navigateTo('home')}
+          className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/75 p-3 text-left transition hover:border-amber-400/40"
+        >
+          <img
+            src="/logo.png"
+            alt="BuscasML Pro"
+            className="h-10 w-10 shrink-0 rounded-xl object-contain drop-shadow-[0_0_12px_rgba(250,204,21,0.35)]"
+          />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black tracking-tight text-white">
+              BuscasML <span className="text-amber-400">Pro</span>
+            </p>
+            <p className="truncate text-[10px] text-slate-400">Inteligência Mercado Livre</p>
+          </div>
+        </button>
+
+        {/* Grupos de Módulos */}
+        {(
+          [
+            { key: 'mercado', title: 'Mercado & Garimpo' },
+            { key: 'competitividade', title: 'Concorrência & Radar' },
+            { key: 'conversao', title: 'Auditoria, Mídia & Lucro' },
+          ] as const
+        ).map((grp) => (
+          <div key={grp.key} className="space-y-1">
+            <p className="px-2.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+              {grp.title}
+            </p>
+            {SIDEBAR_MODULES.filter((m) => m.group === grp.key).map((item) => {
+              const isSelected =
+                activeModule === item.id ||
+                (activeModule === 'raiox' && returnModule === item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => navigateTo(item.id)}
+                  className={`flex w-full items-center justify-between gap-2.5 rounded-xl px-3 py-2.5 text-left transition ${
+                    isSelected
+                      ? 'border border-amber-400/40 bg-gradient-to-r from-amber-400/20 to-sky-500/10 text-white shadow'
+                      : 'border border-transparent text-slate-300 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className={isSelected ? 'text-amber-400' : 'text-slate-400'}>
+                      {item.icon}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold">{item.label}</p>
+                      <p className="truncate text-[10px] text-slate-400">{item.shortDesc}</p>
+                    </div>
+                  </div>
+                  {item.id === 'monitor' && totalMonitoredCount > 0 && (
+                    <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black text-slate-950">
+                      {totalMonitoredCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Rodapé da Sidebar */}
+      <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/70 p-3 text-[11px] text-slate-400">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-slate-200">Status da API</span>
+          <span className="inline-flex items-center gap-1 font-bold text-emerald-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" /> Online
+          </span>
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Dados em tempo real do ecossistema Mercado Livre Brasil (MLB).
+        </p>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen">
-      {/* Cabeçalho com a nova Logomarca PNG */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#040711]/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <button
-            type="button"
-            onClick={resetHome}
-            className="flex items-center gap-3 text-left transition hover:opacity-90"
+    <div className="flex min-h-screen">
+      {/* SIDEBAR DESKTOP FIXA */}
+      <aside className="hidden w-64 shrink-0 border-r border-white/10 bg-[#040711]/90 backdrop-blur-xl lg:block">
+        <div className="sticky top-0 h-screen overflow-y-auto">{renderSidebarContent()}</div>
+      </aside>
+
+      {/* DRAWER MOBILE DA SIDEBAR */}
+      {mobileSidebarOpen && (
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          className="fixed inset-0 z-50 flex bg-black/75 backdrop-blur-sm lg:hidden"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="h-full w-72 overflow-y-auto border-r border-white/15 bg-[#050914]"
           >
-            <img
-              src="/logo.png"
-              alt="BuscasML Pro"
-              className="h-11 w-11 rounded-xl object-contain drop-shadow-[0_0_14px_rgba(250,204,21,0.35)]"
-            />
-            <div>
-              <p className="text-base font-extrabold tracking-tight text-white">
-                BuscasML <span className="text-amber-400">Pro</span>
-              </p>
-              <p className="text-[11px] text-slate-400">
-                Plataforma de Inteligência e Análise para Mercado Livre
-              </p>
+            <div className="flex items-center justify-end px-4 pt-3">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} />
+              </button>
             </div>
-          </button>
-
-          <nav className="glass-panel flex rounded-2xl p-1">
-            <ToggleButton
-              active={tab === 'busca'}
-              onClick={() => setTab('busca')}
-              icon={<Search size={15} />}
-              label="Pesquisa & Ranking"
-            />
-            <ToggleButton
-              active={tab === 'calculadora'}
-              onClick={() => setTab('calculadora')}
-              icon={<Calculator size={15} />}
-              label="Calculadora de Margem e Preço"
-            />
-          </nav>
-
-          <div className="flex items-center gap-2">
-            {session && <Pill tone="green">Conta ML Conectada</Pill>}
-            <button type="button" onClick={() => setAuthOpen(true)} className={BTN_SM_YELLOW}>
-              <Key size={14} /> {session ? 'Conta ML' : 'Conectar ML'}
-            </button>
+            {renderSidebarContent()}
           </div>
         </div>
-      </header>
+      )}
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-        {envStatus && !envStatus.secretConfigured && (
-          <Banner kind="erro">
-            ML_CLIENT_SECRET não configurado na Vercel. Sem ele, as buscas não funcionam.
-          </Banner>
-        )}
-        {notice && (
-          <Banner kind={notice.kind} onClose={() => setNotice(null)}>
-            {notice.text}
-          </Banner>
-        )}
-
-        {tab === 'busca' ? (
-          <>
-            {/* Barra de Pesquisa Central Única com Detecção Automática */}
-            <form
-              onSubmit={submitSearch}
-              className="glass-panel mx-auto max-w-4xl rounded-3xl p-3 sm:p-4"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="relative flex-1">
-                  <Search
-                    size={20}
-                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sky-400"
-                  />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Pesquise por produto, cole o link do anúncio ou digite um código MLB / MLBU..."
-                    aria-label="Pesquisa inteligente no Mercado Livre"
-                    className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3.5 pl-12 pr-10 text-sm text-white placeholder-slate-400 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-500/25 sm:text-base"
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      onClick={() => setQuery('')}
-                      aria-label="Limpar busca"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-
-                <button type="submit" disabled={loading !== null} className={`${BTN_PRIMARY} py-3.5 px-7`}>
-                  {loading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-                  Analisar
-                </button>
+      {/* ÁREA PRINCIPAL (HEADER STICKY + CONTEÚDO DO MÓDULO ATIVO) */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-40 border-b border-white/10 bg-[#040711]/85 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Abrir menu de módulos"
+                className="rounded-xl border border-white/10 bg-slate-900 p-2 text-slate-200 hover:bg-white/10 lg:hidden"
+              >
+                <Menu size={18} />
+              </button>
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                  {MODULE_TITLES[activeModule]}
+                </p>
+                <p className="hidden text-[11px] text-slate-400 sm:block">
+                  Pesquisa universal: digite produto, categoria MLB ou cole qualquer link/código de anúncio
+                </p>
               </div>
+            </div>
+
+            {/* Pesquisa Universal Rápida no Topo */}
+            <form onSubmit={handleUniversalSearch} className="order-3 flex w-full gap-2 md:order-2 md:w-auto md:flex-1 md:max-w-md">
+              <div className="relative flex-1">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-400"
+                />
+                <input
+                  value={universalQuery}
+                  onChange={(e) => setUniversalQuery(e.target.value)}
+                  placeholder="Busca rápida: produto, MLB, MLBU ou link..."
+                  className="w-full rounded-xl border border-white/10 bg-[#050914]/95 py-2 pl-9 pr-8 text-xs text-white placeholder-slate-400 outline-none focus:border-sky-400"
+                />
+                {universalQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setUniversalQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={loading !== null}
+                className="rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-sky-400 disabled:opacity-50"
+              >
+                Ir
+              </button>
             </form>
 
-            {loading && <LoadingBlock label={loading} />}
+            {/* Atalhos Direita: Monitor + OAuth */}
+            <div className="order-2 flex items-center gap-2 md:order-3">
+              <button
+                type="button"
+                onClick={() => navigateTo('monitor')}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-400/40 hover:text-amber-300"
+              >
+                <Bookmark size={14} className="text-amber-400" />
+                <span className="hidden sm:inline">Monitor</span>
+                <span className="rounded-full bg-amber-400/20 px-1.5 py-0.2 text-[10px] font-bold text-amber-300">
+                  {totalMonitoredCount}
+                </span>
+              </button>
+              <button type="button" onClick={() => setAuthOpen(true)} className={BTN_SM_YELLOW}>
+                <Key size={14} /> {session ? 'Conta ML Ativa' : 'Conectar ML'}
+              </button>
+            </div>
+          </div>
+        </header>
 
-            {dossier ? (
-              <DossierView
-                key={dossierKey}
-                d={dossier}
-                canGoBack={keywordResult !== null}
-                onBack={() => (keywordResult ? setDossier(null) : resetHome())}
-                onSimulate={() => simulateFromDossier(dossier)}
-                onPickTerm={runTerm}
-                onOpenCategory={openCategory}
-                onAnalyzeCompetitor={runAdCode}
-                getBearer={getBearer}
-              />
-            ) : keywordResult ? (
-              <KeywordView
-                result={keywordResult}
-                filters={filters}
-                onFilters={patchFilters}
-                onOpen={openProduct}
-                onSimulate={simulateFromSummary}
-                onPickTerm={runTerm}
-                onOpenCategory={openCategory}
-                onUseCategoryFees={simulateCategoryFees}
-                onBackHome={resetHome}
-              />
-            ) : loading ? null : (
-              <BestSellersRankingSection
-                ranking={rankingData}
-                loadingRanking={loadingRanking}
-                selectedCat={rankingCat}
-                onSelectCategory={setRankingCat}
-                onAnalyzeItem={openRankingItem}
-                onAnalyzeTerm={runTerm}
-              />
-            )}
-          </>
-        ) : (
-          <CalculatorView calc={calc} onChange={patchCalc} ee={ee} />
-        )}
-      </main>
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6">
+          {envStatus && !envStatus.secretConfigured && (
+            <Banner kind="erro">
+              ML_CLIENT_SECRET não configurado no servidor. Sem ele, as buscas não funcionam.
+            </Banner>
+          )}
+          {notice && (
+            <Banner kind={notice.kind} onClose={() => setNotice(null)}>
+              {notice.text}
+            </Banner>
+          )}
+          {loading && <LoadingBlock label={loading} />}
+
+          {/* MÓDULO 1: HOME */}
+          {activeModule === 'home' && (
+            <HomeOverviewModule
+              ranking={rankingData}
+              monitoredProductsCount={monitorStore.products.length}
+              monitoredSellersCount={monitorStore.sellers.length}
+              onNavigate={navigateTo}
+              onQuickSearchTerm={(term) => void runProductSearch(term, 'produtos')}
+              childrenRankingSection={
+                <BestSellersRankingSection
+                  ranking={rankingData}
+                  loadingRanking={loadingRanking}
+                  selectedCat={rankingCat}
+                  onSelectCategory={setRankingCat}
+                  onAnalyzeItem={(item) => {
+                    const code = item.productId ?? item.itemId ?? item.id ?? item.permalink;
+                    if (code) void openAdDossier(code, false);
+                    else void runProductSearch(item.title, 'produtos');
+                  }}
+                  onAnalyzeTerm={(term) => void runProductSearch(term, 'produtos')}
+                />
+              }
+            />
+          )}
+
+          {/* MÓDULO 2: BUSCA DE PRODUTOS */}
+          {activeModule === 'produtos' && (
+            <AdvancedProductSearchModule
+              modeVariant="produtos"
+              result={productSearchResult}
+              loading={loading}
+              filters={productFilters}
+              onPatchFilters={(patch) => setProductFilters((prev) => ({ ...prev, ...patch }))}
+              onResetFilters={() => setProductFilters(DEFAULT_ADVANCED_FILTERS)}
+              onRunSearch={(q, hints) => void runProductSearch(q, 'produtos', hints)}
+              onOpenProduct={(p) => {
+                const code = p.mlbuId ?? p.itemId ?? p.productId ?? p.permalink;
+                if (code) void openAdDossier(code, false);
+              }}
+              onSimulateProduct={simulateFromSummary}
+              onOpenCategory={(catId) => void openCategoryAnalysis(catId, true)}
+              onInspectSeller={(sq) => void inspectSeller(sq)}
+              onToggleMonitorProduct={toggleMonitorProduct}
+              isProductMonitored={isProductMonitored}
+            />
+          )}
+
+          {/* MÓDULO 3: PRODUTOS LOCAIS (BRASIL vs CBT + UF) */}
+          {activeModule === 'locais' && (
+            <AdvancedProductSearchModule
+              modeVariant="locais"
+              result={localSearchResult ?? productSearchResult}
+              loading={loading}
+              filters={localFilters}
+              onPatchFilters={(patch) => setLocalFilters((prev) => ({ ...prev, ...patch }))}
+              onResetFilters={() => setLocalFilters(DEFAULT_LOCAL_FILTERS)}
+              onRunSearch={(q, hints) => void runProductSearch(q, 'locais', hints)}
+              onOpenProduct={(p) => {
+                const code = p.mlbuId ?? p.itemId ?? p.productId ?? p.permalink;
+                if (code) void openAdDossier(code, false);
+              }}
+              onSimulateProduct={simulateFromSummary}
+              onOpenCategory={(catId) => void openCategoryAnalysis(catId, true)}
+              onInspectSeller={(sq) => void inspectSeller(sq)}
+              onToggleMonitorProduct={toggleMonitorProduct}
+              isProductMonitored={isProductMonitored}
+            />
+          )}
+
+          {/* MÓDULO 4: ANÁLISE DE CATEGORIA */}
+          {activeModule === 'categorias' && (
+            <CategoryAnalysisModule
+              rootCategories={rootCategories}
+              categoryResult={categoryAnalysisResult}
+              loading={loading}
+              onSelectCategory={(catId) => void openCategoryAnalysis(catId, true)}
+              onSearchCategoryQuery={(q) => void openCategoryAnalysis(q, false)}
+              onOpenProduct={(p) => {
+                const code = p.mlbuId ?? p.itemId ?? p.productId ?? p.permalink;
+                if (code) void openAdDossier(code, false);
+              }}
+              onSimulateProduct={simulateFromSummary}
+              onInspectSeller={(sq) => void inspectSeller(sq)}
+              onUseCategoryFees={simulateCategoryFees}
+              onPickTrendKeyword={(kw) => void runProductSearch(kw, 'produtos')}
+              onToggleMonitorProduct={toggleMonitorProduct}
+              isProductMonitored={isProductMonitored}
+            />
+          )}
+
+          {/* MÓDULO 5: TENDÊNCIAS */}
+          {activeModule === 'tendencias' && (
+            <TrendsModuleView
+              data={trendsPayload}
+              loading={loadingTrends}
+              selectedCat={trendsCat}
+              onSelectCategory={setTrendsCat}
+              onSearchKeywordInProducts={(kw) => void runProductSearch(kw, 'produtos')}
+              onSearchKeywordInLocals={(kw) => void runProductSearch(kw, 'locais')}
+              onExtractMediaForKeyword={(kw) => void extractMediaFor(kw)}
+              onOpenRankingProduct={(item) => {
+                const code = item.productId ?? item.itemId ?? item.id ?? item.permalink;
+                if (code) void openAdDossier(code, false);
+              }}
+            />
+          )}
+
+          {/* MÓDULO 6: CONCORRÊNCIA & BUSCA DE VENDEDORES */}
+          {activeModule === 'vendedores' && (
+            <SellersAndCompetitorsModule
+              sellerDossier={sellerDossier}
+              loadingSeller={loadingSeller}
+              competitorDossier={competitorDossier ?? dossier}
+              loadingCompetitor={loadingCompetitor}
+              onSearchSeller={(q) => void inspectSeller(q)}
+              onSearchCompetitorAd={(q) => void compareCompetitorsForAd(q)}
+              onOpenProductCode={(code) => void openAdDossier(code, false)}
+              onToggleMonitorSeller={toggleMonitorSeller}
+              isSellerMonitored={isSellerMonitored}
+              isProductMonitored={isProductMonitored}
+              childrenCompetitorShowcase={
+                (competitorDossier ?? dossier) ? (
+                  <CompetitorShowcase
+                    rows={(competitorDossier ?? dossier)!.competitors}
+                    currentPrice={(competitorDossier ?? dossier)!.price}
+                    onAnalyzeCompetitor={(code) => void openAdDossier(code, false)}
+                  />
+                ) : null
+              }
+            />
+          )}
+
+          {/* MÓDULO 7: MONITOR */}
+          {activeModule === 'monitor' && (
+            <MonitorModuleView
+              products={monitorStore.products}
+              sellers={monitorStore.sellers}
+              refreshing={refreshingMonitor}
+              onRefreshAll={() => void refreshAllMonitored()}
+              onRefreshSingleProduct={(code) => void refreshSingleMonitoredProduct(code)}
+              onRefreshSingleSeller={(idOrNick) => void refreshSingleMonitoredSeller(idOrNick)}
+              onAddProductByQuery={(q) => void addMonitorProductByQuery(q)}
+              onAddSellerByQuery={(q) => void addMonitorSellerByQuery(q)}
+              onRemoveProduct={(code) =>
+                persistMonitor((prev) => ({
+                  ...prev,
+                  products: prev.products.filter((x) => x.code !== code),
+                }))
+              }
+              onRemoveSeller={(id) =>
+                persistMonitor((prev) => ({
+                  ...prev,
+                  sellers: prev.sellers.filter((x) => x.id !== id),
+                }))
+              }
+              onOpenProductCode={(code) => void openAdDossier(code, false)}
+              onInspectSeller={(sq) => void inspectSeller(sq)}
+            />
+          )}
+
+          {/* MÓDULO 8: ANÁLISE DA LISTAGEM (AUDITOR 0–100) */}
+          {activeModule === 'auditor' && (
+            <ListingAuditorModule
+              dossier={auditorDossier ?? dossier}
+              loading={loading}
+              monitoredProducts={monitorStore.products}
+              onAuditQuery={(q) => void openAdDossier(q, true)}
+              onOpenFullRaioX={() => {
+                if (auditorDossier && !dossier) setDossier(auditorDossier);
+                navigateTo('raiox');
+              }}
+              onSimulateMargin={simulateFromDossier}
+            />
+          )}
+
+          {/* MÓDULO 9: CLIPES E IMAGENS HD */}
+          {activeModule === 'midias' && (
+            <ClipsAndImagesModule
+              media={mediaData}
+              loading={loadingMedia}
+              onExtractMedia={(q) => void extractMediaFor(q)}
+              onOpenProductCode={(code) => void openAdDossier(code, false)}
+            />
+          )}
+
+          {/* MÓDULO 10: CALCULADORA DE MARGEM */}
+          {activeModule === 'calculadora' && (
+            <CalculatorView calc={calc} onChange={patchCalc} ee={ee} />
+          )}
+
+          {/* VISÃO DETALHADA: RAIO-X COMPLETO DO PRODUTO */}
+          {activeModule === 'raiox' && dossier && (
+            <DossierView
+              key={dossier.mlbuId ?? dossier.itemId ?? dossier.productId ?? dossier.title}
+              d={dossier}
+              backLabel={`Voltar para ${MODULE_TITLES[returnModule].split('·')[0].trim()}`}
+              onBack={() => navigateTo(returnModule)}
+              onSimulate={() => simulateFromDossier(dossier)}
+              onPickTerm={(term) => void runProductSearch(term, 'produtos')}
+              onOpenCategory={(catId) => void openCategoryAnalysis(catId, true)}
+              onAnalyzeCompetitor={(code) => void openAdDossier(code, false)}
+              onInspectSeller={(sq) => void inspectSeller(sq)}
+              onToggleMonitor={() => toggleMonitorDossier(dossier)}
+              isMonitored={isProductMonitored(dossierCode)}
+              onOpenAuditor={() => {
+                setAuditorDossier(dossier);
+                navigateTo('auditor');
+              }}
+              onExtractMedia={() => {
+                const target = dossier.mlbuId ?? dossier.itemId ?? dossier.productId ?? dossier.title;
+                void extractMediaFor(target);
+              }}
+              getBearer={getBearer}
+            />
+          )}
+        </main>
+      </div>
 
       {authOpen && (
         <OAuthModal session={session} onClose={() => setAuthOpen(false)} onDisconnect={disconnect} />

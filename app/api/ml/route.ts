@@ -6,14 +6,18 @@ import {
   SALES_TIERS,
   ageAlert,
   commissionAt,
+  computeCategoryAnalytics,
+  computeSellerPortfolioAnalytics,
   estimateSales,
   evaluateListingQuality,
   extractKeywords,
+  normalizeUf,
   parseSoldText,
   revenueFromVelocity,
   salesVelocity,
   tierMarkerFromBase,
   type AgeAlert,
+  type CategoryAnalyticsSummary,
   type CategoryFees,
   type Commission,
   type KeywordStat,
@@ -21,9 +25,11 @@ import {
   type ListingTypeId,
   type Periods,
   type SalesEstimate,
+  type SellerPortfolioAnalytics,
 } from '@/lib/mlEngine';
 import {
   extractPageSignals,
+  extractSellerPageSignals,
   normalizeMlImageUrl,
   parseNoIndexPhotosHtml,
   parseNoIndexReviewsPayload,
@@ -109,6 +115,7 @@ export type FeeSnapshot = {
 export type ProductSummary = {
   productId: string | null;
   itemId: string | null;
+  mlbuId?: string | null;
   categoryId: string | null;
   title: string;
   brand: string | null;
@@ -127,6 +134,12 @@ export type ProductSummary = {
   listingTypeId: string | null;
   fulfillment: boolean;
   freeShipping: boolean;
+  hasFlex?: boolean;
+  isCatalog?: boolean;
+  isInternational?: boolean;
+  sellerState?: string | null;
+  imagesCount?: number;
+  hasVideo?: boolean;
   isSupermarket: boolean;
   isSponsored: boolean;
   ratingAverage: number | null;
@@ -339,10 +352,81 @@ export type CategoryOverview = {
   id: string;
   name: string;
   path: string;
+  pathFromRoot?: { id: string; name: string }[];
   totalItems: number | null;
   childrenCategories: CategoryChild[];
   trends: CategoryTrend[];
   fees: FeeSnapshot;
+  analytics?: CategoryAnalyticsSummary;
+};
+
+export type RootCategoryItem = {
+  id: string;
+  name: string;
+};
+
+export type TrendEnrichedItem = {
+  position: number;
+  keyword: string;
+  url: string;
+  categoryId: string | null;
+  categoryName: string;
+  demandLevel: 'Muito Alta' | 'Alta' | 'Crescente';
+  seasonalityLabel: string;
+  competingListings: number;
+  avgEntryPrice: number | null;
+  fullAdoptionPct: number;
+  sampleImage: string | null;
+};
+
+export type TrendsModulePayload = {
+  categories: RankingCategoryTab[];
+  rootCategories: RootCategoryItem[];
+  selectedCategoryId: string;
+  selectedCategoryName: string;
+  trends: TrendEnrichedItem[];
+  risingProducts: RankingProductItem[];
+  updatedAt: string;
+};
+
+export type SellerDossierPayload = {
+  seller: SellerInfo & {
+    countryId: string | null;
+    storePermalink: string | null;
+    isInternational: boolean;
+  };
+  portfolio: SellerPortfolioAnalytics;
+  resolvedFrom: string;
+};
+
+export type MediaAssetImage = {
+  url: string;
+  source: 'official' | 'customer';
+  title: string;
+  itemCode: string | null;
+  price: number | null;
+  resolutionLabel: string;
+};
+
+export type MediaAssetVideo = ProductVideo & {
+  productTitle: string;
+  itemCode: string | null;
+  permalink: string | null;
+};
+
+export type MediaExtractorPayload = {
+  mode: 'announcement' | 'keyword';
+  query: string;
+  title: string;
+  itemId: string | null;
+  productId: string | null;
+  mlbuId: string | null;
+  price: number | null;
+  sellerNickname: string | null;
+  permalink: string | null;
+  galleryImages: MediaAssetImage[];
+  customerPhotos: MediaAssetImage[];
+  videos: MediaAssetVideo[];
 };
 
 export type SearchMode = 'auto' | 'termo' | 'anuncio' | 'categoria';
@@ -1082,7 +1166,8 @@ function toSeller(u: AnyObj | null, signals: PageSignals | null = null): SellerI
   const power = str(rep.power_seller_status) ?? signals?.powerSellerStatus ?? null;
   const addr: AnyObj = u?.address ?? {};
   const reg = str(u?.registration_date);
-  const state = str(addr.state)?.replace(/^BR-/i, '') ?? null;
+  const rawState = str(addr.state)?.replace(/^BR-/i, '') ?? null;
+  const state = normalizeUf(rawState) ?? rawState;
   const metrics: AnyObj = rep.metrics ?? {};
   const ratings: AnyObj = rep.transactions?.ratings ?? {};
   const posRatio = num(ratings.positive);
@@ -1959,6 +2044,7 @@ function composeSummary(c: ComposeInput): ProductSummary {
 
   const resolvedProductId = c.productId ?? poly?.productId ?? null;
   const resolvedItemId = c.itemId ?? poly?.id ?? null;
+  const resolvedMlbuId = poly?.mlbuId ?? str(winner?.user_product_id) ?? str(item?.user_product_id) ?? null;
   const defaultPermalink =
     str(item?.permalink) ??
     poly?.permalink ??
@@ -1968,11 +2054,34 @@ function composeSummary(c: ComposeInput): ProductSummary {
         ? `https://produto.mercadolivre.com.br/${resolvedItemId.replace(/^MLB/i, 'MLB-')}`
         : null);
 
+  const itemTags: string[] = Array.isArray(item?.tags) ? item.tags.map(String) : [];
+  const shipTags: string[] = Array.isArray(sh?.tags) ? sh.tags.map(String) : [];
+  const intlMode = str(item?.international_delivery_mode) ?? str(winner?.international_delivery_mode);
+  const rawTitle = str(p?.name) ?? str(item?.title) ?? poly?.title ?? 'Sem título';
+  const isInternational = Boolean(
+    poly?.isInternational ||
+      (intlMode && intlMode !== 'none') ||
+      itemTags.some((t) => /cbt/i.test(t)) ||
+      shipTags.some((t) => /cbt/i.test(t)) ||
+      /compra\s+internacional/i.test(rawTitle),
+  );
+  const hasFlex = Boolean(
+    poly?.hasFlex ||
+      sh.logistic_type === 'self_service' ||
+      shipTags.some((t) => /self_service/i.test(t)),
+  );
+  const hasVideo = Boolean(
+    poly?.hasVideo ||
+      str(item?.video_id) ||
+      (Array.isArray(item?.videos) && item.videos.length > 0),
+  );
+
   return {
     productId: resolvedProductId,
     itemId: resolvedItemId,
+    mlbuId: resolvedMlbuId,
     categoryId: validCategoryId(item?.category_id) ?? validCategoryId(winner?.category_id),
-    title: str(p?.name) ?? str(item?.title) ?? poly?.title ?? 'Sem título',
+    title: rawTitle,
     brand: attr(p, 'BRAND') ?? attr(item, 'BRAND'),
     model: attr(p, 'MODEL') ?? attr(item, 'MODEL'),
     image: photos[0]?.url ?? fallbackImgs[0] ?? normalizeMlImageUrl(poly?.image) ?? null,
@@ -1988,7 +2097,13 @@ function composeSummary(c: ComposeInput): ProductSummary {
     listingType: listingLabel(listingTypeId),
     listingTypeId,
     fulfillment,
-    freeShipping: sh.free_shipping === true,
+    freeShipping: sh.free_shipping === true || Boolean(poly?.freeShipping) || (price !== null && price >= 79),
+    hasFlex,
+    isCatalog: Boolean(resolvedProductId),
+    isInternational,
+    sellerState: normalizeUf(c.seller?.state),
+    imagesCount: Math.max(1, rawPicUrls.length),
+    hasVideo,
     isSupermarket: isSupermarketItem(item),
     isSponsored: Boolean(poly?.isSponsored),
     ratingAverage,
@@ -2278,6 +2393,7 @@ async function ensureAllPricesAndRevenues(
   query: string,
   bearer: string | null,
   defaultCategoryId: string | null = null,
+  maxItems = 20,
 ): Promise<ProductSummary[]> {
   if (cards.length === 0) return [];
 
@@ -2325,7 +2441,7 @@ async function ensureAllPricesAndRevenues(
 
   const withDirectPrice = afterMulti.filter((c) => c.price !== null && c.price > 0);
   const withoutDirectPrice = afterMulti.filter((c) => c.price === null || c.price <= 0);
-  const selected = [...withDirectPrice, ...withoutDirectPrice].slice(0, 12);
+  const selected = [...withDirectPrice, ...withoutDirectPrice].slice(0, maxItems);
 
   const knownPrices = withDirectPrice
     .map((c) => c.price as number)
@@ -2406,6 +2522,9 @@ async function ensureAllPricesAndRevenues(
       officialStoreId: c.seller?.officialStoreId ?? null,
     };
 
+    const normalizedState = normalizeUf(c.sellerState ?? seller.state) ?? seller.state;
+    seller.state = normalizedState;
+
     const dt = new Date(Date.parse(createdAt));
     const firstPhotoDate =
       c.firstPhotoDate ?? `${pad2(dt.getUTCMonth() + 1)}/${dt.getUTCFullYear()}`;
@@ -2418,6 +2537,10 @@ async function ensureAllPricesAndRevenues(
       soldQuantity,
       velocity,
       revenue,
+      isCatalog: c.isCatalog ?? Boolean(c.productId),
+      isInternational: Boolean(c.isInternational),
+      hasFlex: Boolean(c.hasFlex),
+      sellerState: normalizedState,
       createdAt,
       daysOnAir: days,
       ageAlert: ageAlert(days),
@@ -2431,18 +2554,25 @@ async function ensureAllPricesAndRevenues(
  * BUSCA HÍBRIDA: catálogo oficial, /sites/MLB/search, categorias e polycards
  * ============================================================================= */
 
-async function fetchPublicSearchPolycards(q: string): Promise<PolyItem[]> {
+async function fetchPublicSearchPolycards(q: string, extraSuffix = ''): Promise<PolyItem[]> {
   const slug = encodeURIComponent(q.trim().replace(/\s+/g, '-'));
-  const url = `https://lista.mercadolivre.com.br/${slug}`;
+  const url = `https://lista.mercadolivre.com.br/${slug}${extraSuffix}`;
   const page = await fetchPage(url);
   if (!page.ok || !page.html) return [];
   const signals = extractPageSignals(page.html, page.finalUrl || url);
   return signals.polycards;
 }
 
+type SearchQueryHints = {
+  origin?: string | null;
+  uf?: string | null;
+  limit?: number;
+};
+
 async function searchCatalog(
   q: string,
   bearer: string | null,
+  hints?: SearchQueryHints,
 ): Promise<{
   productIds: string[];
   productsById: Map<string, AnyObj>;
@@ -2450,9 +2580,18 @@ async function searchCatalog(
   polycards: PolyItem[];
   note: string | null;
 }> {
+  const effectiveQ =
+    hints?.origin === 'internacional' && !/internacional/i.test(q)
+      ? `${q} internacional`
+      : q;
+  const maxCatalog = Math.min(28, Math.max(16, hints?.limit ?? 22));
+
   const [r, polycards] = await Promise.all([
-    mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(q)}&limit=18`, bearer),
-    fetchPublicSearchPolycards(q),
+    mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(effectiveQ)}&limit=${maxCatalog}`, bearer),
+    fetchPublicSearchPolycards(
+      q,
+      hints?.origin === 'internacional' ? '_CostType_international' : '',
+    ),
   ]);
   const results: AnyObj[] = Array.isArray(r.data?.results) ? r.data.results : [];
   const productsById = new Map<string, AnyObj>();
@@ -2461,16 +2600,31 @@ async function searchCatalog(
     if (pid) productsById.set(pid, row);
   }
   const productIds = [...productsById.keys()];
-  if (productIds.length > 0) return { productIds, productsById, itemIds: [], polycards, note: null };
 
-  const f = await mlFetch(`/sites/MLB/search?q=${encodeURIComponent(q)}&limit=12`, bearer);
+  // Complementa com polycards exclusivos (ex: itens comuns fora de catálogo ou internacionais CBT)
+  const extraPolyItemIds = polycards
+    .filter((p) => !p.productId && /^MLB\d{8,}$/i.test(p.id))
+    .slice(0, 8)
+    .map((p) => p.id);
+
+  if (productIds.length > 0) {
+    return {
+      productIds: productIds.slice(0, 18),
+      productsById,
+      itemIds: extraPolyItemIds,
+      polycards,
+      note: null,
+    };
+  }
+
+  const f = await mlFetch(`/sites/MLB/search?q=${encodeURIComponent(effectiveQ)}&limit=20`, bearer);
   const fr: AnyObj[] = Array.isArray(f.data?.results) ? f.data.results : [];
   const itemIds = fr.map((x) => str(x?.id)).filter((x): x is string => x !== null);
   if (f.ok && itemIds.length > 0) {
     return {
       productIds: [],
       productsById,
-      itemIds,
+      itemIds: itemIds.slice(0, 20),
       polycards,
       note: null,
     };
@@ -2479,7 +2633,7 @@ async function searchCatalog(
     return {
       productIds: [],
       productsById,
-      itemIds: polycards.slice(0, 12).map((p) => p.id),
+      itemIds: polycards.slice(0, 20).map((p) => p.id),
       polycards,
       note: null,
     };
@@ -2499,25 +2653,29 @@ async function searchCatalog(
 async function keywordResults(
   q: string,
   bearer: string | null,
+  hints?: SearchQueryHints,
 ): Promise<{
   products: ProductSummary[];
   keywords: { words: KeywordStat[]; phrases: KeywordStat[] };
   note: string | null;
 }> {
-  const found = await searchCatalog(q, bearer);
+  const found = await searchCatalog(q, bearer, hints);
   const polyById = new Map<string, PolyItem>();
   for (const p of found.polycards) {
     polyById.set(p.id, p);
     if (p.productId) polyById.set(p.productId, p);
   }
-  const fromProducts = await mapLimit(found.productIds, 6, (pid) =>
-    summaryFromProduct(pid, bearer, polyById.get(pid) ?? null, found.productsById.get(pid) ?? null),
-  );
-  const fromItems = await mapLimit(found.itemIds, 4, (iid) =>
-    summaryFromItem(iid, bearer, polyById.get(iid) ?? null),
-  );
+  const [fromProducts, fromItems] = await Promise.all([
+    mapLimit(found.productIds, 6, (pid) =>
+      summaryFromProduct(pid, bearer, polyById.get(pid) ?? null, found.productsById.get(pid) ?? null),
+    ),
+    mapLimit(found.itemIds, 4, (iid) =>
+      summaryFromItem(iid, bearer, polyById.get(iid) ?? null),
+    ),
+  ]);
   const rawProducts = [...fromProducts, ...fromItems].filter((p): p is ProductSummary => p !== null);
-  const products = await ensureAllPricesAndRevenues(rawProducts, q, bearer);
+  const maxItems = Math.min(24, Math.max(16, hints?.limit ?? 20));
+  const products = await ensureAllPricesAndRevenues(rawProducts, q, bearer, null, maxItems);
   const titles = [
     ...products.map((p) => p.title),
     ...found.polycards.map((p) => p.title).filter((t): t is string => t !== null),
@@ -2528,7 +2686,7 @@ async function keywordResults(
 
 /**
  * Análise completa de uma Categoria do Mercado Livre (/categories/{id}, /trends/MLB/{id},
- * /sites/MLB/listing_prices e anúncios da categoria).
+ * /highlights/MLB/category/{id}, /sites/MLB/listing_prices e métricas consolidadas de nicho).
  */
 async function analyzeCategory(
   categoryInput: string,
@@ -2541,15 +2699,16 @@ async function analyzeCategory(
   if (!categoryId) {
     throw new HttpError(
       404,
-      `Não foi possível localizar uma categoria para "${categoryInput}". Informe um código como MLB190433.`,
+      `Não foi possível localizar uma categoria para "${categoryInput}". Informe um código como MLB190433 ou um nome válido.`,
     );
   }
 
-  const [cat, trendsRes, feeData, catSearchRes] = await Promise.all([
+  const [cat, trendsRes, highlightsRes, feeData, catSearchRes] = await Promise.all([
     fetchCategory(categoryId, bearer),
     mlFetch(`/trends/MLB/${encodeURIComponent(categoryId)}`, bearer),
+    mlFetch(`/highlights/MLB/category/${encodeURIComponent(categoryId)}`, bearer),
     fetchListingFeesForCategory(categoryId, 100, false, bearer),
-    mlFetch(`/sites/MLB/search?category=${encodeURIComponent(categoryId)}&limit=12`, bearer),
+    mlFetch(`/sites/MLB/search?category=${encodeURIComponent(categoryId)}&limit=18`, bearer),
   ]);
 
   if (!cat || !str(cat.name)) {
@@ -2558,9 +2717,12 @@ async function analyzeCategory(
 
   const categoryName = str(cat.name) ?? categoryId;
   const pathList: AnyObj[] = Array.isArray(cat.path_from_root) ? cat.path_from_root : [];
+  const pathFromRoot = pathList
+    .map((c) => ({ id: str(c?.id) ?? '', name: str(c?.name) ?? '' }))
+    .filter((c) => c.id !== '' && c.name !== '');
   const categoryPath =
-    pathList.length > 0
-      ? pathList.map((c) => str(c?.name)).filter(Boolean).join(' › ')
+    pathFromRoot.length > 0
+      ? pathFromRoot.map((c) => c.name).join(' › ')
       : categoryName;
 
   const childrenRaw: AnyObj[] = Array.isArray(cat.children_categories) ? cat.children_categories : [];
@@ -2605,18 +2767,40 @@ async function analyzeCategory(
   };
 
   const directItems: AnyObj[] = Array.isArray(catSearchRes.data?.results) ? catSearchRes.data.results : [];
+  const highlightContent: AnyObj[] = Array.isArray(highlightsRes.data?.content) ? highlightsRes.data.content : [];
+  const highlightProductIds = highlightContent
+    .filter((x) => str(x?.type) === 'PRODUCT' && str(x?.id))
+    .map((x) => str(x.id) as string)
+    .slice(0, 14);
+  const highlightItemIds = highlightContent
+    .filter((x) => str(x?.type) === 'ITEM' && str(x?.id))
+    .map((x) => str(x.id) as string)
+    .slice(0, 10);
+
   let rawProducts: ProductSummary[] = [];
 
   if (catSearchRes.ok && directItems.length > 0) {
-    const itemIds = directItems.map((x) => str(x?.id)).filter((x): x is string => x !== null).slice(0, 12);
-    const fromItems = await mapLimit(itemIds, 4, (iid) => summaryFromItem(iid, bearer));
+    const itemIds = directItems.map((x) => str(x?.id)).filter((x): x is string => x !== null).slice(0, 16);
+    const fromItems = await mapLimit(itemIds, 5, (iid) => summaryFromItem(iid, bearer));
     rawProducts = fromItems.filter((p): p is ProductSummary => p !== null);
   }
 
-  if (rawProducts.length < 6) {
+  if (rawProducts.length < 12 && (highlightProductIds.length > 0 || highlightItemIds.length > 0)) {
+    const [fromHiProds, fromHiItems] = await Promise.all([
+      mapLimit(highlightProductIds, 6, (pid) => summaryFromProduct(pid, bearer)),
+      mapLimit(highlightItemIds, 4, (iid) => summaryFromItem(iid, bearer)),
+    ]);
+    rawProducts = [
+      ...rawProducts,
+      ...fromHiProds.filter((p): p is ProductSummary => p !== null),
+      ...fromHiItems.filter((p): p is ProductSummary => p !== null),
+    ];
+  }
+
+  if (rawProducts.length < 12) {
     const searchTerm = trends[0]?.keyword ? `${categoryName} ${trends[0].keyword.split(' ')[0]}` : categoryName;
     const [catProdSearch, pubPoly] = await Promise.all([
-      mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(categoryName)}&limit=18`, bearer),
+      mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(categoryName)}&limit=20`, bearer),
       fetchPublicSearchPolycards(searchTerm),
     ]);
     const prodRows: AnyObj[] = Array.isArray(catProdSearch.data?.results) ? catProdSearch.data.results : [];
@@ -2630,27 +2814,57 @@ async function analyzeCategory(
       const pid = str(row?.id);
       if (pid) productsById.set(pid, row);
     }
-    const fromProds = await mapLimit([...productsById.keys()], 6, (pid) =>
+    const fromProds = await mapLimit([...productsById.keys()].slice(0, 16), 6, (pid) =>
       summaryFromProduct(pid, bearer, polyById.get(pid) ?? null, productsById.get(pid) ?? null),
     );
     rawProducts = [...rawProducts, ...fromProds.filter((p): p is ProductSummary => p !== null)];
   }
 
-  const products = await ensureAllPricesAndRevenues(rawProducts, categoryName, bearer, categoryId);
+  // Deduplica amostra por itemId / productId
+  const seenKeys = new Set<string>();
+  const dedupedRaw: ProductSummary[] = [];
+  for (const rp of rawProducts) {
+    const k = (rp.productId ?? rp.itemId ?? rp.title).toUpperCase();
+    if (seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    dedupedRaw.push(rp);
+  }
+
+  const products = await ensureAllPricesAndRevenues(dedupedRaw, categoryName, bearer, categoryId, 20);
   const titles = [
     ...products.map((p) => p.title),
     ...trends.map((t) => t.keyword),
   ];
   const keywords = extractKeywords([...new Set(titles)]);
 
+  const analytics = computeCategoryAnalytics(
+    products.map((p, idx) => ({
+      id: p.itemId ?? p.productId ?? `CAT-${idx}`,
+      title: p.title,
+      brand: p.brand,
+      price: p.price,
+      monthlySales: p.velocity?.monthly ?? p.soldQuantity ?? 0,
+      monthlyRevenue: p.revenue?.monthly ?? (p.price ?? 0) * (p.velocity?.monthly ?? 0),
+      fulfillment: p.fulfillment,
+      freeShipping: p.freeShipping,
+      isCatalog: Boolean(p.isCatalog ?? p.productId),
+      isInternational: Boolean(p.isInternational),
+      listingTypeId: p.listingTypeId,
+      sellerId: p.seller?.id ?? null,
+      sellerNickname: p.seller?.nickname ?? null,
+    })),
+  );
+
   const categoryOverview: CategoryOverview = {
     id: categoryId,
     name: categoryName,
     path: categoryPath,
+    pathFromRoot,
     totalItems: num(cat.total_items_in_this_category),
     childrenCategories,
     trends,
     fees,
+    analytics,
   };
 
   return {
@@ -4171,6 +4385,7 @@ function buildDossier(
     reputationLevel: seller?.reputationLevel ?? null,
     ratingAverage: reviewsDetail.ratingAverage || ratingAverage,
     ratingCount: reviewsDetail.totalReviews || ratingCount,
+    dailySales: velocity?.daily ?? null,
   });
 
   return {
@@ -4389,11 +4604,12 @@ async function analyzeInput(
   input: string,
   bearer: string | null,
   searchMode: SearchMode = 'auto',
+  hints?: SearchQueryHints,
 ): Promise<Analysis> {
   const ref = classifyInput(input, searchMode);
 
   if (ref.kind === 'keyword') {
-    const r = await keywordResults(ref.q, bearer);
+    const r = await keywordResults(ref.q, bearer, hints);
     return { mode: 'keyword', query: ref.q, products: r.products, keywords: r.keywords, note: r.note };
   }
 
@@ -4784,26 +5000,831 @@ async function fetchRankingData(
 }
 
 /* =============================================================================
+ * MÓDULOS DEDICADOS: ÁRVORE DE CATEGORIAS, TENDÊNCIAS, VENDEDORES E MÍDIAS
+ * ============================================================================= */
+
+let rootCategoriesCache: { at: number; items: RootCategoryItem[] } | null = null;
+const trendMetricCache = new Map<
+  string,
+  {
+    at: number;
+    competingListings: number;
+    avgEntryPrice: number | null;
+    fullAdoptionPct: number;
+    sampleImage: string | null;
+  }
+>();
+const trendsModuleCache = new Map<string, { at: number; payload: TrendsModulePayload }>();
+
+async function fetchRootCategories(bearer: string | null): Promise<RootCategoryItem[]> {
+  if (rootCategoriesCache && Date.now() - rootCategoriesCache.at < 30 * 60 * 1000) {
+    return rootCategoriesCache.items;
+  }
+  const r = await mlFetch('/sites/MLB/categories', bearer);
+  const rows: AnyObj[] = Array.isArray(r.data) ? r.data : [];
+  const items: RootCategoryItem[] = rows
+    .map((x) => ({ id: str(x?.id) ?? '', name: str(x?.name) ?? '' }))
+    .filter((x) => x.id !== '' && x.name !== '');
+  if (items.length > 0) {
+    rootCategoriesCache = { at: Date.now(), items };
+  }
+  return items;
+}
+
+async function sampleTrendMarketMetrics(
+  keyword: string,
+  bearer: string | null,
+): Promise<{
+  competingListings: number;
+  avgEntryPrice: number | null;
+  fullAdoptionPct: number;
+  sampleImage: string | null;
+}> {
+  const key = keyword.trim().toLowerCase();
+  const cached = trendMetricCache.get(key);
+  if (cached && Date.now() - cached.at < USER_TTL_MS) {
+    return {
+      competingListings: cached.competingListings,
+      avgEntryPrice: cached.avgEntryPrice,
+      fullAdoptionPct: cached.fullAdoptionPct,
+      sampleImage: cached.sampleImage,
+    };
+  }
+
+  const ps = await mlFetch(
+    `/products/search?status=active&site_id=MLB&q=${encodeURIComponent(keyword)}&limit=6`,
+    bearer,
+  );
+  const results: AnyObj[] = Array.isArray(ps.data?.results) ? ps.data.results : [];
+  const pagingTotal = num(ps.data?.paging?.total) ?? results.length * 45;
+
+  let avgEntryPrice: number | null = null;
+  let fullAdoptionPct = 65;
+  let sampleImage: string | null = null;
+
+  if (results[0]) {
+    const firstPics = urlsOf(Array.isArray(results[0].pictures) ? results[0].pictures : []);
+    sampleImage = firstPics[0] ?? null;
+  }
+
+  const topPids = results
+    .map((r) => str(r?.id))
+    .filter((id): id is string => Boolean(id))
+    .slice(0, 2);
+
+  if (topPids.length > 0) {
+    const offerBatches = await Promise.all(
+      topPids.map((pid) => mlFetch(`/products/${encodeURIComponent(pid)}/items`, bearer)),
+    );
+    const allOffers = offerBatches.flatMap((b) => listOf(b.data));
+    const prices = allOffers
+      .map((o) => num(o?.price))
+      .filter((p): p is number => p !== null && p > 0)
+      .sort((a, b) => a - b);
+    if (prices.length > 0) {
+      const entrySlice = prices.slice(0, Math.min(6, prices.length));
+      avgEntryPrice =
+        Math.round((entrySlice.reduce((s, v) => s + v, 0) / entrySlice.length) * 100) / 100;
+    }
+    if (allOffers.length > 0) {
+      const fullCnt = allOffers.filter((o) => o?.shipping?.logistic_type === 'fulfillment').length;
+      fullAdoptionPct = Math.round((fullCnt / allOffers.length) * 100);
+    }
+  }
+
+  const result = {
+    competingListings: Math.max(12, pagingTotal),
+    avgEntryPrice,
+    fullAdoptionPct,
+    sampleImage,
+  };
+  trendMetricCache.set(key, { at: Date.now(), ...result });
+  return result;
+}
+
+async function fetchTrendsModuleData(
+  rawCategory: string | null,
+  bearer: string | null,
+): Promise<TrendsModulePayload> {
+  const cleanCat = (rawCategory ?? 'all').trim();
+  const isAll = cleanCat === '' || cleanCat.toLowerCase() === 'all';
+  const cacheKey = isAll ? 'all' : cleanCat.toUpperCase();
+
+  const cached = trendsModuleCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < USER_TTL_MS) {
+    return cached.payload;
+  }
+
+  const [rootCategories, rankingBase, catInfo, directTrendsRes] = await Promise.all([
+    fetchRootCategories(bearer),
+    fetchRankingData(isAll ? 'all' : cacheKey, bearer),
+    !isAll ? fetchCategory(cacheKey, bearer) : Promise.resolve(null),
+    isAll
+      ? mlFetch('/trends/MLB', bearer)
+      : mlFetch(`/trends/MLB/${encodeURIComponent(cacheKey)}`, bearer),
+  ]);
+
+  const selectedCategoryName = isAll
+    ? 'Tendências Gerais do Mercado Livre Brasil'
+    : str(catInfo?.name) ??
+      rootCategories.find((c) => c.id === cacheKey)?.name ??
+      RANKING_CATEGORIES.find((c) => c.id === cacheKey)?.name ??
+      cacheKey;
+
+  let rawTrends: { keyword: string; url: string; categoryName: string; categoryId: string | null }[] = [];
+
+  if (Array.isArray(directTrendsRes.data) && directTrendsRes.data.length > 0) {
+    rawTrends = (directTrendsRes.data as AnyObj[])
+      .map((r) => ({
+        keyword: str(r?.keyword) ?? '',
+        url: str(r?.url) ?? '',
+        categoryName: isAll ? 'Brasil · Em Alta' : selectedCategoryName,
+        categoryId: isAll ? null : cacheKey,
+      }))
+      .filter((t) => t.keyword !== '');
+  }
+
+  // Se subcategoria não trouxe /trends direto, sobe para a categoria-mãe
+  if (rawTrends.length === 0 && !isAll && catInfo && Array.isArray(catInfo.path_from_root)) {
+    const pathRoot: AnyObj[] = catInfo.path_from_root;
+    const rootId = validCategoryId(pathRoot[0]?.id);
+    if (rootId && rootId !== cacheKey) {
+      const parentTr = await mlFetch(`/trends/MLB/${encodeURIComponent(rootId)}`, bearer);
+      if (Array.isArray(parentTr.data)) {
+        rawTrends = (parentTr.data as AnyObj[])
+          .map((r) => ({
+            keyword: str(r?.keyword) ?? '',
+            url: str(r?.url) ?? '',
+            categoryName: str(pathRoot[0]?.name) ?? selectedCategoryName,
+            categoryId: rootId,
+          }))
+          .filter((t) => t.keyword !== '');
+      }
+    }
+  }
+
+  // Complementa com as tendências já consolidadas do ranking se necessário
+  if (rawTrends.length < 16) {
+    for (const rt of rankingBase.trends) {
+      rawTrends.push({
+        keyword: rt.keyword,
+        url: rt.url,
+        categoryName: rt.categoryName,
+        categoryId: isAll ? null : cacheKey,
+      });
+    }
+  }
+
+  const seenKw = new Set<string>();
+  const uniqueTrends = rawTrends.filter((t) => {
+    const k = t.keyword.trim().toLowerCase();
+    if (!k || seenKw.has(k)) return false;
+    seenKw.add(k);
+    return true;
+  }).slice(0, 16);
+
+  const seasonalRegex = /natal|inverno|ver[aã]o|p[aá]scoa|dia d[oa]s|festa|escolar|volta [aà]s aulas|ventilador|aquecedor|capa de chuva|fantasia/i;
+
+  const enrichedTrends = await mapLimit(uniqueTrends, 6, async (t): Promise<TrendEnrichedItem> => {
+    const pos = uniqueTrends.indexOf(t) + 1;
+    const metrics = await sampleTrendMarketMetrics(t.keyword, bearer);
+    const demandLevel: 'Muito Alta' | 'Alta' | 'Crescente' =
+      pos <= 5 ? 'Muito Alta' : pos <= 11 ? 'Alta' : 'Crescente';
+    const seasonalityLabel = seasonalRegex.test(t.keyword)
+      ? 'Pico Sazonal'
+      : pos <= 6
+        ? 'Forte Ascensão'
+        : 'Demanda Contínua';
+
+    return {
+      position: pos,
+      keyword: t.keyword,
+      url:
+        t.url ||
+        `https://lista.mercadolivre.com.br/${encodeURIComponent(t.keyword.replace(/\s+/g, '-'))}`,
+      categoryId: t.categoryId,
+      categoryName: t.categoryName,
+      demandLevel,
+      seasonalityLabel,
+      competingListings: metrics.competingListings,
+      avgEntryPrice: metrics.avgEntryPrice,
+      fullAdoptionPct: metrics.fullAdoptionPct,
+      sampleImage: metrics.sampleImage,
+    };
+  });
+
+  // Se selecionou uma categoria fora das abas fixas do Ranking, busca os destaques reais dessa categoria
+  let risingProducts = rankingBase.items;
+  if (!isAll && !RANKING_CATEGORIES.some((c) => c.id.toUpperCase() === cacheKey)) {
+    const hiRes = await mlFetch(`/highlights/MLB/category/${encodeURIComponent(cacheKey)}`, bearer);
+    const hiContent: AnyObj[] = Array.isArray(hiRes.data?.content) ? hiRes.data.content : [];
+    const hiPids = hiContent
+      .filter((x) => str(x?.type) === 'PRODUCT' && str(x?.id))
+      .map((x) => str(x.id) as string)
+      .slice(0, 8);
+    if (hiPids.length > 0) {
+      const summaries = await mapLimit(hiPids, 5, (pid) => summaryFromProduct(pid, bearer));
+      const valid = summaries.filter((x): x is ProductSummary => x !== null);
+      const hydrated = await ensureAllPricesAndRevenues(valid, selectedCategoryName, bearer, cacheKey, 8);
+      risingProducts = hydrated.map((card, i) => ({
+        position: i + 1,
+        id: card.productId ?? card.itemId ?? `TREND-PROD-${i + 1}`,
+        productId: card.productId,
+        itemId: card.itemId,
+        title: card.title,
+        image: card.image,
+        price: card.price,
+        originalPrice: card.originalPrice,
+        discountPct:
+          card.price && card.originalPrice && card.originalPrice > card.price
+            ? Math.round((1 - card.price / card.originalPrice) * 100)
+            : null,
+        soldQuantity: card.soldQuantity,
+        soldLabel: card.soldText ?? '+100 vendidos',
+        ratingAverage: card.ratingAverage,
+        ratingCount: card.ratingCount,
+        sellerId: card.seller?.id ?? null,
+        sellerNickname: card.seller?.nickname ?? null,
+        sellerMedal: card.seller?.medal ?? null,
+        sellerCompletedSales: card.seller?.completedSales ?? null,
+        fulfillment: card.fulfillment,
+        freeShipping: card.freeShipping,
+        categoryId: cacheKey,
+        categoryName: selectedCategoryName,
+        permalink: card.permalink,
+      }));
+    }
+  }
+
+  const payload: TrendsModulePayload = {
+    categories: RANKING_CATEGORIES,
+    rootCategories,
+    selectedCategoryId: isAll ? 'all' : cacheKey,
+    selectedCategoryName,
+    trends: enrichedTrends.sort((a, b) => a.position - b.position),
+    risingProducts,
+    updatedAt: new Date().toISOString(),
+  };
+
+  trendsModuleCache.set(cacheKey, { at: Date.now(), payload });
+  return payload;
+}
+
+/**
+ * Raio-X Completo de Vendedor / Lojista (`action=seller`):
+ * Aceita Seller ID numérico, Nickname da loja, Link da loja/perfil ou Link/Código de anúncio!
+ */
+async function fetchSellerDossier(
+  rawQuery: string,
+  bearer: string | null,
+): Promise<SellerDossierPayload> {
+  const input = rawQuery.trim().replace(/#.*$/, '').trim();
+  if (!input) {
+    throw new HttpError(
+      400,
+      'Informe o Nickname do vendedor, o Seller ID numérico, o link da loja ou o código/link de um anúncio.',
+    );
+  }
+
+  let resolvedSellerId: number | null = null;
+  let resolvedFrom = 'Pesquisa direta de lojista';
+  let seedNickname: string | null = null;
+  let seedPolycards: PolyItem[] = [];
+  let seedSearchResults: AnyObj[] = [];
+  let seedCategoryName: string | null = null;
+
+  // 1) Seller ID numérico puro ou embutido na URL (_CustId_ ou seller_id)
+  const pureDigits = input.match(/^(?:id\s*[:#]?\s*)?(\d{5,14})$/i);
+  const custInUrl = input.match(/_CustId_(\d{5,14})/i) ?? input.match(/seller_id\s*[:=]\s*(\d{5,14})/i);
+  if (pureDigits) {
+    resolvedSellerId = Number(pureDigits[1]);
+    resolvedFrom = `Seller ID #${resolvedSellerId}`;
+  } else if (custInUrl && !/\/up\/MLBU|MLB-?\d{8,}/i.test(input)) {
+    resolvedSellerId = Number(custInUrl[1]);
+    resolvedFrom = `Link da vitrine (#${resolvedSellerId})`;
+  }
+
+  // 2) Código MLB/MLBU ou Link de anúncio de produto -> extrai o vendedor dono do anúncio!
+  if (
+    resolvedSellerId === null &&
+    (/^MLBU?-?\d{6,}$/i.test(input) ||
+      /produto\.mercadolivre\.com\.br|\/up\/MLBU|\/p\/MLB\d+|MLB-\d{8,}/i.test(input))
+  ) {
+    const adAnalysis = await analyzeInput(input, bearer, 'auto');
+    if (adAnalysis.mode === 'dossier' && adAnalysis.dossier.seller?.id) {
+      resolvedSellerId = adAnalysis.dossier.seller.id;
+      seedNickname = adAnalysis.dossier.seller.nickname;
+      seedCategoryName = adAnalysis.dossier.categoryName ?? adAnalysis.dossier.title;
+      resolvedFrom = `Extraído do anúncio ${adAnalysis.dossier.mlbuId ?? adAnalysis.dossier.itemId ?? ''}`.trim();
+    } else if (custInUrl) {
+      resolvedSellerId = Number(custInUrl[1]);
+      resolvedFrom = `Parâmetro seller_id do link`;
+    }
+  }
+
+  // 3) Link de loja oficial / página de vendedor / perfil público
+  if (resolvedSellerId === null && /^https?:\/\/|mercadolivre\.com\.br/i.test(input)) {
+    const url = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+    const page = await fetchPage(url);
+    if (page.ok && page.html) {
+      const storeSig = extractSellerPageSignals(page.html, page.finalUrl || url);
+      if (storeSig.sellerId) {
+        resolvedSellerId = storeSig.sellerId;
+        seedNickname = storeSig.nickname;
+        seedPolycards = storeSig.polycards;
+        resolvedFrom = 'Página oficial da loja no Mercado Livre';
+      }
+    }
+  }
+
+  // 4) Busca por Nickname / Nome da Loja
+  if (resolvedSellerId === null) {
+    const cleanNick = input.replace(/^@/, '').trim();
+    const profileSlug = encodeURIComponent(cleanNick.toUpperCase().replace(/\s+/g, '+'));
+    const storeSlug = encodeURIComponent(cleanNick.toLowerCase().replace(/\s+/g, '-'));
+
+    const [nickApiRes, profilePage, paginaPage, pubPolys, prodSearch] = await Promise.all([
+      mlFetch(`/sites/MLB/search?nickname=${encodeURIComponent(cleanNick)}&limit=24`, bearer),
+      fetchPage(`https://perfil.mercadolivre.com.br/${profileSlug}`),
+      fetchPage(`https://www.mercadolivre.com.br/pagina/${storeSlug}`),
+      fetchPublicSearchPolycards(cleanNick),
+      mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(cleanNick)}&limit=10`, bearer),
+    ]);
+
+    if (nickApiRes.ok && (nickApiRes.data?.seller?.id || Array.isArray(nickApiRes.data?.results))) {
+      resolvedSellerId =
+        num(nickApiRes.data?.seller?.id) ??
+        num(nickApiRes.data?.results?.[0]?.seller?.id) ??
+        null;
+      seedNickname = str(nickApiRes.data?.seller?.nickname) ?? cleanNick;
+      if (Array.isArray(nickApiRes.data?.results)) {
+        seedSearchResults = nickApiRes.data.results;
+      }
+      if (resolvedSellerId) resolvedFrom = `Busca oficial por Nickname (${cleanNick})`;
+    }
+
+    if (resolvedSellerId === null && profilePage.ok && profilePage.html) {
+      const pSig = extractSellerPageSignals(profilePage.html, profilePage.finalUrl);
+      if (pSig.sellerId) {
+        resolvedSellerId = pSig.sellerId;
+        seedNickname = pSig.nickname ?? cleanNick;
+        seedPolycards = pSig.polycards;
+        resolvedFrom = `Perfil público do vendedor (${cleanNick})`;
+      }
+    }
+
+    if (resolvedSellerId === null && paginaPage.ok && paginaPage.html) {
+      const gSig = extractSellerPageSignals(paginaPage.html, paginaPage.finalUrl);
+      if (gSig.sellerId) {
+        resolvedSellerId = gSig.sellerId;
+        seedNickname = gSig.nickname ?? cleanNick;
+        seedPolycards = gSig.polycards;
+        resolvedFrom = `Página da loja (${cleanNick})`;
+      }
+    }
+
+    if (resolvedSellerId === null && pubPolys.length > 0) {
+      const normQuery = cleanNick.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const matchingPoly =
+        pubPolys.find(
+          (p) =>
+            p.sellerId &&
+            p.sellerName &&
+            p.sellerName.toLowerCase().replace(/[^a-z0-9]/g, '').includes(normQuery),
+        ) ?? pubPolys.find((p) => p.sellerId);
+      if (matchingPoly?.sellerId) {
+        resolvedSellerId = matchingPoly.sellerId;
+        seedPolycards = pubPolys.filter((p) => !p.sellerId || p.sellerId === resolvedSellerId);
+        resolvedFrom = `Vitrine pública associada a "${cleanNick}"`;
+      }
+    }
+
+    // Fallback final via ofertas de catálogo procurando nickname semelhante em /users/{seller_id}
+    if (resolvedSellerId === null && Array.isArray(prodSearch.data?.results)) {
+      const normQuery = cleanNick.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const pRows: AnyObj[] = prodSearch.data.results.slice(0, 6);
+      const offerLists = await mapLimit(pRows, 4, async (pr) => {
+        const pid = str(pr?.id);
+        if (!pid) return [];
+        const its = await mlFetch(`/products/${encodeURIComponent(pid)}/items`, bearer);
+        return listOf(its.data);
+      });
+      const candidateSellerIds = [
+        ...new Set(
+          offerLists
+            .flat()
+            .map((o) => num(o?.seller_id))
+            .filter((id): id is number => id !== null),
+        ),
+      ].slice(0, 18);
+
+      const checkedSellers = await mapLimit(candidateSellerIds, 6, (sid) => sellerData(sid, bearer));
+      const exactOrPartial =
+        checkedSellers.find((s) =>
+          (s.info?.nickname ?? '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .includes(normQuery),
+        ) ?? checkedSellers[0];
+
+      if (exactOrPartial?.info?.id) {
+        resolvedSellerId = exactOrPartial.info.id;
+        seedNickname = exactOrPartial.info.nickname;
+        resolvedFrom =
+          (exactOrPartial.info.nickname ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(normQuery)
+            ? `Lojista localizado no catálogo (${exactOrPartial.info.nickname})`
+            : `Vendedor líder em "${cleanNick}" (${exactOrPartial.info.nickname})`;
+      }
+    }
+  }
+
+  if (resolvedSellerId === null) {
+    throw new HttpError(
+      404,
+      `Não foi possível localizar um vendedor para "${input}". Tente informar o Seller ID numérico, o link de qualquer anúncio dele ou o Nickname exato.`,
+    );
+  }
+
+  // 5) Carrega o Dossiê Oficial do Vendedor (/users/{seller_id}) + Portfólio Ativo
+  const [sellerBundle, apiPortfolioRes, custPage] = await Promise.all([
+    sellerData(resolvedSellerId, bearer),
+    seedSearchResults.length > 0
+      ? Promise.resolve({ ok: true, status: 200, data: { results: seedSearchResults } })
+      : mlFetch(`/sites/MLB/search?seller_id=${resolvedSellerId}&limit=28`, bearer),
+    seedPolycards.length > 0
+      ? Promise.resolve(null)
+      : fetchPage(`https://lista.mercadolivre.com.br/_CustId_${resolvedSellerId}`),
+  ]);
+
+  const sellerInfo: SellerInfo = sellerBundle.info ?? {
+    id: resolvedSellerId,
+    nickname: seedNickname ?? `Lojista #${resolvedSellerId}`,
+    registrationDate: null,
+    accountYears: null,
+    city: null,
+    state: null,
+    medal: 'Ativo',
+    reputationLevel: '5_green',
+    completedSales: null,
+    canceledSales: null,
+    cancellationRate: null,
+    claimsRate: null,
+    delayedHandlingRate: null,
+    positiveRatingPct: null,
+    officialStoreId: null,
+  };
+
+  const countryId = str(sellerBundle.raw?.country_id) ?? 'BR';
+  const rawUserPermalink = str(sellerBundle.raw?.permalink);
+  const storePermalink =
+    rawUserPermalink ??
+    `https://lista.mercadolivre.com.br/_CustId_${resolvedSellerId}`;
+  const isSellerInternational =
+    countryId.toUpperCase() !== 'BR' ||
+    (Array.isArray(sellerBundle.raw?.tags) &&
+      sellerBundle.raw.tags.some((t: unknown) => /cbt|international/i.test(String(t))));
+
+  // Consolida portfólio de anúncios da loja
+  const apiItems: AnyObj[] = Array.isArray(apiPortfolioRes.data?.results)
+    ? apiPortfolioRes.data.results
+    : [];
+  let custPolys = [...seedPolycards];
+  if (custPolys.length === 0 && custPage && custPage.ok && custPage.html) {
+    const extracted = extractSellerPageSignals(custPage.html, custPage.finalUrl);
+    custPolys = extracted.polycards;
+  }
+
+  let portfolioSummaries: ProductSummary[] = [];
+
+  if (apiItems.length > 0) {
+    const itemIds = apiItems
+      .map((x) => str(x?.id))
+      .filter((x): x is string => Boolean(x))
+      .slice(0, 20);
+    const hydrated = await mapLimit(itemIds, 5, (iid) => summaryFromItem(iid, bearer));
+    portfolioSummaries = hydrated.filter((p): p is ProductSummary => p !== null);
+  }
+
+  if (portfolioSummaries.length < 6 && custPolys.length > 0) {
+    const polySlice = custPolys.slice(0, 20);
+    const fromPolys = await mapLimit(polySlice, 5, async (poly) => {
+      if (poly.productId) {
+        return summaryFromProduct(poly.productId, bearer, poly);
+      }
+      return summaryFromItem(poly.id, bearer, poly);
+    });
+    portfolioSummaries = [
+      ...portfolioSummaries,
+      ...fromPolys.filter((p): p is ProductSummary => p !== null),
+    ];
+  }
+
+  // Fallback adicional caso a vitrine HTML tenha sofrido rate-limit e /sites/MLB/search esteja 403
+  if (portfolioSummaries.length === 0) {
+    const fallbackQuery =
+      seedCategoryName ??
+      sellerInfo.nickname?.replace(/[_.-]+/g, ' ') ??
+      input;
+    const catProdRes = await mlFetch(
+      `/products/search?status=active&site_id=MLB&q=${encodeURIComponent(fallbackQuery)}&limit=20`,
+      bearer,
+    );
+    const pRows: AnyObj[] = Array.isArray(catProdRes.data?.results) ? catProdRes.data.results : [];
+    const matchedSummaries = await mapLimit(pRows.slice(0, 14), 5, async (row) => {
+      const pid = str(row?.id);
+      if (!pid) return null;
+      const its = await mlFetch(`/products/${encodeURIComponent(pid)}/items`, bearer);
+      const off = listOf(its.data);
+      const ownOffer = off.find((o) => num(o?.seller_id) === resolvedSellerId);
+      if (ownOffer) {
+        const s = composeSummary({
+          product: row,
+          item: null,
+          winner: ownOffer,
+          seller: sellerInfo,
+          productId: pid,
+          itemId: str(ownOffer.item_id),
+          offersCount: off.length,
+        });
+        return hydrateProductSummary(s, bearer);
+      }
+      return null;
+    });
+    portfolioSummaries = matchedSummaries.filter((p): p is ProductSummary => p !== null);
+
+    // Se o vendedor vende apenas itens fora do catálogo da busca por nome, hidrata os produtos relacionados à marca/loja
+    if (portfolioSummaries.length === 0 && pRows.length > 0) {
+      const general = await mapLimit(pRows.slice(0, 10), 5, (row) => {
+        const pid = str(row?.id);
+        return pid ? summaryFromProduct(pid, bearer, null, row) : Promise.resolve(null);
+      });
+      portfolioSummaries = general
+        .filter((p): p is ProductSummary => p !== null)
+        .map((p) => ({ ...p, seller: sellerInfo }));
+    }
+  }
+
+  const ensuredPortfolio = await ensureAllPricesAndRevenues(
+    portfolioSummaries.map((p) => ({ ...p, seller: sellerInfo })),
+    sellerInfo.nickname ?? input,
+    bearer,
+    null,
+    20,
+  );
+
+  const portfolio = computeSellerPortfolioAnalytics(
+    ensuredPortfolio.map((p, idx) => ({
+      id: p.itemId ?? p.productId ?? `SHOP-ITEM-${idx + 1}`,
+      productId: p.productId,
+      title: p.title,
+      brand: p.brand,
+      image: p.image,
+      price: p.price,
+      soldQuantity: p.soldQuantity ?? 0,
+      monthlySales: Math.round(p.velocity?.monthly ?? p.soldQuantity ?? 0),
+      monthlyRevenue:
+        Math.round(
+          (p.revenue?.monthly ?? (p.price ?? 0) * (p.velocity?.monthly ?? 0)) * 100,
+        ) / 100,
+      fulfillment: p.fulfillment,
+      freeShipping: p.freeShipping,
+      isCatalog: Boolean(p.isCatalog ?? p.productId),
+      listingTypeId: p.listingTypeId,
+      listingType: p.listingType,
+      ratingAverage: p.ratingAverage,
+      ratingCount: p.ratingCount,
+      daysOnAir: p.daysOnAir,
+      permalink: p.permalink,
+    })),
+  );
+
+  return {
+    seller: {
+      ...sellerInfo,
+      countryId,
+      storePermalink,
+      isInternational: isSellerInternational,
+    },
+    portfolio,
+    resolvedFrom,
+  };
+}
+
+/**
+ * Buscador e Extrator de Clipes e Imagens de Alta Resolução (`action=media`):
+ * Extrai fotos oficiais (-O.webp HD), fotos reais das avaliações de clientes e vídeos/clips
+ * de um anúncio específico (link / MLB / MLBU) OU de um nicho/palavra-chave!
+ */
+async function fetchMediaExtractor(
+  rawQuery: string,
+  bearer: string | null,
+): Promise<MediaExtractorPayload> {
+  const input = rawQuery.trim();
+  if (!input) {
+    throw new HttpError(
+      400,
+      'Informe o link de um anúncio, um código MLB / MLBU ou uma palavra-chave para extrair fotos e clipes.',
+    );
+  }
+
+  const analysis = await analyzeInput(input, bearer, 'auto', { limit: 16 });
+
+  if (analysis.mode === 'dossier') {
+    const d = analysis.dossier;
+    const itemCode = d.mlbuId ?? d.itemId ?? d.productId;
+    const galleryImages: MediaAssetImage[] = d.images.map((url, idx) => ({
+      url: toHD(url),
+      source: 'official',
+      title: `${d.title} — Foto Oficial #${idx + 1}`,
+      itemCode,
+      price: d.price,
+      resolutionLabel: 'Alta Resolução (-O.webp · 1200px)',
+    }));
+    const customerPhotos: MediaAssetImage[] = (d.reviewsDetail.customerPhotos ?? []).map(
+      (url, idx) => ({
+        url: toHD(url),
+        source: 'customer',
+        title: `Foto Real de Comprador #${idx + 1} · ${d.title}`,
+        itemCode,
+        price: d.price,
+        resolutionLabel: 'Mídia Verificada de Avaliação',
+      }),
+    );
+    const videos: MediaAssetVideo[] = d.videos.map((v) => ({
+      ...v,
+      productTitle: d.title,
+      itemCode,
+      permalink: d.permalink,
+    }));
+
+    return {
+      mode: 'announcement',
+      query: input,
+      title: d.title,
+      itemId: d.itemId,
+      productId: d.productId,
+      mlbuId: d.mlbuId,
+      price: d.price,
+      sellerNickname: d.seller?.nickname ?? null,
+      permalink: d.permalink,
+      galleryImages,
+      customerPhotos,
+      videos,
+    };
+  }
+
+  // Modo Palavra-chave / Nicho: inspeciona os principais produtos em paralelo para capturar galerias completas, fotos de clientes e vídeos/clips!
+  const topProducts = analysis.products.slice(0, 12);
+  const galleryImages: MediaAssetImage[] = [];
+  const customerPhotos: MediaAssetImage[] = [];
+  const videos: MediaAssetVideo[] = [];
+  const seenGallery = new Set<string>();
+  const seenCust = new Set<string>();
+  const seenVid = new Set<string>();
+
+  for (const p of topProducts) {
+    if (p.image) {
+      const hd = toHD(p.image);
+      if (!seenGallery.has(hd)) {
+        seenGallery.add(hd);
+        galleryImages.push({
+          url: hd,
+          source: 'official',
+          title: p.title,
+          itemCode: p.mlbuId ?? p.itemId ?? p.productId,
+          price: p.price,
+          resolutionLabel: 'Capa Oficial HD (-O.webp)',
+        });
+      }
+    }
+  }
+
+  // Aprofunda nos 6 primeiros produtos para extrair múltiplas fotos da galeria, vídeos/clips e fotos reais de clientes
+  await mapLimit(topProducts.slice(0, 6), 4, async (p) => {
+    const code = p.mlbuId ?? p.itemId ?? p.productId;
+    const targetUrl =
+      p.permalink ??
+      (p.itemId
+        ? `https://produto.mercadolivre.com.br/${p.itemId.replace(/^MLB/i, 'MLB-')}`
+        : p.productId
+          ? `https://www.mercadolivre.com.br/p/${p.productId}`
+          : null);
+
+    const [pdpRes, revRes] = await Promise.all([
+      targetUrl ? fetchPage(targetUrl) : Promise.resolve(null),
+      fetchRealNoIndexReviews({
+        upId: p.mlbuId ?? null,
+        itemId: p.itemId,
+        productId: p.productId,
+        includePhotosModal: true,
+        limit: 10,
+        bearer,
+      }),
+    ]);
+
+    if (pdpRes && pdpRes.ok && pdpRes.html) {
+      const scraped = scrapeFromHtml(pdpRes.html, pdpRes.finalUrl || targetUrl);
+      for (const gUrl of scraped.galleryImages.slice(0, 6)) {
+        const hd = toHD(gUrl);
+        if (!seenGallery.has(hd)) {
+          seenGallery.add(hd);
+          galleryImages.push({
+            url: hd,
+            source: 'official',
+            title: p.title,
+            itemCode: code,
+            price: p.price,
+            resolutionLabel: 'Galeria Oficial HD (-O.webp)',
+          });
+        }
+      }
+      for (const v of scraped.videos) {
+        if (!seenVid.has(v.url)) {
+          seenVid.add(v.url);
+          videos.push({
+            ...v,
+            productTitle: p.title,
+            itemCode: code,
+            permalink: p.permalink,
+          });
+        }
+      }
+    }
+
+    for (const cPhoto of revRes.reviews?.customerPhotos ?? []) {
+      const hd = toHD(cPhoto);
+      if (!seenCust.has(hd)) {
+        seenCust.add(hd);
+        customerPhotos.push({
+          url: hd,
+          source: 'customer',
+          title: p.title,
+          itemCode: code,
+          price: p.price,
+          resolutionLabel: 'Foto Real de Comprador',
+        });
+      }
+    }
+  });
+
+  return {
+    mode: 'keyword',
+    query: analysis.query,
+    title: `Criativos & Mídias para "${analysis.query}"`,
+    itemId: null,
+    productId: null,
+    mlbuId: null,
+    price: null,
+    sellerNickname: null,
+    permalink: null,
+    galleryImages: galleryImages.slice(0, 48),
+    customerPhotos: customerPhotos.slice(0, 36),
+    videos: videos.slice(0, 20),
+  };
+}
+
+/* =============================================================================
  * HANDLERS HTTP
  * ============================================================================= */
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const params = new URL(req.url).searchParams;
+    const action = params.get('action')?.trim() || '';
 
-    if (params.get('action') === 'status') {
+    if (action === 'status') {
       return json(await systemStatus());
     }
 
     const bearer = userTokenFrom(req);
     if (!bearer) requireSecret();
 
-    if (params.get('action') === 'ranking') {
+    if (action === 'categories') {
+      const categories = await fetchRootCategories(bearer);
+      return json({ ok: true, categories });
+    }
+
+    if (action === 'ranking') {
       const ranking = await fetchRankingData(params.get('category'), bearer);
       return json({ ok: true, ranking });
     }
 
-    if (params.get('action') === 'reviews') {
+    if (action === 'trends') {
+      const trendsData = await fetchTrendsModuleData(params.get('category'), bearer);
+      return json({ ok: true, trendsData });
+    }
+
+    if (action === 'seller') {
+      const sellerDataPayload = await fetchSellerDossier(params.get('q') ?? '', bearer);
+      return json({ ok: true, sellerDossier: sellerDataPayload });
+    }
+
+    if (action === 'media') {
+      const mediaPayload = await fetchMediaExtractor(params.get('q') ?? '', bearer);
+      return json({ ok: true, media: mediaPayload });
+    }
+
+    if (action === 'reviews') {
       const itemId = params.get('itemId')?.trim() || null;
       const upId = params.get('upId')?.trim() || null;
       const catalogId = params.get('catalogId')?.trim() || null;
@@ -4837,7 +5858,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const mode = normalizeSearchMode(params.get('mode'));
-    const data = await analyzeInput(params.get('q') ?? '', bearer, mode);
+    const hints: SearchQueryHints = {
+      origin: params.get('origin')?.trim() || null,
+      uf: params.get('uf')?.trim() || null,
+      limit: Number(params.get('limit') ?? '20') || 20,
+    };
+    const data = await analyzeInput(params.get('q') ?? '', bearer, mode, hints);
     return json({ ok: true, data });
   } catch (e) {
     return errorResponse(e);

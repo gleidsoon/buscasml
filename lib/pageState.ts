@@ -23,6 +23,9 @@ export type PolyItem = {
   image: string | null;
   isFull: boolean;
   freeShipping?: boolean;
+  isInternational?: boolean;
+  hasFlex?: boolean;
+  hasVideo?: boolean;
   isSponsored: boolean;
   productId: string | null;
   mlbuId?: string | null;
@@ -96,6 +99,8 @@ export type PageSignals = {
   logisticType: string | null;
   freeShipping: boolean | null;
   isFull: boolean;
+  isInternational: boolean;
+  hasFlex: boolean;
   isSupermarket: boolean;
   soldText: string | null;
   soldExact: number | null;
@@ -1015,8 +1020,23 @@ function polyFromResult(r: AnyObj): PolyItem | null {
   const soldQuantity = exactTrackSold ?? soldCountFromMatch(soldText);
 
   const shippingDump = JSON.stringify(comp('shipping') ?? r.shipping ?? {}).toLowerCase();
+  const fullPolyDump = JSON.stringify(poly).toLowerCase();
   const isFull = shippingDump.includes('full') || shippingDump.includes('fulfillment');
   const freeShipping = shippingDump.includes('grátis') || shippingDump.includes('gratis') || shippingDump.includes('"free_shipping":true');
+  const isInternational =
+    fullPolyDump.includes('compra internacional') ||
+    fullPolyDump.includes('international_delivery') ||
+    fullPolyDump.includes('"cbt"') ||
+    fullPolyDump.includes('cbt_item');
+  const hasFlex =
+    shippingDump.includes('chegará hoje') ||
+    shippingDump.includes('chegara hoje') ||
+    shippingDump.includes('self_service') ||
+    shippingDump.includes('flex');
+  const hasVideo =
+    fullPolyDump.includes('"clips"') ||
+    fullPolyDump.includes('video_id') ||
+    fullPolyDump.includes('.mp4');
 
   return {
     id,
@@ -1031,6 +1051,9 @@ function polyFromResult(r: AnyObj): PolyItem | null {
     image,
     isFull,
     freeShipping,
+    isInternational,
+    hasFlex,
+    hasVideo,
     isSponsored: components.some((c) => obj(c)?.type === 'ads_promotions') || Boolean(r.is_pad),
     productId,
     mlbuId,
@@ -1138,6 +1161,9 @@ export function readHtmlPolycards(html: string): PolyItem[] {
 
     const isFull = /poly_full|aria-label=["'][^"']*full[^"']*["']|fulfillment/i.test(block);
     const freeShipping = /frete\s+gr[áa]tis/i.test(block);
+    const isInternational = /compra\s+internacional|cbt_item|international/i.test(block);
+    const hasFlex = /chegar[áa]\s+hoje|envio\s+flex|self_service/i.test(block);
+    const hasVideo = /poly-component__clips|video|clipe/i.test(block);
     const isSponsored = /patrocinado|poly-component__ads-promotions/i.test(block);
 
     out.push({
@@ -1153,6 +1179,9 @@ export function readHtmlPolycards(html: string): PolyItem[] {
       image,
       isFull,
       freeShipping,
+      isInternational,
+      hasFlex,
+      hasVideo,
       isSponsored,
       productId,
       mlbuId,
@@ -1186,6 +1215,8 @@ function emptySignals(): PageSignals {
     logisticType: null,
     freeShipping: null,
     isFull: false,
+    isInternational: false,
+    hasFlex: false,
     isSupermarket: false,
     soldText: null,
     soldExact: null,
@@ -2010,8 +2041,55 @@ export function extractPageSignals(html: string, url: string | null = null): Pag
   s.itemId ??= s.reviewsData.resolvedItemId;
 
   if (s.logisticType === 'fulfillment') s.isFull = true;
+  if (s.logisticType === 'self_service' || /chegar[áa]\s+hoje|self_service/i.test(html)) s.hasFlex = true;
+  if (/compra\s+internacional|"international_delivery_mode"|"cbt_item"/i.test(html)) s.isInternational = true;
   if (s.startTime && !s.startTimeSource) s.startTimeSource = 'Estado da página (start_time)';
   if (s.pageType === 'unknown' && (s.itemId || s.title)) s.pageType = 'product';
   s.sources = [...new Set(s.sources)];
   return s;
+}
+
+/** Extrai ID do vendedor, nome da loja e vitrine pública a partir de páginas de perfil ou loja do ML. */
+export function extractSellerPageSignals(
+  html: string,
+  url: string | null = null,
+): {
+  sellerId: number | null;
+  nickname: string | null;
+  officialStoreId: number | null;
+  polycards: PolyItem[];
+} {
+  const sig = extractPageSignals(html, url);
+  const custFromUrl = url?.match(/_CustId_(\d{4,})/i)?.[1] ?? url?.match(/seller_id[=:](\d{4,})/i)?.[1];
+  const custFromHtml =
+    html.match(/_CustId_(\d{4,})/i)?.[1] ??
+    html.match(/"seller_id"\s*:\s*(\d{4,})/i)?.[1] ??
+    html.match(/"collector_id"\s*:\s*(\d{4,})/i)?.[1] ??
+    null;
+
+  const sellerId =
+    (custFromUrl ? Number(custFromUrl) : null) ??
+    sig.sellerId ??
+    (custFromHtml ? Number(custFromHtml) : null) ??
+    sig.polycards.find((p) => p.sellerId)?.sellerId ??
+    null;
+
+  const storeTitle =
+    sig.sellerName ??
+    textByClass(html, '.store-header__title, .ui-search-breadcrumb__title, .profile-title') ??
+    metaProperty(html, 'og:title')?.replace(/\s*[-|]\s*Mercado\s*Li[vb]re.*$/i, '').trim() ??
+    sig.polycards.find((p) => p.sellerName)?.sellerName ??
+    null;
+
+  const officialMatch =
+    url?.match(/_Loja_([a-z0-9-]+)/i) ?? html.match(/"official_store_id"\s*:\s*(\d+)/i);
+  const officialStoreId =
+    sig.officialStoreId ?? (officialMatch && /^\d+$/.test(officialMatch[1]) ? Number(officialMatch[1]) : null);
+
+  return {
+    sellerId,
+    nickname: storeTitle && !/^Mercado\s*Li[vb]re/i.test(storeTitle) ? storeTitle : null,
+    officialStoreId,
+    polycards: sig.polycards,
+  };
 }
