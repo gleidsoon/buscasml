@@ -553,3 +553,290 @@ export function extractKeywords(titles: string[], limit = 20): { words: KeywordS
 
   return { words: rank(wordDocs, 1), phrases: rank(phraseDocs, valid.length > 1 ? 2 : 1) };
 }
+
+/* =============================================================================
+ * ANÁLISE DE QUALIDADE DA LISTAGEM (Score 0 a 100 — inspirado em MlbListingsScores)
+ * Checklist dos 6 pilares: Título, Fotos, Vídeo/Clipes, Ficha Técnica, Logística e Modalidade
+ * ============================================================================= */
+
+export type ListingQualityStatus = 'ok' | 'warning' | 'missing';
+export type ListingQualityLevel = 'Great' | 'Good' | 'NeedAttention' | 'Critical';
+export type ListingQualityCriterionId =
+  | 'title'
+  | 'photos'
+  | 'video'
+  | 'specs'
+  | 'logistics'
+  | 'modality';
+
+export type ListingQualityCriterion = {
+  id: ListingQualityCriterionId;
+  label: string;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  status: ListingQualityStatus;
+  currentValue: string;
+  recommendation: string;
+};
+
+export type ListingQualityReport = {
+  score: number;
+  maxScore: 100;
+  level: ListingQualityLevel;
+  levelLabel: string;
+  summary: string;
+  passedCount: number;
+  totalCriteria: 6;
+  potentialGain: number;
+  criteria: ListingQualityCriterion[];
+};
+
+export type ListingQualityInput = {
+  title: string | null;
+  brand: string | null;
+  model: string | null;
+  imagesCount: number;
+  videosCount: number;
+  attributesCount: number;
+  descriptionLength: number;
+  fulfillment: boolean;
+  freeShipping: boolean;
+  listingTypeId: string | null;
+  listingTypeLabel: string | null;
+  price: number | null;
+  sellerMedal: string | null;
+  reputationLevel: string | null;
+  ratingAverage: number | null;
+  ratingCount: number | null;
+};
+
+export function evaluateListingQuality(input: ListingQualityInput): ListingQualityReport {
+  const cleanTitle = (input.title ?? '').trim();
+  const titleLen = cleanTitle.length;
+  const titleWords = cleanTitle.split(/\s+/).filter((w) => w.length >= 2).length;
+  const hasSpamSymbols = /[!?*]{2,}|[\u{1F300}-\u{1FAFF}]/u.test(cleanTitle);
+
+  // 1. Título SEO (0 a 20 pts)
+  let titleScore = 6;
+  let titleStatus: ListingQualityStatus = 'missing';
+  let titleRec = 'Amplie o título para 50–60 caracteres incluindo Produto + Marca + Modelo + atributo principal.';
+  if (titleLen >= 45 && titleWords >= 6 && !hasSpamSymbols) {
+    titleScore = 20;
+    titleStatus = 'ok';
+    titleRec = 'Título bem estruturado para indexação orgânica nas buscas do Mercado Livre.';
+  } else if (titleLen >= 32 && titleWords >= 4) {
+    titleScore = hasSpamSymbols ? 12 : 14;
+    titleStatus = 'warning';
+    titleRec = hasSpamSymbols
+      ? 'Remova símbolos promocionais/emojis e aproveite os 60 caracteres com palavras-chave de busca.'
+      : 'Aproveite o espaço até ~60 caracteres adicionando variações, material ou aplicação principal.';
+  }
+
+  // 2. Galeria de Fotos (0 a 20 pts — imagesScorePercent)
+  const imgs = Math.max(0, Math.round(input.imagesCount));
+  let photoScore = 0;
+  let photoStatus: ListingQualityStatus = 'missing';
+  let photoRec = 'Adicione ao menos 6 fotos em alta resolução (1200x1200px), com capa em fundo branco puro.';
+  if (imgs >= 6) {
+    photoScore = 20;
+    photoStatus = 'ok';
+    photoRec = 'Galeria completa! Mantenha a 1ª foto em fundo branco e as demais mostrando detalhes e medidas.';
+  } else if (imgs >= 4) {
+    photoScore = 15;
+    photoStatus = 'warning';
+    photoRec = `Adicione mais ${6 - imgs} foto(s) (ângulos de uso, tabela de medidas e itens inclusos) para nota máxima.`;
+  } else if (imgs >= 2) {
+    photoScore = 9;
+    photoStatus = 'warning';
+    photoRec = `Galeria curta (${imgs} fotos). Suba para 6–10 imagens HD para aumentar a taxa de conversão.`;
+  } else if (imgs === 1) {
+    photoScore = 4;
+    photoStatus = 'missing';
+    photoRec = 'Anúncio com apenas 1 foto perde cliques e conversão. Inclua pelo menos 6 fotos reais e de escala.';
+  }
+
+  // 3. Vídeo / Clipes (0 a 15 pts — clipsScorePercent / hasClips)
+  const vids = Math.max(0, Math.round(input.videosCount));
+  const videoScore = vids >= 1 ? 15 : 0;
+  const videoStatus: ListingQualityStatus = vids >= 1 ? 'ok' : 'missing';
+  const videoRec =
+    vids >= 1
+      ? 'Anúncio conta com vídeo/clipe ativo, aumentando a retenção na página e tráfego do ML Clips.'
+      : 'Publique um vídeo/clipe vertical (15s a 60s) no Mercado Livre Clips para ganhar +15 pts de exposição.';
+
+  // 4. Ficha Técnica & Descrição (0 a 15 pts — hasDescription + attributes)
+  const hasRealBrand = Boolean(input.brand && !/^(gen[eé]rica|linha\s)/i.test(input.brand));
+  const hasRealModel = Boolean(input.model && input.model.trim().length >= 2);
+  const attrCount = Math.max(
+    0,
+    Math.round(input.attributesCount) + (input.attributesCount === 0 ? (hasRealBrand ? 1 : 0) + (hasRealModel ? 1 : 0) : 0),
+  );
+  const hasDesc = input.descriptionLength >= 80;
+  let specsScore = 5;
+  let specsStatus: ListingQualityStatus = 'missing';
+  let specsRec = 'Preencha todos os atributos da Ficha Técnica (Marca, Modelo, EAN/GTIN, medidas) e descrição completa.';
+  if (attrCount >= 6 || (attrCount >= 4 && hasDesc)) {
+    specsScore = 15;
+    specsStatus = 'ok';
+    specsRec = 'Ficha técnica bem preenchida, habilitando os filtros laterais da categoria na busca.';
+  } else if (attrCount >= 2 || hasDesc) {
+    specsScore = 10;
+    specsStatus = 'warning';
+    specsRec = hasDesc
+      ? 'Complete mais atributos estruturados na Ficha Técnica (EAN/GTIN, dimensões, material) para filtrar melhor.'
+      : 'Enriqueça a Ficha Técnica e adicione uma descrição textual quebrando objeções frequentes.';
+  }
+
+  // 5. Logística & Frete (0 a 15 pts — shippingFullScorePercent + freeShippingScorePercent)
+  let logScore = 5;
+  let logStatus: ListingQualityStatus = 'warning';
+  let logValue = 'Envio padrão (frete por conta do comprador)';
+  let logRec = 'Ative Mercado Envios Full ou Frete Grátis competitivo para subir posições no ranking.';
+  if (input.fulfillment && input.freeShipping) {
+    logScore = 15;
+    logStatus = 'ok';
+    logValue = '⚡ Mercado Envios Full + Frete Grátis';
+    logRec = 'Configuração logística máxima (Full + Frete Grátis), com prioridade no BuyBox e entrega rápida.';
+  } else if (input.fulfillment) {
+    logScore = 13;
+    logStatus = 'ok';
+    logValue = '⚡ Mercado Envios Full';
+    logRec = 'Estoque no Full garante selo raio e entrega rápida; avalie kits ≥ R$ 79 para ativar Frete Grátis.';
+  } else if (input.freeShipping) {
+    logScore = 11;
+    logStatus = 'warning';
+    logValue = '🚚 Frete Grátis (Agência / Coleta)';
+    logRec = 'Já oferece Frete Grátis; migrar o giro ao Mercado Envios Full destrava o topo das buscas.';
+  }
+
+  // 6. Modalidade & Reputação (0 a 15 pts — listingType + medalScorePercent + reputationScorePercent)
+  const isPremium = input.listingTypeId === 'gold_pro' || /premium/i.test(input.listingTypeLabel ?? '');
+  const medalTxt = input.sellerMedal ?? '';
+  const hasTopRep =
+    /platinum|gold|l[ií]der|loja oficial/i.test(medalTxt) ||
+    input.reputationLevel === '5_green' ||
+    input.reputationLevel === '4_light_green';
+  let modScore = 7;
+  let modStatus: ListingQualityStatus = 'warning';
+  const modLabel = isPremium ? 'Premium (Sem juros)' : 'Clássico';
+  let modRec = 'Mantenha reputação verde e avalie Anúncio Premium para oferecer parcelamento sem juros.';
+  if (isPremium && hasTopRep) {
+    modScore = 15;
+    modStatus = 'ok';
+    modRec = 'Exposição máxima Premium com parcelamento sem juros aliada à reputação verde do vendedor.';
+  } else if (!isPremium && hasTopRep) {
+    modScore = 12;
+    modStatus = input.price !== null && input.price < 79 ? 'ok' : 'warning';
+    modRec =
+      input.price !== null && input.price < 79
+        ? 'Modalidade Clássico adequada para ticket acessível com reputação forte do vendedor.'
+        : 'Boa reputação no Clássico; teste um anúncio espelho no Premium para capturar compradores parcelados.';
+  } else if (isPremium) {
+    modScore = 11;
+    modStatus = 'warning';
+    modRec = 'Anúncio Premium ativo; evolua termômetro/medalha para maximizar a relevância orgânica.';
+  }
+
+  const criteria: ListingQualityCriterion[] = [
+    {
+      id: 'title',
+      label: 'Título SEO',
+      score: titleScore,
+      maxScore: 20,
+      percentage: Math.round((titleScore / 20) * 100),
+      status: titleStatus,
+      currentValue: `${titleLen} caracteres · ${titleWords} palavras`,
+      recommendation: titleRec,
+    },
+    {
+      id: 'photos',
+      label: 'Galeria de Fotos',
+      score: photoScore,
+      maxScore: 20,
+      percentage: Math.round((photoScore / 20) * 100),
+      status: photoStatus,
+      currentValue: `${imgs} ${imgs === 1 ? 'foto exclusiva' : 'fotos exclusivas'}`,
+      recommendation: photoRec,
+    },
+    {
+      id: 'video',
+      label: 'Vídeo / Clipes',
+      score: videoScore,
+      maxScore: 15,
+      percentage: Math.round((videoScore / 15) * 100),
+      status: videoStatus,
+      currentValue: vids >= 1 ? `${vids} vídeo/clipe ativo` : 'Sem vídeo ou clipe',
+      recommendation: videoRec,
+    },
+    {
+      id: 'specs',
+      label: 'Ficha Técnica',
+      score: specsScore,
+      maxScore: 15,
+      percentage: Math.round((specsScore / 15) * 100),
+      status: specsStatus,
+      currentValue:
+        attrCount > 0
+          ? `${attrCount} atributo(s)${hasDesc ? ' + Descrição completa' : ''}`
+          : hasDesc
+            ? 'Descrição presente · Poucos atributos'
+            : 'Atributos básicos',
+      recommendation: specsRec,
+    },
+    {
+      id: 'logistics',
+      label: 'Logística & Frete',
+      score: logScore,
+      maxScore: 15,
+      percentage: Math.round((logScore / 15) * 100),
+      status: logStatus,
+      currentValue: logValue,
+      recommendation: logRec,
+    },
+    {
+      id: 'modality',
+      label: 'Modalidade & Reputação',
+      score: modScore,
+      maxScore: 15,
+      percentage: Math.round((modScore / 15) * 100),
+      status: modStatus,
+      currentValue: `${modLabel}${medalTxt ? ` · ${medalTxt}` : ''}`,
+      recommendation: modRec,
+    },
+  ];
+
+  const rawScore = criteria.reduce((sum, c) => sum + c.score, 0);
+  const score = Math.min(100, Math.max(0, Math.round(rawScore)));
+  const passedCount = criteria.filter((c) => c.status === 'ok').length;
+  const potentialGain = Math.max(0, 100 - score);
+
+  let level: ListingQualityLevel = 'Critical';
+  let levelLabel = 'Crítico';
+  let summary = 'Anúncio com lacunas importantes de mídia, ficha técnica ou logística que limitam o tráfego.';
+  if (score >= 85) {
+    level = 'Great';
+    levelLabel = 'Excelente';
+    summary = 'Anúncio altamente competitivo e otimizado nos principais fatores de ranqueamento do Mercado Livre.';
+  } else if (score >= 70) {
+    level = 'Good';
+    levelLabel = 'Bom';
+    summary = 'Boa estrutura de anúncio! Ajustes pontuais (como vídeo/clipe ou mais fotos) podem levá-lo a 90+ pts.';
+  } else if (score >= 50) {
+    level = 'NeedAttention';
+    levelLabel = 'Requer Atenção';
+    summary = 'Existem oportunidades claras de otimização para ganhar relevância orgânica e conversão.';
+  }
+
+  return {
+    score,
+    maxScore: 100,
+    level,
+    levelLabel,
+    summary,
+    passedCount,
+    totalCriteria: 6,
+    potentialGain,
+    criteria,
+  };
+}

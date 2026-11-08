@@ -50,6 +50,11 @@ export type ReviewAttribute = {
   rating: number;
 };
 
+export type SpecAttribute = {
+  name: string;
+  value: string;
+};
+
 export type ReviewComment = {
   id: string;
   title: string;
@@ -110,6 +115,8 @@ export type PageSignals = {
   catalogSellers: number | null;
   galleryImages: string[];
   videos: ProductVideo[];
+  specsAttributes: SpecAttribute[];
+  descriptionLength: number;
   alAndroidUrl: string | null;
   ogUrl: string | null;
   ogDescription: string | null;
@@ -661,29 +668,100 @@ export function extractPdpGalleryHtmlImages(html: string): string[] {
   return out;
 }
 
-/** Extrai Marca, Modelo e EAN/GTIN recursivamente de `_n.ctx.r` / `initialState` ou da descrição do produto. */
+/** Extrai Marca, Modelo, EAN/GTIN, atributos da Ficha Técnica e tamanho da descrição de `_n.ctx.r` / `initialState`. */
 function extractSpecsFromState(
   state: AnyObj | null,
   descriptionText?: string | null,
-): { brand: string | null; model: string | null; gtin: string | null } {
+): {
+  brand: string | null;
+  model: string | null;
+  gtin: string | null;
+  attributes: SpecAttribute[];
+  descriptionLength: number;
+} {
   let brand: string | null = null;
   let model: string | null = null;
   let gtin: string | null = null;
+  const attributes: SpecAttribute[] = [];
+  const seenAttrKeys = new Set<string>();
+  let descriptionLength = descriptionText ? descriptionText.trim().length : 0;
 
-  const inspectPair = (rawKey: string | null, rawVal: string | null) => {
+  const pushSpec = (rawName: string | null, rawVal: string | null) => {
+    if (!rawName || !rawVal) return;
+    const cleanName = rawName.replace(/[:\s]+$/g, '').trim();
+    const cleanVal = rawVal.trim();
+    if (
+      cleanName.length < 2 ||
+      cleanName.length > 55 ||
+      cleanVal.length < 1 ||
+      cleanVal.length > 90 ||
+      /^(https?:\/\/|mlb\d|true|false|null|undefined|\d+)$/i.test(cleanName)
+    ) {
+      return;
+    }
+    const key = cleanName.toLowerCase();
+    if (seenAttrKeys.has(key)) return;
+    seenAttrKeys.add(key);
+    attributes.push({ name: cleanName, value: cleanVal });
+  };
+
+  const inspectPair = (rawKey: string | null, rawVal: string | null, fromSpecsSection = false) => {
     if (!rawKey || !rawVal) return;
     const k = rawKey.toLowerCase().trim();
     const v = rawVal.trim();
-    if (!v || v.length > 80) return;
+    if (!v || v.length > 90) return;
     if (!brand && (/^(marca|brand|fabricante)$/i.test(k) || k === 'brand')) brand = v;
     if (!model && (/^(modelo|model|linha)$/i.test(k) || k === 'model')) model = v;
     if (!gtin && (/^(ean|gtin|c[oó]digo universal|upc)$/i.test(k) || /^\d{8,14}$/.test(v))) {
       const digits = v.match(/\b(\d{8,14})\b/);
       if (digits) gtin = digits[1];
     }
+    if (fromSpecsSection) pushSpec(rawKey, v);
   };
 
   if (state) {
+    const comp = obj(state.components) ?? {};
+    const descComp = obj(comp.description) ?? {};
+    const descContent =
+      str(descComp.content) ??
+      str(at(descComp, 'content.text')) ??
+      str(descComp.plain_text) ??
+      str(findDeep(descComp, 'content', 500));
+    if (descContent && descContent.length > descriptionLength) {
+      descriptionLength = descContent.length;
+    }
+
+    const specSections = [
+      comp.highlighted_specs_attrs,
+      comp.specs,
+      comp.technical_specifications,
+      state.specs,
+      state.attributes,
+    ].filter(Boolean);
+    for (const sec of specSections) {
+      const secStack: unknown[] = [sec];
+      let secVis = 0;
+      while (secStack.length > 0 && secVis < 4_000) {
+        const cur = secStack.pop();
+        secVis++;
+        if (!cur || typeof cur !== 'object') continue;
+        if (Array.isArray(cur)) {
+          for (let i = cur.length - 1; i >= 0; i--) secStack.push(cur[i]);
+          continue;
+        }
+        const o = cur as AnyObj;
+        const name = str(o.name) ?? str(o.title) ?? str(o.label) ?? str(o.id);
+        const val =
+          str(o.value_name) ??
+          str(o.value) ??
+          str(at(o, 'values.0.name')) ??
+          str(at(o, 'value.text')) ??
+          str(o.text);
+        if (name && val && name !== val) inspectPair(name, val, true);
+        for (const v of Object.values(o)) if (v && typeof v === 'object') secStack.push(v);
+      }
+    }
+
     const stack: unknown[] = [state.components ?? state];
     let visited = 0;
     while (stack.length > 0 && visited < 20_000 && (!brand || !model || !gtin)) {
@@ -702,7 +780,7 @@ function extractSpecsFromState(
         str(at(o, 'values.0.name')) ??
         str(at(o, 'value.text')) ??
         str(o.text);
-      if (id && val) inspectPair(id, val);
+      if (id && val) inspectPair(id, val, false);
       for (const v of Object.values(o)) if (v && typeof v === 'object') stack.push(v);
     }
   }
@@ -722,7 +800,11 @@ function extractSpecsFromState(
     }
   }
 
-  return { brand, model, gtin };
+  if (brand) pushSpec('Marca', brand);
+  if (model) pushSpec('Modelo', model);
+  if (gtin) pushSpec('EAN / GTIN', gtin);
+
+  return { brand, model, gtin, attributes: attributes.slice(0, 24), descriptionLength };
 }
 
 /** Converte uma string "1.599,90" ou "207" capturada após R$ em número. */
@@ -1123,6 +1205,8 @@ function emptySignals(): PageSignals {
     catalogSellers: null,
     galleryImages: [],
     videos: [],
+    specsAttributes: [],
+    descriptionLength: 0,
     alAndroidUrl: null,
     ogUrl: null,
     ogDescription: null,
@@ -1584,11 +1668,24 @@ function applyInitialState(s: PageSignals, state: AnyObj | null, label: string):
     }
   }
 
-  // Especificações (Marca, Modelo, EAN/GTIN)
+  // Especificações (Marca, Modelo, EAN/GTIN, Ficha Técnica e Descrição)
   const specs = extractSpecsFromState(state);
   s.brand ??= specs.brand;
   s.model ??= specs.model;
   s.gtin ??= specs.gtin;
+  if (specs.descriptionLength > s.descriptionLength) {
+    s.descriptionLength = specs.descriptionLength;
+  }
+  if (specs.attributes.length > 0) {
+    const existingKeys = new Set(s.specsAttributes.map((a) => a.name.toLowerCase()));
+    for (const attrItem of specs.attributes) {
+      const k = attrItem.name.toLowerCase();
+      if (!existingKeys.has(k)) {
+        existingKeys.add(k);
+        s.specsAttributes.push(attrItem);
+      }
+    }
+  }
 
   const aq = obj(components.available_quantity) ?? {};
   const stockLabel =
@@ -1645,6 +1742,22 @@ function applyLdJson(s: PageSignals, nodes: AnyObj[]): void {
   s.brand ??= str(obj(product.brand)?.name) ?? str(product.brand);
   s.model ??= str(product.model);
   s.gtin ??= str(product.gtin13) ?? str(product.gtin) ?? str(product.gtin14) ?? str(product.gtin8);
+  const ldDesc = str(product.description);
+  if (ldDesc && ldDesc.length > s.descriptionLength) {
+    s.descriptionLength = ldDesc.length;
+  }
+  if (Array.isArray(product.additionalProperty)) {
+    const existingKeys = new Set(s.specsAttributes.map((a) => a.name.toLowerCase()));
+    for (const prop of product.additionalProperty) {
+      const po = obj(prop);
+      const pName = str(po?.name);
+      const pVal = str(po?.value);
+      if (pName && pVal && !existingKeys.has(pName.toLowerCase())) {
+        existingKeys.add(pName.toLowerCase());
+        s.specsAttributes.push({ name: pName, value: pVal });
+      }
+    }
+  }
 
   const ldImages = Array.isArray(product.image)
     ? (product.image as unknown[]).map((x) => str(x) ?? str(obj(x)?.url))
@@ -1741,6 +1854,31 @@ function applySelectors(s: PageSignals, html: string): void {
     s.brand ??= descSpecs.brand;
     s.model ??= descSpecs.model;
     s.gtin ??= descSpecs.gtin;
+  }
+
+  // Extrai Ficha Técnica do DOM (.andes-table / .ui-vpp-striped-specs) e tamanho da descrição (.ui-pdp-description__content)
+  const domDesc = textByClass(html, '.ui-pdp-description__content');
+  if (domDesc && domDesc.length > s.descriptionLength) {
+    s.descriptionLength = domDesc.length;
+  }
+  if (s.specsAttributes.length < 16) {
+    const existingKeys = new Set(s.specsAttributes.map((a) => a.name.toLowerCase()));
+    const trMatches = [
+      ...html.matchAll(
+        /<tr[^>]*class=["'][^"']*andes-table__row[^"']*["'][^>]*>([\s\S]{10,1200}?)<\/tr>/gi,
+      ),
+    ];
+    for (const m of trMatches) {
+      const th = m[1].match(/<th[^>]*>([\s\S]*?)<\/th>/i)?.[1];
+      const td = m[1].match(/<td[^>]*>([\s\S]*?)<\/td>/i)?.[1];
+      const kName = th ? textOf(th) : '';
+      const kVal = td ? textOf(td) : '';
+      if (kName && kVal && kName.length <= 55 && kVal.length <= 90 && !existingKeys.has(kName.toLowerCase())) {
+        existingKeys.add(kName.toLowerCase());
+        s.specsAttributes.push({ name: kName, value: kVal });
+      }
+      if (s.specsAttributes.length >= 24) break;
+    }
   }
 
   s.itemId ??= normalizeMlb(inputValue(html, 'item_id')) ?? normalizeMlb(inputValue(html, 'itemId'));

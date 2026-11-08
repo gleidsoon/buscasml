@@ -12,10 +12,14 @@ import {
   Calendar,
   Camera,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   Copy,
   ExternalLink,
+  FileText,
+  Film,
   Flame,
   Hash,
   Info,
@@ -41,6 +45,7 @@ import {
   AGE_ALERT_LABEL,
   DEFAULT_COMMISSION_PCT,
   breakdownAt,
+  evaluateListingQuality,
   extractKeywords,
   suggestPrice,
   type AgeAlert,
@@ -49,6 +54,8 @@ import {
   type CategoryFees,
   type Commission,
   type KeywordStat,
+  type ListingQualityCriterionId,
+  type ListingQualityReport,
   type Periods,
   type SalesEstimate,
   type SuggestedPrice,
@@ -59,6 +66,7 @@ import type {
   ReviewAttribute,
   ReviewComment,
   ReviewStarBreakdown,
+  SpecAttribute,
 } from '@/lib/pageState';
 
 /* =============================================================================
@@ -184,6 +192,8 @@ type Dossier = {
   model: string | null;
   images: string[];
   videos: ProductVideo[];
+  attributes?: SpecAttribute[];
+  listingQuality?: ListingQualityReport;
   price: number | null;
   originalPrice: number | null;
   discountPct: number | null;
@@ -467,7 +477,9 @@ function formatAccountAge(years: number | null): string {
 }
 
 function formatRating(value: number | null): string {
-  return value === null ? '4,8' : value.toFixed(1).replace('.', ',');
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value.toFixed(1).replace('.', ',')
+    : HIDDEN;
 }
 
 function formatPercent(value: number | null | undefined, fallback: string = HIDDEN): string {
@@ -1375,19 +1387,10 @@ function BestSellersRankingSection({
                     </div>
 
                     <div className="mt-2.5 flex items-center justify-between border-t border-white/10 pt-2.5 text-xs">
-                      {item.ratingAverage !== null ? (
-                        <span className="flex items-center gap-1 text-amber-300">
-                          <Star size={13} className="fill-amber-400 text-amber-400" />
-                          <span className="font-semibold">{formatRating(item.ratingAverage)}</span>
-                          {item.ratingCount !== null && item.ratingCount > 0 && (
-                            <span className="text-slate-400">({formatInt(item.ratingCount)})</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">
-                          {item.sellerMedal ?? 'Destaque ML'}
-                        </span>
-                      )}
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+                        <Award size={13} className="text-amber-400" />
+                        <span>{item.sellerMedal ?? 'Vendedor Verificado'}</span>
+                      </span>
 
                       <span className="inline-flex items-center gap-1 font-semibold text-sky-400 group-hover:translate-x-0.5 transition">
                         Analisar <ChevronRight size={14} />
@@ -2063,9 +2066,11 @@ function ProductReviewsSection({
       if (res.customerPhotos.length > 0) {
         setCustomerPhotos((prev) => Array.from(new Set([...prev, ...res.customerPhotos])));
       }
-      if (res.ratingAverage !== null) setLiveAvg(res.ratingAverage);
-      if (res.totalReviews !== null) setLiveTotal(res.totalReviews);
-      if (res.distribution.length > 0) setLiveDist(res.distribution);
+      if (res.ratingAverage !== null && res.ratingAverage > 0) setLiveAvg(res.ratingAverage);
+      if (res.totalReviews !== null && res.totalReviews > 0) setLiveTotal(res.totalReviews);
+      if (res.distribution.some((d) => d.count > 0 || d.percentage > 0)) {
+        setLiveDist(res.distribution);
+      }
     } catch {
       // Se falhar a rede, filtra localmente os comentários já carregados
       const base = reviews?.comments ?? [];
@@ -2345,7 +2350,7 @@ function ProductReviewsSection({
                           </>
                         ) : (
                           <>
-                            <MessageSquare size={14} /> Ver mais opiniões reais
+                            <MessageSquare size={14} /> Ver mais opiniões
                           </>
                         )}
                       </button>
@@ -2698,7 +2703,10 @@ function CompetitorShowcase({
                         cls: 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30',
                       };
 
-            const targetCode = r.mlbuId ?? r.itemId;
+            const targetCode =
+              r.mlbuId && r.sellerId
+                ? `https://www.mercadolivre.com.br/up/${r.mlbuId}?pdp_filters=seller_id:${r.sellerId}`
+                : (r.mlbuId ?? r.itemId);
 
             return (
               <article
@@ -2814,6 +2822,235 @@ function CompetitorShowcase({
               </article>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListingQualitySection({
+  d,
+}: {
+  d: Dossier;
+}) {
+  const report = useMemo<ListingQualityReport>(() => {
+    if (d.listingQuality) return d.listingQuality;
+    return evaluateListingQuality({
+      title: d.title,
+      brand: d.brand,
+      model: d.model,
+      imagesCount: d.images.length,
+      videosCount: d.videos.length,
+      attributesCount: d.attributes?.length ?? d.pageSignals?.specsAttributes?.length ?? 0,
+      descriptionLength: d.pageSignals?.descriptionLength ?? 0,
+      fulfillment: d.fulfillment,
+      freeShipping: d.freeShipping,
+      listingTypeId: d.listingTypeId,
+      listingTypeLabel: d.listingType,
+      price: d.price,
+      sellerMedal: d.seller?.medal ?? null,
+      reputationLevel: d.seller?.reputationLevel ?? null,
+      ratingAverage: d.ratingAverage ?? d.reviewsDetail?.ratingAverage ?? null,
+      ratingCount: d.ratingCount ?? d.reviewsDetail?.totalReviews ?? null,
+    });
+  }, [d]);
+
+  const tone =
+    report.level === 'Great'
+      ? {
+          ring: '#34d399',
+          pill: 'green' as PillTone,
+          scoreText: 'text-emerald-300',
+          border: 'border-emerald-500/30',
+        }
+      : report.level === 'Good'
+        ? {
+            ring: '#38bdf8',
+            pill: 'blue' as PillTone,
+            scoreText: 'text-sky-300',
+            border: 'border-sky-400/30',
+          }
+        : report.level === 'NeedAttention'
+          ? {
+              ring: '#fbbf24',
+              pill: 'yellow' as PillTone,
+              scoreText: 'text-amber-300',
+              border: 'border-amber-400/35',
+            }
+          : {
+              ring: '#f87171',
+              pill: 'red' as PillTone,
+              scoreText: 'text-red-400',
+              border: 'border-red-500/35',
+            };
+
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, report.score)) / 100) * circumference;
+
+  const criterionIcon = (id: ListingQualityCriterionId) => {
+    switch (id) {
+      case 'title':
+        return <FileText size={15} className="text-sky-400" />;
+      case 'photos':
+        return <Camera size={15} className="text-amber-400" />;
+      case 'video':
+        return <Film size={15} className="text-purple-400" />;
+      case 'specs':
+        return <Boxes size={15} className="text-emerald-400" />;
+      case 'logistics':
+        return <Truck size={15} className="text-teal-400" />;
+      case 'modality':
+        return <Award size={15} className="text-yellow-400" />;
+    }
+  };
+
+  const specsPreview = d.attributes ?? d.pageSignals?.specsAttributes ?? [];
+
+  return (
+    <div className={`glass-panel space-y-5 rounded-3xl border p-6 ${tone.border}`}>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+        <div className="flex items-center gap-4">
+          {/* Medidor Circular 0 a 100 */}
+          <div className="relative flex h-24 w-24 shrink-0 items-center justify-center">
+            <svg className="h-24 w-24 -rotate-90 transform" viewBox="0 0 108 108">
+              <circle
+                cx="54"
+                cy="54"
+                r={radius}
+                stroke="rgba(255,255,255,0.08)"
+                strokeWidth="9"
+                fill="transparent"
+              />
+              <circle
+                cx="54"
+                cy="54"
+                r={radius}
+                stroke={tone.ring}
+                strokeWidth="9"
+                strokeLinecap="round"
+                fill="transparent"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+              <span className={`text-2xl font-black leading-none ${tone.scoreText}`}>
+                {report.score}
+              </span>
+              <span className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                / 100
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <ClipboardCheck size={18} className="text-amber-400" />
+              <h3 className="text-base font-bold text-white sm:text-lg">
+                Análise de Qualidade da Listagem
+              </h3>
+              <Pill tone={tone.pill}>{report.levelLabel}</Pill>
+            </div>
+            <p className="max-w-2xl text-xs leading-relaxed text-slate-300">{report.summary}</p>
+            <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] text-slate-400">
+              <span className="inline-flex items-center gap-1 font-semibold text-emerald-300">
+                <CheckCircle2 size={13} /> {report.passedCount} de {report.totalCriteria} critérios ideais
+              </span>
+              {report.potentialGain > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="font-semibold text-amber-300">
+                    +{report.potentialGain} pts disponíveis para otimização
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Checklist de 6 Pilares */}
+      <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+        {report.criteria.map((c) => {
+          const statusUI =
+            c.status === 'ok'
+              ? {
+                  badge: '✓ Ideal',
+                  badgeCls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300',
+                  barCls: 'bg-gradient-to-r from-emerald-500 to-teal-400',
+                  cardBorder: 'border-emerald-500/20',
+                }
+              : c.status === 'warning'
+                ? {
+                    badge: '⚠ Atenção',
+                    badgeCls: 'border-amber-400/35 bg-amber-400/15 text-amber-300',
+                    barCls: 'bg-gradient-to-r from-amber-400 to-yellow-500',
+                    cardBorder: 'border-amber-400/25',
+                  }
+                : {
+                    badge: '✕ Pendente',
+                    badgeCls: 'border-red-500/35 bg-red-500/15 text-red-300',
+                    barCls: 'bg-gradient-to-r from-red-500 to-rose-500',
+                    cardBorder: 'border-red-500/25',
+                  };
+
+          return (
+            <div
+              key={c.id}
+              className={`flex flex-col justify-between rounded-2xl border bg-slate-950/60 p-4 ${statusUI.cardBorder}`}
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-2 text-xs font-bold text-white">
+                    {criterionIcon(c.id)}
+                    {c.label}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusUI.badgeCls}`}
+                  >
+                    {statusUI.badge}
+                  </span>
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between text-[11px]">
+                  <span className="truncate font-semibold text-slate-200">{c.currentValue}</span>
+                  <span className="ml-2 shrink-0 font-bold text-slate-300">
+                    {c.score}/{c.maxScore} pts
+                  </span>
+                </div>
+
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className={`h-full rounded-full transition-all ${statusUI.barCls}`}
+                    style={{ width: `${Math.min(100, Math.max(4, c.percentage))}%` }}
+                  />
+                </div>
+              </div>
+
+              <p className="mt-3 text-[11px] leading-relaxed text-slate-400">{c.recommendation}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Prévia da Ficha Técnica extraída quando disponível */}
+      {specsPreview.length > 0 && (
+        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+          <p className="mb-2.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-300">
+            <Boxes size={13} className="text-emerald-400" /> Atributos Mapeados na Ficha Técnica ({specsPreview.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {specsPreview.slice(0, 12).map((sp) => (
+              <span
+                key={`${sp.name}-${sp.value}`}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-300"
+              >
+                <span className="text-slate-400">{sp.name}:</span>
+                <strong className="font-semibold text-white">{sp.value}</strong>
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -3122,6 +3359,9 @@ function DossierView({
           )}
         </div>
       </div>
+
+      {/* Módulo de Análise de Qualidade da Listagem (Score 0 a 100 + Checklist) */}
+      <ListingQualitySection d={d} />
 
       {/* Comparador Ranqueado de Concorrentes (Estilo AliPrice / 1688) */}
       <div className="glass-panel space-y-4 rounded-3xl p-6">

@@ -7,6 +7,7 @@ import {
   ageAlert,
   commissionAt,
   estimateSales,
+  evaluateListingQuality,
   extractKeywords,
   parseSoldText,
   revenueFromVelocity,
@@ -16,6 +17,7 @@ import {
   type CategoryFees,
   type Commission,
   type KeywordStat,
+  type ListingQualityReport,
   type ListingTypeId,
   type Periods,
   type SalesEstimate,
@@ -32,6 +34,7 @@ import {
   type ReviewComment,
   type ReviewStarBreakdown,
   type ScrapedReviews,
+  type SpecAttribute,
 } from '@/lib/pageState';
 
 export const dynamic = 'force-dynamic';
@@ -203,6 +206,8 @@ type Bundle = {
   shippingSource: string;
   refPriceFromSimilar: number | null;
   fallbackPictures: AnyObj[];
+  descriptionLength: number;
+  resolvedSignals: PageSignals | null;
 };
 
 export type Dossier = {
@@ -219,6 +224,8 @@ export type Dossier = {
   model: string | null;
   images: string[];
   videos: ProductVideo[];
+  attributes: SpecAttribute[];
+  listingQuality: ListingQualityReport;
   price: number | null;
   originalPrice: number | null;
   discountPct: number | null;
@@ -886,6 +893,7 @@ async function fetchItem(itemId: string, bearer: string | null): Promise<AnyObj 
     category_id: categoryId,
     currency_id: 'BRL',
     permalink: `https://produto.mercadolivre.com.br/${itemId.replace(/^MLB/i, 'MLB-')}`,
+    _descriptionPlainText: plainText,
     shipping: {
       free_shipping: shipOpt ? num(shipOpt.cost) === 0 : false,
       logistic_type: str(shipOpt?.logistic_type) ?? 'drop_off',
@@ -1202,14 +1210,17 @@ async function fetchRealNoIndexReviews(opts: {
   let activeObjectId: string | null = candidates[0]?.id ?? null;
   let activeIsItem: boolean = candidates[0]?.isItem ?? true;
 
+  let rawSearchReturned = 0;
+
   for (const cand of candidates) {
-    // 1) Quando offset === 0 e sem filtro de estrela específica, busca a página contextual completa (traz média, total, níveis, carrossel de fotos e 15 opiniões + item_id real!)
-    if (offset === 0 && starNum === null) {
+    // 1) Quando offset === 0 e sem filtro de estrela/fotos, busca a página contextual completa (traz média, total, níveis, carrossel de fotos e 15 opiniões + item_id real!)
+    if (offset === 0 && starNum === null && !onlyPhotos) {
       const ctxUrl = `https://www.mercadolivre.com.br/noindex/catalog/reviews/${encodeURIComponent(cand.id)}?noIndex=true&contextual=true&isItem=${cand.isItem}`;
       const rawHtml = await fetchNoIndexText(ctxUrl, false);
       const parsed = rawHtml ? parseNoIndexReviewsPayload(rawHtml) : null;
       if (parsed && (parsed.comments.length > 0 || (parsed.totalReviews ?? 0) > 0 || parsed.ratingAverage !== null)) {
         bestReviews = parsed;
+        rawSearchReturned = parsed.comments.length;
         activeObjectId = cand.id;
         activeIsItem = cand.isItem;
         if (parsed.resolvedItemId) {
@@ -1226,6 +1237,7 @@ async function fetchRealNoIndexReviews(opts: {
           const rawSearch = await fetchNoIndexText(searchUrl, true);
           const parsedSearch = rawSearch ? parseNoIndexReviewsPayload(rawSearch) : null;
           if (parsedSearch && parsedSearch.comments.length > 0) {
+            rawSearchReturned = parsedSearch.comments.length;
             bestReviews = {
               ...parsed,
               comments: parsedSearch.comments,
@@ -1237,12 +1249,19 @@ async function fetchRealNoIndexReviews(opts: {
       }
     }
 
-    // 2) Endpoint JSON /search (suporta paginação offset e filtro rating=1..5)
+    // 2) Endpoint JSON /search (suporta paginação offset, filtro rating=1..5 e busca ampla para Com Fotos)
     const ratingParam = starNum !== null ? `&rating=${starNum}` : '';
-    const fetchLimit = onlyPhotos ? Math.max(limit, 30) : limit;
-    const searchUrlA = `https://www.mercadolivre.com.br/noindex/catalog/reviews/${encodeURIComponent(cand.id)}/search?objectId=${encodeURIComponent(cand.id)}&siteId=MLB&isItem=${cand.isItem}${ratingParam}&limit=${fetchLimit}&offset=${offset}`;
+    const mediaParam = onlyPhotos ? '&mediaRole=image' : '';
+    const fetchLimit = onlyPhotos ? 30 : limit;
+    const searchUrlA = `https://www.mercadolivre.com.br/noindex/catalog/reviews/${encodeURIComponent(cand.id)}/search?objectId=${encodeURIComponent(cand.id)}&siteId=MLB&isItem=${cand.isItem}${ratingParam}${mediaParam}&limit=${fetchLimit}&offset=${offset}`;
     let rawJson = await fetchNoIndexText(searchUrlA, true);
     let parsedJson = rawJson ? parseNoIndexReviewsPayload(rawJson) : null;
+
+    if ((!parsedJson || parsedJson.comments.length === 0) && mediaParam) {
+      const searchUrlNoMedia = `https://www.mercadolivre.com.br/noindex/catalog/reviews/${encodeURIComponent(cand.id)}/search?objectId=${encodeURIComponent(cand.id)}&siteId=MLB&isItem=${cand.isItem}&limit=30&offset=${offset}`;
+      rawJson = await fetchNoIndexText(searchUrlNoMedia, true);
+      parsedJson = rawJson ? parseNoIndexReviewsPayload(rawJson) : null;
+    }
 
     if (!parsedJson || parsedJson.comments.length === 0) {
       const searchUrlB = `https://www.mercadolivre.com.br/noindex/catalog/reviews/search?objectId=${encodeURIComponent(cand.id)}&siteId=MLB&isItem=${cand.isItem}${ratingParam}&limit=${fetchLimit}&offset=${offset}`;
@@ -1251,6 +1270,7 @@ async function fetchRealNoIndexReviews(opts: {
     }
 
     if (parsedJson && (parsedJson.comments.length > 0 || (parsedJson.totalReviews ?? 0) > 0)) {
+      rawSearchReturned = parsedJson.comments.length;
       bestReviews = parsedJson;
       activeObjectId = cand.id;
       activeIsItem = cand.isItem;
@@ -1312,6 +1332,13 @@ async function fetchRealNoIndexReviews(opts: {
     }
   }
 
+  if (bestReviews && starNum !== null) {
+    bestReviews = {
+      ...bestReviews,
+      comments: bestReviews.comments.filter((c) => Math.round(c.rating) === starNum),
+    };
+  }
+
   if (bestReviews && onlyPhotos) {
     bestReviews = {
       ...bestReviews,
@@ -1323,10 +1350,10 @@ async function fetchRealNoIndexReviews(opts: {
   const totalKnown = bestReviews?.totalReviews ?? 0;
   const starRow = starNum !== null ? bestReviews?.distribution.find((d) => d.stars === starNum) : null;
   const expectedForFilter = starRow && starRow.count > 0 ? starRow.count : totalKnown;
-  const hasMore =
-    !onlyPhotos &&
-    rawReturnedCount >= Math.max(8, limit - 4) &&
-    (expectedForFilter === 0 || offset + rawReturnedCount < expectedForFilter);
+  const hasMore = onlyPhotos
+    ? rawSearchReturned >= 20 && rawReturnedCount > 0
+    : rawReturnedCount >= Math.max(8, limit - 4) &&
+      (expectedForFilter === 0 || offset + rawReturnedCount < expectedForFilter);
 
   return {
     reviews: bestReviews,
@@ -1540,7 +1567,7 @@ async function buildAllCompetitors(opts: {
       monthlyRevenue,
       matchType,
       permalink: mlbuId
-        ? `https://www.mercadolivre.com.br/up/${mlbuId}`
+        ? `https://www.mercadolivre.com.br/up/${mlbuId}${sid ? `?pdp_filters=seller_id:${sid}` : ''}`
         : `https://produto.mercadolivre.com.br/${iid.replace(/^MLB/i, 'MLB-')}`,
       source: c._fromSimilarSearch ? 'Busca Similar' : 'Catálogo BuyBox',
     };
@@ -1698,7 +1725,7 @@ async function buildAllCompetitors(opts: {
         monthlyRevenue,
         matchType,
         permalink: mlbuId
-          ? `https://www.mercadolivre.com.br/up/${mlbuId}`
+          ? `https://www.mercadolivre.com.br/up/${mlbuId}${sid ? `?pdp_filters=seller_id:${sid}` : ''}`
           : `https://produto.mercadolivre.com.br/${offerItemId.replace(/^MLB/i, 'MLB-')}`,
         source: 'Busca Similar',
       };
@@ -1706,16 +1733,22 @@ async function buildAllCompetitors(opts: {
 
     out.push(...similarFromProds);
 
-    // Candidatos vindos de /sites/MLB/search
+    // Candidatos vindos de /sites/MLB/search (com busca paralela do vendedor real GET /users/{seller_id})
     const siteItems: AnyObj[] = Array.isArray(siteSearchRes.data?.results) ? siteSearchRes.data.results : [];
+    const selectedSiteItems: AnyObj[] = [];
     for (const sItem of siteItems) {
-      if (out.length >= MAX_COMPETITORS) break;
+      if (out.length + selectedSiteItems.length >= MAX_COMPETITORS) break;
       const iid = str(sItem?.id)?.toUpperCase() ?? null;
       if (!iid || seenIds.has(iid)) continue;
       const sTitle = str(sItem?.title) ?? opts.mainTitle;
       if (!isEquivalentProductTitle(opts.mainTitle, sTitle)) continue;
       seenIds.add(iid);
+      selectedSiteItems.push(sItem);
+    }
 
+    const fromSiteItems = await mapLimit(selectedSiteItems, 8, async (sItem): Promise<CompetitorRow> => {
+      const iid = str(sItem?.id)?.toUpperCase() as string;
+      const sTitle = str(sItem?.title) ?? opts.mainTitle;
       const sid = num(sItem?.seller?.id) ?? num(sItem?.seller_id);
       const { info } = sid ? await sellerData(sid, opts.bearer) : { info: null };
       const price = num(sItem?.price);
@@ -1730,11 +1763,12 @@ async function buildAllCompetitors(opts: {
       const monthlyRevenue = price !== null && vel ? Math.round(vel.monthly * price * 100) / 100 : null;
       const img = normalizeMlImageUrl(str(sItem?.thumbnail)) ?? opts.mainImage;
       const cProdId = str(sItem?.catalog_product_id);
+      const mlbuId = str(sItem?.user_product_id)?.toUpperCase() ?? null;
 
-      out.push({
+      return {
         itemId: iid,
         productId: cProdId,
-        mlbuId: str(sItem?.user_product_id)?.toUpperCase() ?? null,
+        mlbuId,
         title: sTitle,
         image: img,
         price,
@@ -1753,14 +1787,20 @@ async function buildAllCompetitors(opts: {
         ratingCount: null,
         monthlyRevenue,
         matchType: classifyCompetitorMatch(opts.mainTitle, opts.mainImage, opts.mainProductId, sTitle, img, cProdId),
-        permalink: str(sItem?.permalink) ?? `https://produto.mercadolivre.com.br/${iid.replace(/^MLB/i, 'MLB-')}`,
+        permalink:
+          str(sItem?.permalink) ??
+          (mlbuId
+            ? `https://www.mercadolivre.com.br/up/${mlbuId}${sid ? `?pdp_filters=seller_id:${sid}` : ''}`
+            : `https://produto.mercadolivre.com.br/${iid.replace(/^MLB/i, 'MLB-')}`),
         source: 'Busca Similar',
-      });
-    }
+      };
+    });
+    out.push(...fromSiteItems);
 
-    // Candidatos vindos de polycards públicos
+    // Candidatos vindos de polycards públicos (com GET /users/{seller_id} em paralelo)
+    const selectedPolys: PolyItem[] = [];
     for (const poly of polycards) {
-      if (out.length >= MAX_COMPETITORS) break;
+      if (out.length + selectedPolys.length >= MAX_COMPETITORS) break;
       const pid = poly.id.toUpperCase();
       if (
         seenIds.has(pid) ||
@@ -1773,7 +1813,11 @@ async function buildAllCompetitors(opts: {
       seenIds.add(pid);
       if (poly.productId) seenIds.add(poly.productId.toUpperCase());
       if (poly.mlbuId) seenIds.add(poly.mlbuId.toUpperCase());
+      selectedPolys.push(poly);
+    }
 
+    const fromPolys = await mapLimit(selectedPolys, 8, async (poly): Promise<CompetitorRow> => {
+      const pid = poly.id.toUpperCase();
       const { info } = poly.sellerId ? await sellerData(poly.sellerId, opts.bearer) : { info: null };
       const price = poly.price ?? opts.mainPrice;
       const soldLabel =
@@ -1796,7 +1840,7 @@ async function buildAllCompetitors(opts: {
       const cTitle = poly.title ?? opts.mainTitle;
       const cImg = poly.image ?? opts.mainImage;
 
-      out.push({
+      return {
         itemId: pid,
         productId: poly.productId,
         mlbuId: poly.mlbuId ?? null,
@@ -1820,8 +1864,9 @@ async function buildAllCompetitors(opts: {
         matchType: classifyCompetitorMatch(opts.mainTitle, opts.mainImage, opts.mainProductId, cTitle, cImg, poly.productId),
         permalink: poly.permalink,
         source: 'Busca Similar',
-      });
-    }
+      };
+    });
+    out.push(...fromPolys);
   }
 
   // Enriquecimento rápido de avaliações reais para os top 12 concorrentes sem nota
@@ -2152,10 +2197,10 @@ async function summaryFromProduct(
   const winnerId: unknown = winner?.item_id ?? cheapest?.item_id;
   const itemId: string | null = typeof winnerId === 'string' ? winnerId : poly?.id ?? null;
 
-  const sellerId = num(winner?.seller_id) ?? num(cheapest?.seller_id);
-  const [item, sellerRes, questionsRes, qr] = await Promise.all([
+  const initialSellerId = num(winner?.seller_id) ?? num(cheapest?.seller_id) ?? poly?.sellerId ?? null;
+  const [item, initialSellerRes, questionsRes, qr] = await Promise.all([
     itemId ? fetchItem(itemId, bearer) : Promise.resolve(null),
-    sellerData(sellerId, bearer),
+    sellerData(initialSellerId, bearer),
     itemId
       ? mlFetch(`/questions/search?item=${encodeURIComponent(itemId)}&limit=1&api_version=4`, bearer)
       : Promise.resolve(null),
@@ -2164,6 +2209,15 @@ async function summaryFromProduct(
       : quickRatingForTarget(itemId, null, productId),
   ]);
   const questionsCount = questionsRes?.ok ? num(questionsRes.data?.total) : null;
+  const fallbackSellerId =
+    num(item?.seller_id) ??
+    (questionsRes?.ok
+      ? num(questionsRes.data?.questions?.[0]?.seller_id) ?? num(questionsRes.data?.seller_id)
+      : null);
+  const sellerRes =
+    initialSellerRes.info || !fallbackSellerId
+      ? initialSellerRes
+      : await sellerData(fallbackSellerId, bearer);
 
   const summary = composeSummary({
     product,
@@ -2244,7 +2298,7 @@ async function ensureAllPricesAndRevenues(
     }
   }
 
-  const afterMulti = cards.map((c) => {
+  const afterMulti = await mapLimit(cards, 6, async (c) => {
     const body = c.itemId ? multiById.get(c.itemId) : undefined;
     if (!body) return c;
     const price = c.price ?? num(body.price);
@@ -2252,6 +2306,12 @@ async function ensureAllPricesAndRevenues(
     const days = c.daysOnAir ?? daysSince(str(body.date_created) ?? str(body.start_time)) ?? 30;
     const velocity = c.velocity ?? salesVelocity(c.soldQuantity, days);
     const revenue = revenueFromVelocity(price, velocity);
+    let seller = c.seller;
+    const bodySellerId = num(body.seller_id);
+    if ((!seller || !seller.nickname) && bodySellerId) {
+      const sRes = await sellerData(bodySellerId, bearer);
+      if (sRes.info) seller = sRes.info;
+    }
     return {
       ...c,
       price,
@@ -2259,6 +2319,7 @@ async function ensureAllPricesAndRevenues(
       categoryId: c.categoryId ?? validCategoryId(body.category_id),
       velocity,
       revenue,
+      seller,
     };
   });
 
@@ -3124,13 +3185,14 @@ async function loadBundle(
   let noIndexReviews = initialNoIndex.reviews;
   const discoveredItemId = itemIdIn ?? noIndexReviews?.resolvedItemId ?? signals?.itemId ?? null;
 
-  // Se o itemId foi descoberto a partir do MLBU (ex: MLBU3375028575 -> MLB5625506238), carrega seus dados e foto oficial
+  // Se o itemId foi descoberto a partir do MLBU (ex: MLBU3375028575 -> MLB5625506238), carrega seus dados, vídeo, ficha técnica e foto oficial
   let itemResolvedEarly = itemFirst;
   let extraStrictGallery = [...strictGalleryImages];
+  let mergedSignals: PageSignals | null = signals;
   if (!itemIdIn && discoveredItemId) {
     const [fetchedDiscovered, itemBotPage] = await Promise.all([
       fetchItem(discoveredItemId, bearer),
-      extraStrictGallery.length === 0
+      extraStrictGallery.length === 0 || (signals?.videos.length ?? 0) === 0 || (signals?.specsAttributes.length ?? 0) === 0
         ? fetchPage(`https://produto.mercadolivre.com.br/${discoveredItemId.replace(/^MLB/i, 'MLB-')}`)
         : Promise.resolve(null),
     ]);
@@ -3146,8 +3208,46 @@ async function loadBundle(
       if (!fallbackTitle && scrapedItem.title) {
         fallbackTitle = scrapedItem.title;
       }
+      if (scrapedItem.signals) {
+        const sub = scrapedItem.signals;
+        mergedSignals = mergedSignals
+          ? {
+              ...mergedSignals,
+              itemId: mergedSignals.itemId ?? sub.itemId,
+              productId: mergedSignals.productId ?? sub.productId,
+              categoryId: mergedSignals.categoryId ?? sub.categoryId,
+              categoryName: mergedSignals.categoryName ?? sub.categoryName,
+              brand: mergedSignals.brand ?? sub.brand,
+              model: mergedSignals.model ?? sub.model,
+              gtin: mergedSignals.gtin ?? sub.gtin,
+              price: mergedSignals.price ?? sub.price,
+              originalPrice: mergedSignals.originalPrice ?? sub.originalPrice,
+              listingTypeId: mergedSignals.listingTypeId ?? sub.listingTypeId,
+              logisticType: mergedSignals.logisticType ?? sub.logisticType,
+              freeShipping: mergedSignals.freeShipping ?? sub.freeShipping,
+              isFull: mergedSignals.isFull || sub.isFull,
+              soldText: mergedSignals.soldText ?? sub.soldText,
+              soldExact: mergedSignals.soldExact ?? sub.soldExact,
+              availableQuantity: mergedSignals.availableQuantity ?? sub.availableQuantity,
+              startTime: mergedSignals.startTime ?? sub.startTime,
+              sellerId: mergedSignals.sellerId ?? sub.sellerId,
+              sellerName: mergedSignals.sellerName ?? sub.sellerName,
+              galleryImages: [...new Set([...mergedSignals.galleryImages, ...sub.galleryImages])],
+              videos:
+                mergedSignals.videos.length > 0
+                  ? mergedSignals.videos
+                  : sub.videos,
+              specsAttributes:
+                mergedSignals.specsAttributes.length >= sub.specsAttributes.length
+                  ? mergedSignals.specsAttributes
+                  : sub.specsAttributes,
+              descriptionLength: Math.max(mergedSignals.descriptionLength, sub.descriptionLength),
+            }
+          : sub;
+      }
     }
   }
+  signals = mergedSignals;
 
   const catalogRaw: unknown = itemResolvedEarly?.catalog_product_id;
   // IMPORTANTE: `productId` oficial só é definido quando o anúncio realmente pertence a um catálogo
@@ -3208,17 +3308,34 @@ async function loadBundle(
   let fallbackPictures: AnyObj[] = [];
   const allSimilarOffers: AnyObj[] = [];
 
+  // Match exato dentro das ofertas de catálogo quando o link especifica MLBU, item MLB ou pdp_filters=seller_id:...
+  if (competitorsRaw.length > 0 && (effectiveMlbuId || discoveredItemId || targetSellerId !== null)) {
+    matchedSellerOffer =
+      (effectiveMlbuId
+        ? competitorsRaw.find((o) => str(o?.user_product_id)?.toUpperCase() === effectiveMlbuId)
+        : null) ??
+      (discoveredItemId
+        ? competitorsRaw.find((o) => str(o?.item_id)?.toUpperCase() === discoveredItemId.toUpperCase())
+        : null) ??
+      (targetSellerId !== null
+        ? competitorsRaw.find((o) => num(o?.seller_id) === targetSellerId)
+        : null) ??
+      null;
+  }
+
   const hasOwnStrictPhotos =
     extraStrictGallery.length > 0 ||
     (Array.isArray(itemResolvedEarly?.pictures) && itemResolvedEarly.pictures.length > 0) ||
-    (signals?.galleryImages && signals.galleryImages.length > 0);
+    Boolean(signals?.galleryImages && signals.galleryImages.length > 0);
 
-  // 2) Se o anúncio for individual/MLBU ou sem ofertas de catálogo diretas:
-  //    a) Tenta busca direta filtrada pelo seller_id (`/sites/MLB/search?seller_id=...`)
+  // 2) Se o anúncio for individual/MLBU, sem ofertas diretas ou ainda sem match exato do seller_id/MLBU:
+  //    a) Busca direta filtrada pelo seller_id (`/sites/MLB/search?seller_id=...`)
   //    b) Busca catálogos equivalentes em `/products/search` (limit=30) em paralelo para localizar a oferta exata
   //       (por `user_product_id === MLBU`, `item_id === MLB` ou `seller_id`) e coletar ofertas reais do nicho.
   //    NUNCA pega cegamente o 1º resultado para substituir foto/título do anúncio!
-  if (competitorsRaw.length === 0 && searchTitle) {
+  const needsExactOfferLookup =
+    !matchedSellerOffer && (effectiveMlbuId !== null || targetSellerId !== null);
+  if ((competitorsRaw.length === 0 || needsExactOfferLookup) && searchTitle) {
     const cleanWords = searchTitle
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .split(/\s+/)
@@ -3233,8 +3350,10 @@ async function loadBundle(
             bearer,
           )
         : Promise.resolve({ ok: false, status: 0, data: null }),
-      mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(fullQ)}&limit=30`, bearer),
-      shortQ !== fullQ
+      competitorsRaw.length === 0
+        ? mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(fullQ)}&limit=30`, bearer)
+        : Promise.resolve({ ok: false, status: 0, data: null }),
+      competitorsRaw.length === 0 && shortQ !== fullQ
         ? mlFetch(`/products/search?status=active&site_id=MLB&q=${encodeURIComponent(shortQ)}&limit=20`, bearer)
         : Promise.resolve({ ok: false, status: 0, data: null }),
     ]);
@@ -3244,19 +3363,27 @@ async function loadBundle(
       const exactSellerHit =
         sRows.find(
           (r) =>
-            (discoveredItemId && str(r?.id)?.toUpperCase() === discoveredItemId.toUpperCase()) ||
-            (effectiveMlbuId && str(r?.user_product_id)?.toUpperCase() === effectiveMlbuId),
+            (effectiveMlbuId && str(r?.user_product_id)?.toUpperCase() === effectiveMlbuId) ||
+            (discoveredItemId && str(r?.id)?.toUpperCase() === discoveredItemId.toUpperCase()),
         ) ?? sRows.find((r) => isEquivalentProductTitle(searchTitle, str(r?.title) ?? ''));
       if (exactSellerHit) {
         matchedSellerOffer = {
           item_id: str(exactSellerHit.id),
+          user_product_id: str(exactSellerHit.user_product_id),
           seller_id: num(exactSellerHit.seller?.id) ?? targetSellerId,
           price: num(exactSellerHit.price),
           original_price: num(exactSellerHit.original_price),
+          available_quantity: num(exactSellerHit.available_quantity),
+          sold_quantity: num(exactSellerHit.sold_quantity),
           listing_type_id: str(exactSellerHit.listing_type_id),
           category_id: str(exactSellerHit.category_id),
           shipping: exactSellerHit.shipping ?? {},
+          attributes: exactSellerHit.attributes,
         };
+        const hitThumb = normalizeMlImageUrl(str(exactSellerHit.thumbnail));
+        if (!hasOwnStrictPhotos && hitThumb) {
+          extraStrictGallery = [...new Set([...extraStrictGallery, hitThumb])];
+        }
       }
     }
 
@@ -3458,7 +3585,8 @@ async function loadBundle(
     fallbackPicUrls[0] ??
     null;
 
-  const [reviewsRes, seller, competitors, category, feeData] = await Promise.all([
+  const alreadyPlainDesc = str(item?._descriptionPlainText);
+  const [reviewsRes, seller, competitors, category, feeData, descRes] = await Promise.all([
     resolvedItemId ? mlFetch(`/reviews/item/${resolvedItemId}`, bearer) : Promise.resolve(null),
     sellerData(sellerId, bearer, signals),
     buildAllCompetitors({
@@ -3477,7 +3605,17 @@ async function loadBundle(
     }),
     fetchCategory(categoryId, bearer),
     fetchListingFeesForCategory(categoryId, price, isSupermarket, bearer),
+    resolvedItemId && !alreadyPlainDesc
+      ? mlFetch(`/items/${encodeURIComponent(resolvedItemId)}/description`, bearer)
+      : Promise.resolve(null),
   ]);
+
+  const apiDescLen =
+    alreadyPlainDesc?.length ??
+    (descRes && descRes.ok && descRes.data && typeof descRes.data === 'object'
+      ? str(descRes.data.plain_text)?.length ?? 0
+      : 0);
+  const descriptionLength = Math.max(apiDescLen, signals?.descriptionLength ?? 0);
 
   const reviews =
     reviewsRes && reviewsRes.ok && reviewsRes.data && typeof reviewsRes.data === 'object'
@@ -3507,6 +3645,8 @@ async function loadBundle(
     shippingSource: shippingData.source,
     refPriceFromSimilar,
     fallbackPictures: extraStrictGallery.length > 0 ? extraStrictGallery.map((u) => ({ secure_url: u })) : fallbackPictures,
+    descriptionLength,
+    resolvedSignals: signals,
   };
 }
 
@@ -3683,7 +3823,7 @@ function buildDossier(
   const product = b.product;
   const item = b.item;
   const winner = b.winner;
-  const signals = pub?.signals ?? null;
+  const signals = b.resolvedSignals ?? pub?.signals ?? null;
   const sh: AnyObj = item?.shipping ?? winner?.shipping ?? {};
   const notes: string[] = [...baseNotes];
 
@@ -3700,7 +3840,10 @@ function buildDossier(
    * Zero fotos de outros anúncios ou polycards relacionados!
    * ========================================================================= */
   const itemPics: AnyObj[] = Array.isArray(item?.pictures) ? item.pictures : [];
-  const pageGalleryUrls: string[] = pub?.galleryImages ?? signals?.galleryImages ?? [];
+  const pageGalleryUrls: string[] =
+    pub?.galleryImages && pub.galleryImages.length > 0
+      ? pub.galleryImages
+      : (signals?.galleryImages ?? []);
   const productPics: AnyObj[] = Array.isArray(product?.pictures) ? product.pictures : [];
 
   let strictImageUrls: string[] = [];
@@ -3708,6 +3851,8 @@ function buildDossier(
     strictImageUrls = urlsOf(itemPics);
   } else if (pageGalleryUrls.length > 0) {
     strictImageUrls = pageGalleryUrls;
+  } else if (b.mlbuId && b.fallbackPictures.length > 0) {
+    strictImageUrls = urlsOf(b.fallbackPictures);
   } else if (productPics.length > 0) {
     strictImageUrls = urlsOf(productPics);
   } else if (b.fallbackPictures.length > 0) {
@@ -3977,6 +4122,57 @@ function buildDossier(
     productId: b.productId,
   });
 
+  // Consolida Ficha Técnica (atributos da API do item + catálogo + sinais da página)
+  const attributes: SpecAttribute[] = [];
+  const seenSpecNames = new Set<string>();
+  const addAttr = (rawName: string | null, rawVal: string | null) => {
+    if (!rawName || !rawVal) return;
+    const n = rawName.trim();
+    const v = rawVal.trim();
+    if (!n || !v || n.length > 60 || v.length > 100) return;
+    const k = n.toLowerCase();
+    if (seenSpecNames.has(k)) return;
+    seenSpecNames.add(k);
+    attributes.push({ name: n, value: v });
+  };
+
+  for (const attrArr of [item?.attributes, winner?.attributes, product?.attributes]) {
+    if (!Array.isArray(attrArr)) continue;
+    for (const a of attrArr) {
+      const aName = str(a?.name) ?? str(a?.id);
+      const aVal = str(a?.value_name) ?? str(a?.values?.[0]?.name);
+      if (aName && aVal) addAttr(aName, aVal);
+    }
+  }
+  if (signals?.specsAttributes) {
+    for (const sa of signals.specsAttributes) {
+      addAttr(sa.name, sa.value);
+    }
+  }
+  if (rawBrand) addAttr('Marca', rawBrand);
+  if (rawModel) addAttr('Modelo', rawModel);
+  const rawGtin = attr(item, 'GTIN') ?? attr(product, 'GTIN') ?? signals?.gtin ?? null;
+  if (rawGtin) addAttr('EAN / GTIN', rawGtin);
+
+  const listingQuality = evaluateListingQuality({
+    title,
+    brand: rawBrand ?? inferred.brand,
+    model: rawModel ?? inferred.model,
+    imagesCount: allImages.length,
+    videosCount: videos.length,
+    attributesCount: attributes.length,
+    descriptionLength: b.descriptionLength,
+    fulfillment,
+    freeShipping,
+    listingTypeId,
+    listingTypeLabel: listingType,
+    price,
+    sellerMedal: seller?.medal ?? null,
+    reputationLevel: seller?.reputationLevel ?? null,
+    ratingAverage: reviewsDetail.ratingAverage || ratingAverage,
+    ratingCount: reviewsDetail.totalReviews || ratingCount,
+  });
+
   return {
     origin,
     productId: b.productId,
@@ -3991,6 +4187,8 @@ function buildDossier(
     model: inferred.model,
     images: allImages,
     videos,
+    attributes: attributes.slice(0, 20),
+    listingQuality,
     price,
     originalPrice,
     discountPct,
