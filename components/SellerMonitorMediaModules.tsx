@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   AlertCircle,
@@ -168,6 +168,19 @@ export function SellersAndCompetitorsModule({
   const [compInput, setCompInput] = useState('');
   const [abcFilter, setAbcFilter] = useState<'ALL' | AbcClass>('ALL');
 
+  useEffect(() => {
+    if (sellerDossier?.seller.nickname) {
+      setSellerInput(sellerDossier.seller.nickname);
+    } else if (sellerDossier?.seller.id) {
+      setSellerInput(String(sellerDossier.seller.id));
+    }
+  }, [sellerDossier?.seller.nickname, sellerDossier?.seller.id]);
+
+  useEffect(() => {
+    const code = competitorDossier?.mlbuId ?? competitorDossier?.itemId ?? competitorDossier?.productId;
+    if (code) setCompInput(code);
+  }, [competitorDossier?.mlbuId, competitorDossier?.itemId, competitorDossier?.productId]);
+
   const portfolioItems = useMemo(() => {
     const items = sellerDossier?.portfolio.items ?? [];
     if (abcFilter === 'ALL') return items;
@@ -255,7 +268,7 @@ export function SellersAndCompetitorsModule({
             </form>
             <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
               <span>Exemplos rápidos:</span>
-              {['LOJA OFICIAL SAMSUNG', 'WAP OFICIAL', 'MONDIAL OFICIAL', 'VONDER'].map((ex) => (
+              {['DEFANTISHOP', '532200362', 'LOJA OFICIAL SAMSUNG', 'WAP OFICIAL', 'MONDIAL OFICIAL'].map((ex) => (
                 <button
                   key={ex}
                   type="button"
@@ -415,16 +428,38 @@ export function SellersAndCompetitorsModule({
               </div>
             </div>
 
-            {/* Métricas Financeiras e Logísticas do Portfólio */}
+            {/* Métricas Financeiras e Logísticas do Portfólio + Tendência de Vendas */}
             <div className="glass-panel flex flex-col justify-between space-y-4 rounded-3xl p-6 lg:col-span-5">
-              <div>
-                <h3 className="text-base font-bold text-white">
-                  Desempenho Estimado do Portfólio Ativo
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Consolidado sobre os {sellerDossier.portfolio.portfolioSampleCount} principais anúncios ativos da loja
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Desempenho Estimado do Portfólio Ativo
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Consolidado sobre os {sellerDossier.portfolio.portfolioSampleCount} principais anúncios ativos da loja
+                  </p>
+                </div>
+
+                {sellerDossier.portfolio.salesTrend && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-extrabold ${
+                      sellerDossier.portfolio.salesTrend === 'Em Alta'
+                        ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                        : sellerDossier.portfolio.salesTrend === 'Em Queda'
+                          ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                          : 'border-sky-400/40 bg-sky-500/15 text-sky-300'
+                    }`}
+                  >
+                    <TrendingUp size={13} /> Tendência: {sellerDossier.portfolio.salesTrend}
+                  </span>
+                )}
               </div>
+
+              {sellerDossier.portfolio.salesTrendReason && (
+                <p className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] text-slate-300">
+                  {sellerDossier.portfolio.salesTrendReason}
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
@@ -469,6 +504,42 @@ export function SellersAndCompetitorsModule({
               </div>
             </div>
           </div>
+
+          {/* Principais Marcas Trabalhadas pelo Vendedor */}
+          {sellerDossier.portfolio.topBrands && sellerDossier.portfolio.topBrands.length > 0 && (
+            <div className="glass-panel rounded-3xl p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+                  <Tag size={15} className="text-amber-400" />
+                  Principais Marcas Trabalhadas por {sellerDossier.seller.nickname ?? 'esta Loja'}
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  Participação por marca no faturamento estimado do portfólio
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {sellerDossier.portfolio.topBrands.slice(0, 8).map((brand, idx) => (
+                  <div
+                    key={`${brand.name}-${idx}`}
+                    className="rounded-2xl border border-white/10 bg-slate-950/65 p-3 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-bold text-white">
+                        #{idx + 1} {brand.name}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                        {fmtPct(brand.sharePct)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                      <span>{brand.count} anúncio(s)</span>
+                      <span className="font-semibold text-emerald-400">{fmtBRL(brand.monthlyRevenue)}/mês</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Portfólio em Curva ABC (A = 80% receita, B = 15%, C = 5%) */}
           <div className="glass-panel space-y-4 rounded-3xl p-6">
@@ -1119,6 +1190,11 @@ export function ListingAuditorModule({
 }) {
   const [input, setInput] = useState('');
 
+  useEffect(() => {
+    const code = dossier?.mlbuId ?? dossier?.itemId ?? dossier?.productId ?? dossier?.permalink;
+    if (code) setInput(code);
+  }, [dossier?.mlbuId, dossier?.itemId, dossier?.productId, dossier?.permalink]);
+
   const report = useMemo<ListingQualityReport | null>(() => {
     if (!dossier) return null;
     if (dossier.listingQuality) return dossier.listingQuality;
@@ -1166,7 +1242,11 @@ export function ListingAuditorModule({
     }
   };
 
-  const titleLen = dossier?.title.trim().length ?? 0;
+  const cleanSeoTitle = (dossier?.title ?? '')
+    .replace(/\s*[|\-–]\s*(?:Mercado\s*Livre|Frete\s*Gr[áa]tis).*$/i, '')
+    .replace(/\s*-\s*R\$\s*[\d.,]+.*$/i, '')
+    .trim();
+  const titleLen = cleanSeoTitle.length;
   const specs = dossier?.attributes ?? dossier?.pageSignals?.specsAttributes ?? [];
 
   return (
@@ -1438,6 +1518,10 @@ export function ClipsAndImagesModule({
   onOpenProductCode: (code: string) => void;
 }) {
   const [input, setInput] = useState('');
+
+  useEffect(() => {
+    if (media?.query) setInput(media.query);
+  }, [media?.query]);
   const [tab, setTab] = useState<'all' | 'official' | 'customer' | 'videos'>('all');
   const [lightbox, setLightbox] = useState<MediaAssetImage | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);

@@ -299,7 +299,7 @@ export function feeRangeKey(price: number): keyof CategoryFees {
   return 'range_128';
 }
 
-/** Taxa fixa por unidade vendida, por faixa de preço. */
+/** Taxa fixa por unidade vendida, por faixa de preço (R$ 6,50 abaixo de R$ 79). */
 export function fixedFeeFor(price: number, isSupermarket: boolean): number {
   if (isSupermarket) {
     if (price < 30) return 1;
@@ -308,9 +308,8 @@ export function fixedFeeFor(price: number, isSupermarket: boolean): number {
     if (price < 199) return 6;
     return 0;
   }
-  if (price < 29) return 6.25;
-  if (price < 50) return 6.5;
-  if (price < 79) return 6.75;
+  if (price < 12.5) return 0;
+  if (price < 79) return 6.5;
   return 0;
 }
 
@@ -325,7 +324,8 @@ export type Commission = {
 /**
  * Comissão do ML para um preço:
  *   - abaixo de R$ 12,50: custo de 50% do preço, sem taxa fixa;
- *   - demais faixas: percentual da categoria + taxa fixa (6,25 / 6,50 / 6,75 / 0);
+ *   - R$ 12,50 até R$ 78,99: percentual da categoria + taxa fixa de R$ 6,50;
+ *   - a partir de R$ 79,00: percentual da categoria, sem taxa fixa (frete grátis);
  *   - supermercado: taxa fixa própria (1 / 2 / 4 / 6 / 0).
  */
 export function commissionAt(
@@ -344,7 +344,7 @@ export function commissionAt(
     const table = fees ?? DEFAULT_CATEGORY_FEES;
     const pct = table[feeRangeKey(price)]?.[listingTypeId] ?? DEFAULT_COMMISSION_PCT[listingTypeId];
     percentage = pct;
-    fixed = price < 29 ? 6.25 : price < 50 ? 6.5 : price < 79 ? 6.75 : 0;
+    fixed = price < 79 ? 6.5 : 0;
   }
   if (isSupermarket) fixed = fixedFeeFor(price, true);
   const amount = price * (percentage / 100) + fixed;
@@ -619,48 +619,56 @@ export type ListingQualityInput = {
 };
 
 export function evaluateListingQuality(input: ListingQualityInput): ListingQualityReport {
-  const cleanTitle = (input.title ?? '').trim();
+  const cleanTitle = (input.title ?? '')
+    .replace(/\s*\|\s*Mercado\s*Li[vb]re.*$/i, '')
+    .replace(/\s*-\s*R\$\s*[\d.,]+.*$/i, '')
+    .replace(/\s*\|\s*Frete\s+gr[áa]tis.*$/i, '')
+    .trim();
   const titleLen = cleanTitle.length;
   const titleWords = cleanTitle.split(/\s+/).filter((w) => w.length >= 2).length;
   const hasSpamSymbols = /[!?*]{2,}|[\u{1F300}-\u{1FAFF}]/u.test(cleanTitle);
 
-  // 1. Título Otimizado (0 a 20 pts — >= 50 chars: 20; 35..49: 14; 20..34: 8; < 20: 4)
+  // 1. Título Otimizado — Régua oficial de 60 caracteres (0 a 20 pts)
   let titleScore = 4;
   let titleStatus: ListingQualityStatus = 'missing';
   let titleRec = 'Amplie o título para 50–60 caracteres estruturando: Produto + Marca + Modelo + Especificação Principal.';
-  if (titleLen >= 50 && titleWords >= 6 && !hasSpamSymbols) {
+  if (titleLen >= 48 && titleLen <= 65 && titleWords >= 6 && !hasSpamSymbols) {
     titleScore = 20;
     titleStatus = 'ok';
-    titleRec = 'Título completo (50+ caracteres) com excelente densidade semântica para o buscador do Mercado Livre.';
+    titleRec = `Título calibrado na régua ideal de 60 caracteres (${titleLen}/60) com alta densidade semântica para o buscador.`;
+  } else if (titleLen > 65) {
+    titleScore = 15;
+    titleStatus = 'warning';
+    titleRec = `Título acima do limite recomendado de 60 caracteres (${titleLen}/60). Enxugue termos redundantes para evitar corte no mobile.`;
   } else if (titleLen >= 35 && titleWords >= 4) {
     titleScore = hasSpamSymbols ? 11 : 14;
     titleStatus = 'warning';
     titleRec = hasSpamSymbols
       ? 'Remova emojis/pontuação repetida e aproveite até 60 caracteres com termos reais de busca do comprador.'
-      : `Faltam ~${Math.max(5, 55 - titleLen)} caracteres para o tamanho ideal (55–60). Adicione cor, medida, voltagem ou aplicação.`;
+      : `Faltam ~${Math.max(4, 58 - titleLen)} caracteres para o teto ideal de 60 (${titleLen}/60). Adicione cor, medida, material ou aplicação.`;
   } else if (titleLen >= 20) {
     titleScore = 8;
     titleStatus = 'missing';
     titleRec = 'Título curto desperdiça tráfego orgânico de cauda longa. Expanda para 50–60 caracteres sem repetir palavras.';
   }
 
-  // 2. Galeria de Fotos e Resolução HD (0 a 20 pts — >= 7 fotos: 20; 5..6: 15; 3..4: 10; 1..2: 5; 0: 0)
+  // 2. Galeria de Fotos e Resolução HD (0 a 20 pts — >= 6 fotos: 20; 4..5: 15; 2..3: 10; 1: 5; 0: 0)
   const imgs = Math.max(0, Math.round(input.imagesCount));
   let photoScore = 0;
   let photoStatus: ListingQualityStatus = 'missing';
-  let photoRec = 'Suba ao menos 7 imagens em alta resolução (1200x1200px), sendo a 1ª em fundo branco puro.';
-  if (imgs >= 7) {
+  let photoRec = 'Suba ao menos 6 imagens em alta resolução (1200x1200px), sendo a 1ª em fundo branco puro.';
+  if (imgs >= 6) {
     photoScore = 20;
     photoStatus = 'ok';
-    photoRec = 'Galeria rica (7+ fotos em alta definição). Mantenha capa em fundo branco, foto ambientada e tabela de medidas.';
-  } else if (imgs >= 5) {
+    photoRec = `Galeria completa (${imgs} fotos em alta definição). Mantenha capa limpa, foto ambientada e tabela de medidas.`;
+  } else if (imgs >= 4) {
     photoScore = 15;
     photoStatus = 'warning';
-    photoRec = `Boa galeria (${imgs} fotos), mas adicionar mais ${7 - imgs} imagem(ns) (detalhes, medidas e embalagem) garante pontuação máxima.`;
-  } else if (imgs >= 3) {
+    photoRec = `Boa galeria (${imgs} fotos), mas adicionar mais ${6 - imgs} imagem(ns) (detalhes, medidas e embalagem) garante nota máxima.`;
+  } else if (imgs >= 2) {
     photoScore = 10;
     photoStatus = 'warning';
-    photoRec = `Apenas ${imgs} fotos cadastradas. Suba para 7–10 imagens HD (1200x1200px) para elevar a taxa de conversão.`;
+    photoRec = `Apenas ${imgs} fotos cadastradas. Suba para 6–10 imagens HD (1200x1200px) para elevar a taxa de conversão.`;
   } else if (imgs >= 1) {
     photoScore = 5;
     photoStatus = 'missing';
@@ -766,7 +774,7 @@ export function evaluateListingQuality(input: ListingQualityInput): ListingQuali
       maxScore: 20,
       percentage: Math.round((titleScore / 20) * 100),
       status: titleStatus,
-      currentValue: `${titleLen} caracteres · ${titleWords} palavras`,
+      currentValue: `${titleLen}/60 caracteres · ${titleWords} palavras`,
       recommendation: titleRec,
     },
     {
@@ -1016,6 +1024,8 @@ export type CategorySampleInput = {
   listingTypeId: string | null;
   sellerId: number | null;
   sellerNickname: string | null;
+  sellerMedal?: string | null;
+  officialStoreId?: number | null;
 };
 
 export type CategoryLeaderRow = {
@@ -1037,7 +1047,15 @@ export type CategoryPriceBucket = {
   revenueSharePct: number;
 };
 
-export type MonopolyLevel = 'Baixa' | 'Moderada' | 'Alta';
+export type CategoryMedalDistribution = {
+  platinumPct: number;
+  goldPct: number;
+  silverPct: number;
+  officialStorePct: number;
+  noMedalPct: number;
+};
+
+export type MonopolyLevel = 'Baixo' | 'Médio' | 'Alto';
 
 export type CategoryAnalyticsSummary = {
   sampleSize: number;
@@ -1048,12 +1066,15 @@ export type CategoryAnalyticsSummary = {
   minPrice: number;
   maxPrice: number;
   uniqueSellersCount: number;
+  concentratedSellersCount: number;
+  sellerConcentrationRatioPct: number;
   uniqueBrandsCount: number;
   revenuePerSeller: number;
   monopolyIndexPct: number;
   brandConcentrationPct: number;
   monopolyLevel: MonopolyLevel;
   monopolySummary: string;
+  medalDistribution: CategoryMedalDistribution;
   topSellers: CategoryLeaderRow[];
   topBrands: CategoryLeaderRow[];
   priceBuckets: CategoryPriceBucket[];
@@ -1081,7 +1102,7 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
   const estimatedMonthlySales = Math.round(valid.reduce((s, x) => s + Math.max(0, x.monthlySales), 0));
   const revDenom = Math.max(1, estimatedMonthlyRevenue);
 
-  // Agregação por Vendedor (Top 5 Vendedores)
+  // Agregação por Vendedor (Top 5 Vendedores + Proporção de Concentração)
   const sellerMap = new Map<string, { name: string; id: string | null; count: number; sales: number; rev: number }>();
   for (const it of valid) {
     const rawName = (it.sellerNickname ?? '').trim();
@@ -1106,6 +1127,20 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
   }
 
   const allSellers = [...sellerMap.values()].sort((a, b) => b.rev - a.rev || b.sales - a.sales);
+  const uniqueSellersCount = Math.max(1, allSellers.length);
+
+  // Quantos vendedores concentram 75% das vendas/receita do nicho vs. total de vendedores
+  let cumSellerSales = 0;
+  const totalSalesDenom = Math.max(1, allSellers.reduce((s, x) => s + Math.max(1, x.sales), 0));
+  let concentratedSellersCount = 0;
+  for (const s of allSellers) {
+    concentratedSellersCount += 1;
+    cumSellerSales += Math.max(1, s.sales);
+    if (cumSellerSales / totalSalesDenom >= 0.75) break;
+  }
+  concentratedSellersCount = Math.max(1, concentratedSellersCount);
+  const sellerConcentrationRatioPct = roundMoney((concentratedSellersCount / uniqueSellersCount) * 100);
+
   const topSellers: CategoryLeaderRow[] = allSellers.slice(0, 5).map((s) => ({
     name: s.name,
     id: s.id,
@@ -1114,6 +1149,44 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
     monthlyRevenue: roundMoney(s.rev),
     sharePct: roundMoney((s.rev / revDenom) * 100),
   }));
+
+  // Distribuição de Medalhas (Lojas Oficiais, Platinum, Gold, Líder/Silver, Sem Medalha)
+  let officialCnt = 0;
+  let platCnt = 0;
+  let goldCnt = 0;
+  let silverCnt = 0;
+  let noMedalCnt = 0;
+  for (const it of valid) {
+    const medalRaw = (it.sellerMedal ?? '').toLowerCase();
+    const nickRaw = (it.sellerNickname ?? '').toLowerCase();
+    if (it.officialStoreId || /oficial/.test(medalRaw) || /\boficial\b/.test(nickRaw)) {
+      officialCnt++;
+    } else if (/platinum/.test(medalRaw)) {
+      platCnt++;
+    } else if (/gold/.test(medalRaw)) {
+      goldCnt++;
+    } else if (/silver|l[ií]der/.test(medalRaw)) {
+      silverCnt++;
+    } else {
+      noMedalCnt++;
+    }
+  }
+  const medalDistribution: CategoryMedalDistribution = {
+    officialStorePct: roundMoney((officialCnt / n) * 100),
+    platinumPct: roundMoney((platCnt / n) * 100),
+    goldPct: roundMoney((goldCnt / n) * 100),
+    silverPct: roundMoney((silverCnt / n) * 100),
+    noMedalPct: roundMoney(
+      Math.max(
+        0,
+        100 -
+          roundMoney((officialCnt / n) * 100) -
+          roundMoney((platCnt / n) * 100) -
+          roundMoney((goldCnt / n) * 100) -
+          roundMoney((silverCnt / n) * 100),
+      ),
+    ),
+  };
 
   // Agregação por Marca (Top 5 Marcas)
   const brandMap = new Map<string, { name: string; count: number; sales: number; rev: number }>();
@@ -1141,24 +1214,28 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
     sharePct: roundMoney((b.rev / revDenom) * 100),
   }));
 
-  const top5SellerRev = topSellers.reduce((s, r) => s + r.monthlyRevenue, 0);
+  const top3SellerRev = topSellers.slice(0, 3).reduce((s, r) => s + r.monthlyRevenue, 0);
   const top5BrandRev = topBrands
     .filter((b) => b.name !== 'Marca Própria / Genérica')
     .reduce((s, r) => s + r.monthlyRevenue, 0);
 
+  // Índice real de monopolização combinando a razão de vendedores concentradores vs total + share Top 3
+  const top3SharePct = valid.length > 0 ? (top3SellerRev / revDenom) * 100 : 0;
   const monopolyIndexPct =
-    valid.length > 0 ? Math.min(100, roundMoney((top5SellerRev / revDenom) * 100)) : 0;
+    valid.length > 0
+      ? Math.min(100, Math.max(5, roundMoney(top3SharePct * 0.65 + (100 - sellerConcentrationRatioPct) * 0.35)))
+      : 0;
   const brandConcentrationPct =
     valid.length > 0 ? Math.min(100, roundMoney((top5BrandRev / revDenom) * 100)) : 0;
 
-  let monopolyLevel: MonopolyLevel = 'Moderada';
-  let monopolySummary = 'Competitividade equilibrada: há espaço para novos sellers com boa oferta e Full.';
-  if (monopolyIndexPct < 42) {
-    monopolyLevel = 'Baixa';
-    monopolySummary = 'Nicho pulverizado! As vendas estão bem distribuídas entre diversos vendedores — excelente janela de entrada.';
-  } else if (monopolyIndexPct > 68) {
-    monopolyLevel = 'Alta';
-    monopolySummary = 'Alta concentração nos Top 5 vendedores. Exige diferenciação clara (kits, marca própria, Full ou preço agressivo).';
+  let monopolyLevel: MonopolyLevel = 'Médio';
+  let monopolySummary = `${concentratedSellersCount} de ${uniqueSellersCount} vendedores concentram 75% das vendas (${roundMoney(top3SharePct)}% nos Top 3). Há espaço para competir com boa ficha técnica e Full.`;
+  if (monopolyIndexPct < 42 || sellerConcentrationRatioPct >= 62) {
+    monopolyLevel = 'Baixo';
+    monopolySummary = `Nicho pulverizado: ${concentratedSellersCount} de ${uniqueSellersCount} vendedores dividem 75% das vendas — excelente janela de entrada para novos sellers.`;
+  } else if (monopolyIndexPct > 65 || (uniqueSellersCount >= 5 && sellerConcentrationRatioPct <= 30)) {
+    monopolyLevel = 'Alto';
+    monopolySummary = `Monopólio elevado: apenas ${concentratedSellersCount} de ${uniqueSellersCount} vendedores concentram 75% do giro. Exige diferenciação clara (kits, marca própria, Full ou preço agressivo).`;
   }
 
   // Distribuição em 4 faixas dinâmicas de preço
@@ -1209,7 +1286,6 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
   const internationalPct = roundMoney((intlCount / n) * 100);
   const nationalPct = roundMoney(Math.max(0, 100 - internationalPct));
 
-  const uniqueSellersCount = Math.max(1, allSellers.length);
   const uniqueBrandsCount = Math.max(1, allBrands.length);
 
   return {
@@ -1221,12 +1297,15 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
     minPrice,
     maxPrice,
     uniqueSellersCount,
+    concentratedSellersCount,
+    sellerConcentrationRatioPct,
     uniqueBrandsCount,
     revenuePerSeller: roundMoney(estimatedMonthlyRevenue / uniqueSellersCount),
     monopolyIndexPct,
     brandConcentrationPct,
     monopolyLevel,
     monopolySummary,
+    medalDistribution,
     topSellers,
     topBrands,
     priceBuckets,
@@ -1243,10 +1322,11 @@ export function computeCategoryAnalytics(items: CategorySampleInput[]): Category
 }
 
 /* =============================================================================
- * RAIO-X DE VENDEDOR — PORTFÓLIO E CURVA ABC (80 / 15 / 5)
+ * RAIO-X DE VENDEDOR — PORTFÓLIO, MARCAS, TENDÊNCIA E CURVA ABC (80 / 15 / 5)
  * ============================================================================= */
 
 export type AbcClass = 'A' | 'B' | 'C';
+export type SellerSalesTrend = 'Em Alta' | 'Estável' | 'Em Queda';
 
 export type SellerPortfolioItemInput = {
   id: string;
@@ -1276,6 +1356,13 @@ export type SellerPortfolioItem = SellerPortfolioItemInput & {
   cumulativeSharePct: number;
 };
 
+export type SellerBrandSummary = {
+  name: string;
+  count: number;
+  sharePct: number;
+  monthlyRevenue: number;
+};
+
 export type SellerPortfolioAnalytics = {
   portfolioSampleCount: number;
   estimatedMonthlyRevenue: number;
@@ -1288,11 +1375,46 @@ export type SellerPortfolioAnalytics = {
   premiumPct: number;
   classicPct: number;
   catalogPct: number;
-  topBrands: { name: string; count: number; sharePct: number }[];
+  salesTrend: SellerSalesTrend;
+  salesTrendReason: string;
+  topBrands: SellerBrandSummary[];
   items: SellerPortfolioItem[];
 };
 
-export function computeSellerPortfolioAnalytics(rawItems: SellerPortfolioItemInput[]): SellerPortfolioAnalytics {
+const KNOWN_BRAND_TOKENS = [
+  'Samsung', 'Apple', 'Xiaomi', 'Motorola', 'LG', 'Sony', 'JBL', 'Logitech', 'AMD', 'Ryzen',
+  'Intel', 'Kingston', 'SanDisk', 'Mondial', 'WAP', 'Britânia', 'Philco', 'Electrolux', 'Arno',
+  'Oster', 'Tramontina', 'Vonder', 'Bosch', 'Makita', 'DeWalt', 'Stanley', '3M', 'Nike', 'Adidas',
+  'Puma', 'Olympikus', 'Havaianas', 'Lupo', 'Boticário', 'Natura', 'Eudora', 'L’Oréal', 'Nivea',
+  'Growth', 'Max Titanium', 'Integralmedica', 'Brastemp', 'Consul', 'Midea', 'Gree', 'Elgin',
+  'Multilaser', 'Positivo', 'Dell', 'Lenovo', 'Asus', 'Acer', 'HP', 'Epson', 'Canon',
+];
+
+function inferBrandFromItem(brand: string | null, title: string, fallbackStoreName?: string | null): string {
+  const b = (brand ?? '').trim();
+  if (b && !/^(gen[eé]rica|sem marca|outros|importado|linha\s)/i.test(b)) {
+    return b;
+  }
+  const lowerTitle = ` ${title.toLowerCase()} `;
+  for (const kb of KNOWN_BRAND_TOKENS) {
+    if (lowerTitle.includes(` ${kb.toLowerCase()} `)) return kb;
+  }
+  if (fallbackStoreName && !/^lojista/i.test(fallbackStoreName)) {
+    return `${fallbackStoreName} (Linha Própria)`;
+  }
+  return 'Marca Própria / Importação';
+}
+
+export function computeSellerPortfolioAnalytics(
+  rawItems: SellerPortfolioItemInput[],
+  sellerContext?: {
+    nickname?: string | null;
+    reputationLevel?: string | null;
+    claimsRate?: number | null;
+    cancellationRate?: number | null;
+    completedSales?: number | null;
+  },
+): SellerPortfolioAnalytics {
   const sorted = [...rawItems].sort(
     (a, b) => b.monthlyRevenue - a.monthlyRevenue || b.soldQuantity - a.soldQuantity,
   );
@@ -1321,8 +1443,11 @@ export function computeSellerPortfolioAnalytics(rawItems: SellerPortfolioItemInp
     abcCounts[abcClass] += 1;
     abcRevenue[abcClass] = roundMoney(abcRevenue[abcClass] + Math.max(0, item.monthlyRevenue));
 
+    const resolvedBrand = inferBrandFromItem(item.brand, item.title, sellerContext?.nickname);
+
     return {
       ...item,
+      brand: item.brand ?? resolvedBrand,
       rank: idx + 1,
       abcClass,
       revenueSharePct: roundMoney(sharePct),
@@ -1336,19 +1461,51 @@ export function computeSellerPortfolioAnalytics(rawItems: SellerPortfolioItemInp
   const classicPct = roundMoney(Math.max(0, 100 - premiumPct));
   const catalogPct = roundMoney((sorted.filter((x) => x.isCatalog).length / n) * 100);
 
-  const bMap = new Map<string, { name: string; count: number }>();
-  for (const x of sorted) {
-    const b = (x.brand ?? '').trim();
-    if (!b || /^gen[eé]rica|^linha\s/i.test(b)) continue;
-    const k = b.toLowerCase();
-    const cur = bMap.get(k) ?? { name: b, count: 0 };
+  const bMap = new Map<string, { name: string; count: number; rev: number }>();
+  for (const x of items) {
+    const resolved = inferBrandFromItem(x.brand, x.title, sellerContext?.nickname);
+    const k = resolved.toLowerCase();
+    const cur = bMap.get(k) ?? { name: resolved, count: 0, rev: 0 };
     cur.count += 1;
+    cur.rev += Math.max(0, x.monthlyRevenue);
     bMap.set(k, cur);
   }
-  const topBrands = [...bMap.values()]
-    .sort((a, b) => b.count - a.count)
+  const topBrands: SellerBrandSummary[] = [...bMap.values()]
+    .sort((a, b) => b.rev - a.rev || b.count - a.count)
     .slice(0, 6)
-    .map((b) => ({ name: b.name, count: b.count, sharePct: roundMoney((b.count / n) * 100) }));
+    .map((b) => ({
+      name: b.name,
+      count: b.count,
+      sharePct: roundMoney((b.count / n) * 100),
+      monthlyRevenue: roundMoney(b.rev),
+    }));
+
+  // Cálculo de Tendência de Vendas (Em Alta | Estável | Em Queda)
+  const avgMonthlyPerListing = sorted.length > 0 ? totalSales / sorted.length : 0;
+  const recentActiveShare =
+    sorted.length > 0
+      ? sorted.filter((x) => (x.daysOnAir ?? 120) <= 210 && x.monthlySales >= 8).length / sorted.length
+      : 0;
+  const rep = (sellerContext?.reputationLevel ?? '5_green').toLowerCase();
+  const highClaims = (sellerContext?.claimsRate ?? 0) > 0.025 || (sellerContext?.cancellationRate ?? 0) > 0.02;
+
+  let salesTrend: SellerSalesTrend = 'Estável';
+  let salesTrendReason = 'Ritmo consistente de giro nos SKUs líderes com reputação controlada.';
+
+  if (rep.startsWith('1') || rep.startsWith('2') || highClaims || (sorted.length > 0 && avgMonthlyPerListing < 3)) {
+    salesTrend = 'Em Queda';
+    salesTrendReason = highClaims || rep.startsWith('1') || rep.startsWith('2')
+      ? 'Pressão no termômetro / reclamações reduzindo exposição orgânica do portfólio.'
+      : 'Baixa velocidade mensal por anúncio ativo na vitrine atual.';
+  } else if (
+    avgMonthlyPerListing >= 18 ||
+    fullPct >= 40 ||
+    recentActiveShare >= 0.35 ||
+    ((sellerContext?.completedSales ?? 0) >= 1000 && avgMonthlyPerListing >= 8)
+  ) {
+    salesTrend = 'Em Alta';
+    salesTrendReason = `Giro aquecido (~${Math.round(avgMonthlyPerListing)} vendas/mês por SKU amostrado) sustentado por ${fullPct >= 30 ? 'operação Full e ' : ''}termômetro verde.`;
+  }
 
   return {
     portfolioSampleCount: sorted.length,
@@ -1362,8 +1519,208 @@ export function computeSellerPortfolioAnalytics(rawItems: SellerPortfolioItemInp
     premiumPct,
     classicPct,
     catalogPct,
+    salesTrend,
+    salesTrendReason,
     topBrands,
     items,
   };
 }
+
+/* =============================================================================
+ * INSIGHTS DE AVALIAÇÕES (EXTRAÇÃO AUTOMÁTICA DE ELOGIOS E PONTOS DE ATENÇÃO)
+ * ============================================================================= */
+
+export type ReviewInsightTrait = {
+  term: string;
+  count: number;
+  sharePct: number;
+  sentiment: 'positive' | 'negative';
+  sampleQuote: string | null;
+};
+
+export type ReviewCitedWord = {
+  word: string;
+  count: number;
+  sentiment: 'positive' | 'negative' | 'neutral';
+};
+
+export type ReviewInsightsSummary = {
+  analyzedCommentsCount: number;
+  positiveTraits: ReviewInsightTrait[];
+  negativeTraits: ReviewInsightTrait[];
+  topCitedWords: ReviewCitedWord[];
+  summary: string;
+};
+
+const POSITIVE_ASPECT_PATTERNS: { label: string; regex: RegExp }[] = [
+  { label: 'Qualidade', regex: /\b(qualidade|[oó]tima qualidade|boa qualidade|excelente material)\b/i },
+  { label: 'Beleza / Design', regex: /\b(lind[ao]s?|bonit[ao]s?|maravilhos[ao]s?|perfeit[ao]s?|delicad[ao]s?|elegante)\b/i },
+  { label: 'Brilho & Acabamento', regex: /\b(brilh[oa]|acabamento|detalhes|strass|bem feit[ao]|capricho)\b/i },
+  { label: 'Custo-benefício', regex: /\b(custo[\s-]*benef[ií]cio|vale a pena|pre[çc]o bom|[oó]timo pre[çc]o|barat[ao])\b/i },
+  { label: 'Resistência / Firmeza', regex: /\b(resistente|firme|forte|dur[áa]vel|segur[ao])\b/i },
+  { label: 'Tamanho & Encaixe', regex: /\b(tamanho [oó]timo|tamanho ideal|serviu|encaix[ea]|confort[áa]vel|leve)\b/i },
+  { label: 'Fiel às fotos', regex: /\b(igual [àa] foto|id[êe]ntic[ao]|como na foto|fiel ao an[úu]ncio)\b/i },
+  { label: 'Entrega & Embalagem', regex: /\b(r[áa]pid[ao]|chegou antes|bem embalad[ao]|no prazo)\b/i },
+];
+
+const NEGATIVE_ASPECT_PATTERNS: { label: string; regex: RegExp }[] = [
+  { label: 'Frágil / Delicado', regex: /\b(fr[áa]gil|fr[áa]geis|fin[ao] demais|parece quebrar|entorta|fraco)\b/i },
+  { label: 'Tamanho menor / Medidas', regex: /\b(pequen[ao]|menor que|apertad[ao]|curt[ao]|grande demais|tamanho)\b/i },
+  { label: 'Avaria / Pedra solta', regex: /\b(quebrad[ao]|amassad[ao]|solt[ao]u?|caiu|faltando|defeito|riscad[ao]|tort[ao])\b/i },
+  { label: 'Conforto / Peso', regex: /\b(machuca|aperta|pesad[ao]|incomoda|escorrega)\b/i },
+  { label: 'Diferença de cor / Foto', regex: /\b(diferente da foto|cor diferente|desbotad[ao]|oxid[ao]u|escureceu)\b/i },
+  { label: 'Embalagem / Transporte', regex: /\b(mal embalad[ao]|caixa amassada|atras[ao]u|demorou)\b/i },
+];
+
+const REVIEW_WORD_STOP = new Set(
+  (
+    'para com sem por uma uns umas das dos que mais muito pelo pela pelos pelas como ' +
+    'mas porem contudo foi era sao estao tem tinha veio comprei comprar produto mercadoria ' +
+    'mercado livre super bem tudo todos toda todas meu minha meus minhas ela ele eles elas ' +
+    'isso essa esse este esta nao sim ainda sobre entre mesmo mesma pois porque quando onde ' +
+    'achei gostei recomendo'
+  ).split(/\s+/),
+);
+
+const POS_WORDS = new Set([
+  'qualidade', 'linda', 'lindo', 'bonita', 'bonito', 'perfeita', 'perfeito', 'otima', 'otimo',
+  'excelente', 'brilho', 'brilha', 'acabamento', 'resistente', 'firme', 'delicada', 'delicado',
+  'confortavel', 'rapido', 'rapida', 'embalado', 'embalada', 'barato', 'preco', 'maravilhosa',
+  'maravilhoso', 'elegante', 'amei', 'adorei', 'funciona', 'potente', 'pratico', 'pratica',
+]);
+
+const NEG_WORDS = new Set([
+  'fragil', 'quebrou', 'quebrada', 'quebrado', 'pequena', 'pequeno', 'amassada', 'amassado',
+  'defeito', 'fraco', 'fraca', 'ruim', 'pessimo', 'pessima', 'soltou', 'caiu', 'torta', 'torto',
+  'machuca', 'aperta', 'atrasou', 'diferente', 'menor', 'pesada', 'pesado',
+]);
+
+export function extractReviewInsights(
+  comments: { title?: string | null; content: string; rating: number }[],
+): ReviewInsightsSummary {
+  const valid = comments.filter((c) => typeof c.content === 'string' && c.content.trim().length >= 3);
+  const total = valid.length;
+  if (total === 0) {
+    return {
+      analyzedCommentsCount: 0,
+      positiveTraits: [],
+      negativeTraits: [],
+      topCitedWords: [],
+      summary: 'Ainda não há comentários textuais suficientes para extrair padrões recorrentes.',
+    };
+  }
+
+  const posMap = new Map<string, { count: number; quote: string | null }>();
+  const negMap = new Map<string, { count: number; quote: string | null }>();
+  const wordCounts = new Map<string, { display: string; count: number; ratingSum: number }>();
+
+  for (const c of valid) {
+    const fullText = `${c.title ?? ''}. ${c.content}`.trim();
+    const snippet = c.content.trim().slice(0, 110);
+    const hasContrast = /\b(mas|por[ée]m|entretanto|contudo|infelizmente|s[oó] que|pena que)\b/i.test(fullText);
+
+    if (c.rating >= 4) {
+      for (const p of POSITIVE_ASPECT_PATTERNS) {
+        if (p.regex.test(fullText)) {
+          const cur = posMap.get(p.label) ?? { count: 0, quote: null };
+          cur.count += 1;
+          cur.quote ??= snippet;
+          posMap.set(p.label, cur);
+        }
+      }
+    }
+
+    if (c.rating <= 3 || hasContrast) {
+      for (const nPat of NEGATIVE_ASPECT_PATTERNS) {
+        if (nPat.regex.test(fullText)) {
+          const cur = negMap.get(nPat.label) ?? { count: 0, quote: null };
+          cur.count += 1;
+          cur.quote ??= snippet;
+          negMap.set(nPat.label, cur);
+        }
+      }
+    } else {
+      // Mesmo em 4★–5★ sem conjunção adversativa explícita, captura alertas diretos como "frágil" ou "soltou"
+      for (const nPat of NEGATIVE_ASPECT_PATTERNS) {
+        if (nPat.label !== 'Tamanho menor / Medidas' && nPat.regex.test(fullText)) {
+          const cur = negMap.get(nPat.label) ?? { count: 0, quote: null };
+          cur.count += 1;
+          cur.quote ??= snippet;
+          negMap.set(nPat.label, cur);
+        }
+      }
+    }
+
+    const seenInComment = new Set<string>();
+    const rawWords = fullText.split(/[^0-9A-Za-zÀ-ÿ]+/).filter(Boolean);
+    for (const rw of rawWords) {
+      const norm = normalizeToken(rw);
+      if (norm.length < 4 || /^\d+$/.test(norm) || REVIEW_WORD_STOP.has(norm)) continue;
+      if (seenInComment.has(norm)) continue;
+      seenInComment.add(norm);
+      const cur = wordCounts.get(norm) ?? { display: rw.toLowerCase(), count: 0, ratingSum: 0 };
+      cur.count += 1;
+      cur.ratingSum += c.rating;
+      wordCounts.set(norm, cur);
+    }
+  }
+
+  const positiveTraits: ReviewInsightTrait[] = [...posMap.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 5)
+    .map(([term, v]) => ({
+      term,
+      count: v.count,
+      sharePct: Math.round((v.count / total) * 100),
+      sentiment: 'positive',
+      sampleQuote: v.quote,
+    }));
+
+  const negativeTraits: ReviewInsightTrait[] = [...negMap.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 5)
+    .map(([term, v]) => ({
+      term,
+      count: v.count,
+      sharePct: Math.round((v.count / total) * 100),
+      sentiment: 'negative',
+      sampleQuote: v.quote,
+    }));
+
+  const topCitedWords: ReviewCitedWord[] = [...wordCounts.entries()]
+    .filter(([, v]) => v.count >= (total >= 6 ? 2 : 1))
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 12)
+    .map(([norm, v]) => {
+      const avgR = v.ratingSum / v.count;
+      const sentiment: 'positive' | 'negative' | 'neutral' = NEG_WORDS.has(norm) || avgR <= 3.2
+        ? 'negative'
+        : POS_WORDS.has(norm) || avgR >= 4.4
+          ? 'positive'
+          : 'neutral';
+      return {
+        word: v.display,
+        count: v.count,
+        sentiment,
+      };
+    });
+
+  const topPos = positiveTraits.slice(0, 2).map((p) => p.term.toLowerCase()).join(' e ');
+  const topNeg = negativeTraits.slice(0, 2).map((n) => n.term.toLowerCase()).join(' e ');
+  const summary =
+    topPos && topNeg
+      ? `Em ${total} opiniões analisadas, compradores destacam positivamente ${topPos}, enquanto os principais pontos de atenção envolvem ${topNeg}.`
+      : topPos
+        ? `Em ${total} opiniões analisadas, a aprovação concentra-se em ${topPos}, sem reclamações recorrentes críticas.`
+        : `Padrões extraídos de ${total} comentários reais verificados no anúncio.`;
+
+  return {
+    analyzedCommentsCount: total,
+    positiveTraits,
+    negativeTraits,
+    topCitedWords,
+    summary,
+  };
+}
+
 

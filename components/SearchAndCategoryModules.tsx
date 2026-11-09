@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -14,12 +14,15 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   Download,
   ExternalLink,
+  EyeOff,
   Film,
   Filter,
   Flame,
   Globe,
+  Image as ImageIcon,
   Layers,
   LayoutGrid,
   List,
@@ -43,6 +46,7 @@ import {
   exportProductsToCsv,
   type AdvancedFilterState,
   type AdvancedSortKey,
+  type CategoryMatrixRow,
   type CategoryOverview,
   type KeywordAnalysis,
   type ModuleId,
@@ -103,6 +107,27 @@ function monthlyRevOf(p: ProductSummary): number {
   return 0;
 }
 
+function imageCoreIdOf(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = url.match(/(\d+-[A-Z]{2,4}\d+_\d{4,6})/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function normTitleTokens(raw: string): string[] {
+  const stop = new Set([
+    'para', 'com', 'sem', 'por', 'uma', 'das', 'dos', 'que', 'mais', 'kit', 'novo', 'nova',
+    'original', 'envio', 'full', 'gratis', 'luxo', 'promo', 'pronta', 'entrega',
+  ]);
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !stop.has(w));
+}
+
 function applyAdvancedProductFilters(
   items: ProductSummary[],
   f: AdvancedFilterState,
@@ -113,7 +138,13 @@ function applyAdvancedProductFilters(
   const maxSales30 = parseFilterNum(f.sales30dMax);
   const minRev30 = parseFilterNum(f.rev30dMin);
   const maxRev30 = parseFilterNum(f.rev30dMax);
+  const minAgeDays = parseFilterNum(f.ageMinDays);
+  const maxAgeDays = parseFilterNum(f.ageMaxDays);
   const minRat = f.minRating === 'todos' ? null : Number(f.minRating);
+
+  const sameRefRaw = (f.sameTitleOrImageRef ?? '').trim();
+  const refImgCore = imageCoreIdOf(sameRefRaw);
+  const refTokens = sameRefRaw ? normTitleTokens(sameRefRaw).slice(0, 6) : [];
 
   const filtered = items.filter((p) => {
     const price = p.price ?? 0;
@@ -122,6 +153,13 @@ function applyAdvancedProductFilters(
     const isCat = Boolean(p.isCatalog ?? p.productId);
     const isIntl = Boolean(p.isInternational);
     const uf = resolvedUfOf(p);
+    const medalStr = p.seller?.medal ?? '';
+    const nickStr = p.seller?.nickname ?? '';
+    const isOfficial =
+      Boolean(p.seller?.officialStoreId) ||
+      /loja\s+oficial/i.test(nickStr) ||
+      /oficial/i.test(medalStr);
+    const hasMedal = /platinum|gold|silver|l[íi]der/i.test(medalStr);
 
     if (minPrice !== null && (p.price === null || price < minPrice)) return false;
     if (maxPrice !== null && (p.price === null || price > maxPrice)) return false;
@@ -146,8 +184,24 @@ function applyAdvancedProductFilters(
 
     if (f.adType === 'catalogo' && !isCat) return false;
     if (f.adType === 'comum' && isCat) return false;
+    if (f.hideCatalog && isCat) return false;
+    if (f.hideOfficialStores && isOfficial) return false;
+    if (f.hideMedaledSellers && hasMedal) return false;
+
+    if (f.selectedCategories && f.selectedCategories.length > 0) {
+      const catKey = p.categoryId ?? p.categoryName ?? '';
+      if (!catKey || !f.selectedCategories.includes(catKey)) return false;
+    }
+
+    if (f.selectedBrands && f.selectedBrands.length > 0) {
+      const brandKey = (p.brand ?? 'Genérica / Própria').trim();
+      if (!f.selectedBrands.includes(brandKey)) return false;
+    }
 
     if (minRat !== null && (p.ratingAverage === null || p.ratingAverage < minRat)) return false;
+
+    if (minAgeDays !== null && (p.daysOnAir === null || p.daysOnAir < minAgeDays)) return false;
+    if (maxAgeDays !== null && (p.daysOnAir === null || p.daysOnAir > maxAgeDays)) return false;
 
     if (f.ageRange !== 'todos') {
       if (f.ageRange === 'mais_180') {
@@ -156,6 +210,22 @@ function applyAdvancedProductFilters(
         const maxDays = Number(f.ageRange);
         if (p.daysOnAir === null || p.daysOnAir > maxDays) return false;
       }
+    }
+
+    if (sameRefRaw) {
+      const pImgCore = imageCoreIdOf(p.image);
+      const sameImage = Boolean(refImgCore && pImgCore && refImgCore === pImgCore);
+      let sameTitle = false;
+      if (refTokens.length > 0) {
+        const candSet = new Set(normTitleTokens(p.title));
+        let hits = 0;
+        for (const tk of refTokens) {
+          if (candSet.has(tk)) hits++;
+        }
+        const needed = refTokens.length <= 2 ? 1 : 2;
+        sameTitle = hits >= needed;
+      }
+      if (!sameImage && !sameTitle) return false;
     }
 
     if (f.origin === 'nacional' && isIntl) return false;
@@ -525,11 +595,62 @@ export function AdvancedProductSearchModule({
   const [searchInput, setSearchInput] = useState(result?.query ?? '');
   const [filtersExpanded, setFiltersExpanded] = useState(true);
 
+  useEffect(() => {
+    if (result?.query) {
+      setSearchInput(result.query);
+    }
+  }, [result?.query]);
+
   const rawProducts = result?.products ?? [];
   const visible = useMemo(
     () => applyAdvancedProductFilters(rawProducts, filters),
     [rawProducts, filters],
   );
+
+  // Categorias e Marcas disponíveis na amostra para filtro múltiplo combinado ("Cérebro")
+  const availableCategories = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; count: number }>();
+    for (const p of rawProducts) {
+      const key = p.categoryId ?? p.categoryName ?? '';
+      if (!key) continue;
+      const label = p.categoryName ? `${p.categoryName} (${p.categoryId ?? ''})`.trim() : key;
+      const cur = map.get(key);
+      if (cur) cur.count += 1;
+      else map.set(key, { key, label, count: 1 });
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count);
+  }, [rawProducts]);
+
+  const availableBrands = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of rawProducts) {
+      const b = (p.brand ?? 'Genérica / Própria').trim();
+      if (!b) continue;
+      map.set(b, (map.get(b) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [rawProducts]);
+
+  const toggleMultiCategory = (catKey: string) => {
+    const cur = filters.selectedCategories ?? [];
+    const next = cur.includes(catKey) ? cur.filter((c) => c !== catKey) : [...cur, catKey];
+    onPatchFilters({ selectedCategories: next });
+  };
+
+  const toggleMultiBrand = (brandName: string) => {
+    const cur = filters.selectedBrands ?? [];
+    const next = cur.includes(brandName) ? cur.filter((b) => b !== brandName) : [...cur, brandName];
+    onPatchFilters({ selectedBrands: next });
+  };
+
+  const handleFindSameImageOrTitle = (p: ProductSummary) => {
+    const imgCore = imageCoreIdOf(p.image);
+    const refValue = imgCore ? `${imgCore} ${p.title}` : p.title;
+    setFiltersExpanded(true);
+    onPatchFilters({ sameTitleOrImageRef: refValue });
+  };
 
   // Contagem de Estados (UF) presentes na amostra carregada
   const ufCounts = useMemo(() => {
@@ -577,7 +698,15 @@ export function AdvancedProductSearchModule({
     });
   };
 
-  const applyQuickPreset = (preset: 'alta_receita' | 'alto_giro' | 'novos_60d' | 'full_catalogo' | 'limpar') => {
+  const applyQuickPreset = (
+    preset:
+      | 'alta_receita'
+      | 'alto_giro'
+      | 'novos_60d'
+      | 'oportunidade_140d'
+      | 'full_catalogo'
+      | 'limpar',
+  ) => {
     const base = modeVariant === 'locais' ? DEFAULT_LOCAL_FILTERS : DEFAULT_ADVANCED_FILTERS;
     if (preset === 'limpar') {
       onResetFilters();
@@ -588,7 +717,16 @@ export function AdvancedProductSearchModule({
     } else if (preset === 'alto_giro') {
       onPatchFilters({ ...base, sales30dMin: '30', sort: 'vendas_30d_desc' });
     } else if (preset === 'novos_60d') {
-      onPatchFilters({ ...base, ageRange: '60', sales30dMin: '5', sort: 'faturamento_desc' });
+      onPatchFilters({ ...base, ageMinDays: '0', ageMaxDays: '60', sales30dMin: '5', sort: 'faturamento_desc' });
+    } else if (preset === 'oportunidade_140d') {
+      onPatchFilters({
+        ...base,
+        ageMinDays: '0',
+        ageMaxDays: '140',
+        hideOfficialStores: true,
+        hideMedaledSellers: true,
+        sort: 'faturamento_desc',
+      });
     } else if (preset === 'full_catalogo') {
       onPatchFilters({ ...base, logistic: 'full', adType: 'catalogo', sort: 'faturamento_desc' });
     }
@@ -798,7 +936,7 @@ export function AdvancedProductSearchModule({
           </div>
         )}
 
-        {/* Painel Completo de Filtros Analíticos */}
+        {/* Painel Completo de Filtros Analíticos ("Cérebro") */}
         {filtersExpanded && (
           <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
             {/* Presets Analíticos Rápidos */}
@@ -809,10 +947,17 @@ export function AdvancedProductSearchModule({
                 </span>
                 <button
                   type="button"
+                  onClick={() => applyQuickPreset('oportunidade_140d')}
+                  className="rounded-xl border border-rose-400/35 bg-rose-500/15 px-3 py-1 text-xs font-bold text-rose-200 hover:bg-rose-500/25"
+                >
+                  🎯 Oportunidades 0–140d (Sem Medalha/Oficial)
+                </button>
+                <button
+                  type="button"
                   onClick={() => applyQuickPreset('alta_receita')}
                   className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-400/20"
                 >
-                   Alta Receita (≥ R$ 10 mil/mês)
+                  💰 Alta Receita (≥ R$ 10 mil/mês)
                 </button>
                 <button
                   type="button"
@@ -826,14 +971,14 @@ export function AdvancedProductSearchModule({
                   onClick={() => applyQuickPreset('novos_60d')}
                   className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
                 >
-                   Oportunidades Recentes (≤ 60 dias)
+                  🌱 Recentes (0–60 dias)
                 </button>
                 <button
                   type="button"
                   onClick={() => applyQuickPreset('full_catalogo')}
                   className="rounded-xl border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs font-semibold text-purple-300 hover:bg-purple-500/20"
                 >
-                   Catálogo + Full
+                  📦 Catálogo + Full
                 </button>
               </div>
 
@@ -846,8 +991,8 @@ export function AdvancedProductSearchModule({
               </button>
             </div>
 
-            {/* Grade de Faixas Numéricas: Preço, Vendas 30d e Faturamento 30d */}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Grade de Faixas Numéricas: Preço, Vendas 30d, Faturamento 30d e Janela de Idade (dias) */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   Faixa de Preço (R$)
@@ -913,7 +1058,171 @@ export function AdvancedProductSearchModule({
                   />
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-sky-400/20 bg-slate-950/60 p-3">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-sky-300">
+                  Janela de Idade (Dias no Ar)
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    inputMode="numeric"
+                    placeholder="Mín (ex: 0)"
+                    value={filters.ageMinDays}
+                    onChange={(e) => onPatchFilters({ ageMinDays: e.target.value, ageRange: 'todos' })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                  />
+                  <input
+                    inputMode="numeric"
+                    placeholder="Máx (ex: 140)"
+                    value={filters.ageMaxDays}
+                    onChange={(e) => onPatchFilters({ ageMaxDays: e.target.value, ageRange: 'todos' })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                  />
+                </div>
+              </div>
             </div>
+
+            {/* Exclusões Inteligentes ("Ocultar") + Busca por Mesma Imagem / Título */}
+            <div className="grid gap-3 lg:grid-cols-12">
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/60 p-3 lg:col-span-7">
+                <span className="mr-1 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                  <EyeOff size={12} /> Ocultar Concorrência Pesada:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onPatchFilters({ hideOfficialStores: !filters.hideOfficialStores })}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                    filters.hideOfficialStores
+                      ? 'border-amber-400 bg-amber-400 text-slate-950'
+                      : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
+                  }`}
+                >
+                  Ocultar Lojas Oficiais
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPatchFilters({ hideMedaledSellers: !filters.hideMedaledSellers })}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                    filters.hideMedaledSellers
+                      ? 'border-amber-400 bg-amber-400 text-slate-950'
+                      : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
+                  }`}
+                >
+                  Ocultar Vendedores com Medalha
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPatchFilters({ hideCatalog: !filters.hideCatalog })}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                    filters.hideCatalog
+                      ? 'border-amber-400 bg-amber-400 text-slate-950'
+                      : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
+                  }`}
+                >
+                  Ocultar Catálogo
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/60 p-3 lg:col-span-5">
+                <ImageIcon size={15} className="shrink-0 text-sky-400" />
+                <input
+                  value={filters.sameTitleOrImageRef}
+                  onChange={(e) => onPatchFilters({ sameTitleOrImageRef: e.target.value })}
+                  placeholder="Mesma imagem (URL mlstatic) ou título semelhante..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white placeholder-slate-400 outline-none focus:border-sky-400"
+                />
+                {filters.sameTitleOrImageRef && (
+                  <button
+                    type="button"
+                    onClick={() => onPatchFilters({ sameTitleOrImageRef: '' })}
+                    className="shrink-0 rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-[11px] font-bold text-rose-300 hover:bg-rose-500/20"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filtro Combinado de Múltiplas Categorias e Múltiplas Marcas */}
+            {(availableCategories.length > 0 || availableBrands.length > 0) && (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {availableCategories.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                    <div className="mb-2 flex items-center justify-between text-[11px]">
+                      <span className="font-bold uppercase tracking-wide text-slate-400">
+                        Múltiplas Categorias ({filters.selectedCategories.length} selecionadas)
+                      </span>
+                      {filters.selectedCategories.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onPatchFilters({ selectedCategories: [] })}
+                          className="font-semibold text-amber-300 hover:underline"
+                        >
+                          Todas
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                      {availableCategories.slice(0, 12).map((cat) => {
+                        const active = filters.selectedCategories.includes(cat.key);
+                        return (
+                          <button
+                            key={cat.key}
+                            type="button"
+                            onClick={() => toggleMultiCategory(cat.key)}
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                              active
+                                ? 'border-sky-400 bg-sky-500 text-white'
+                                : 'border-white/10 bg-slate-900 text-slate-300 hover:border-sky-400/40'
+                            }`}
+                          >
+                            {cat.label} ({cat.count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {availableBrands.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                    <div className="mb-2 flex items-center justify-between text-[11px]">
+                      <span className="font-bold uppercase tracking-wide text-slate-400">
+                        Múltiplas Marcas ({filters.selectedBrands.length} selecionadas)
+                      </span>
+                      {filters.selectedBrands.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onPatchFilters({ selectedBrands: [] })}
+                          className="font-semibold text-amber-300 hover:underline"
+                        >
+                          Todas
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                      {availableBrands.slice(0, 14).map((b) => {
+                        const active = filters.selectedBrands.includes(b.name);
+                        return (
+                          <button
+                            key={b.name}
+                            type="button"
+                            onClick={() => toggleMultiBrand(b.name)}
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                              active
+                                ? 'border-purple-400 bg-purple-500 text-white'
+                                : 'border-white/10 bg-slate-900 text-slate-300 hover:border-purple-400/40'
+                            }`}
+                          >
+                            {b.name} ({b.count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Seletores Categóricos: Modalidade, Logística, Tipo, Nota, Idade, Origem e UF */}
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
@@ -1337,6 +1646,14 @@ export function AdvancedProductSearchModule({
                         </button>
                         <button
                           type="button"
+                          onClick={() => handleFindSameImageOrTitle(p)}
+                          title="Buscar produtos com mesma imagem ou título"
+                          className="rounded-lg border border-sky-400/30 bg-sky-500/10 p-1.5 text-sky-300 transition hover:bg-sky-500/20"
+                        >
+                          <ImageIcon size={13} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onSimulateProduct(p)}
                           title="Simular margem na calculadora"
                           className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-1.5 text-amber-300 transition hover:bg-amber-400/20"
@@ -1463,19 +1780,27 @@ export function AdvancedProductSearchModule({
                     </div>
                   </div>
 
-                  <div className="mt-auto grid grid-cols-2 gap-2 pt-1">
+                  <div className="mt-auto grid grid-cols-3 gap-2 pt-1">
                     <button
                       type="button"
                       onClick={() => onOpenProduct(p)}
                       disabled={!code}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 py-2 text-xs font-bold text-white"
+                      className="inline-flex items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 py-2 text-xs font-bold text-white"
                     >
-                      <Search size={13} /> Abrir Raio-X
+                      <Search size={13} /> Raio-X
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleFindSameImageOrTitle(p)}
+                      title="Buscar mesma imagem/título"
+                      className="inline-flex items-center justify-center gap-1 rounded-xl border border-sky-400/35 bg-sky-500/10 py-2 text-xs font-bold text-sky-300"
+                    >
+                      <ImageIcon size={13} /> Similar
                     </button>
                     <button
                       type="button"
                       onClick={() => onSimulateProduct(p)}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-400/10 py-2 text-xs font-bold text-amber-300"
+                      className="inline-flex items-center justify-center gap-1 rounded-xl border border-amber-400/40 bg-amber-400/10 py-2 text-xs font-bold text-amber-300"
                     >
                       <Calculator size={13} /> Margem
                     </button>
@@ -1496,6 +1821,8 @@ export function AdvancedProductSearchModule({
 
 export function CategoryAnalysisModule({
   rootCategories,
+  matrixRows,
+  matrixLoading,
   categoryResult,
   loading,
   onSelectCategory,
@@ -1509,6 +1836,8 @@ export function CategoryAnalysisModule({
   isProductMonitored,
 }: {
   rootCategories: RootCategoryItem[];
+  matrixRows: CategoryMatrixRow[];
+  matrixLoading?: boolean;
   categoryResult: KeywordAnalysis | null;
   loading: string | null;
   onSelectCategory: (categoryId: string) => void;
@@ -1538,12 +1867,12 @@ export function CategoryAnalysisModule({
   };
 
   const monopolyTone =
-    analytics?.monopolyLevel === 'Baixa'
+    analytics?.monopolyLevel === 'Baixo'
       ? {
           badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
           bar: 'from-emerald-500 to-teal-400',
         }
-      : analytics?.monopolyLevel === 'Alta'
+      : analytics?.monopolyLevel === 'Alto'
         ? {
             badge: 'bg-red-500/20 text-red-300 border-red-500/40',
             bar: 'from-red-500 to-rose-400',
@@ -1696,6 +2025,162 @@ export function CategoryAnalysisModule({
         )}
       </div>
 
+      {/* Tabela Consolidada de Categorias Mães e Filhas (Visível imediatamente ao abrir a aba) */}
+      <div className="glass-panel overflow-x-auto rounded-3xl p-5 sm:p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-extrabold text-white sm:text-lg">
+              <Layers size={18} className="text-amber-400" />
+              Matriz de Categorias Mães e Filhas (Mercado Livre Brasil)
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Comparativo real de Receita Mensal 30d, Ticket Médio, Distribuição de Medalhas, % Full, % Catálogo e Proporção de Monopólio. Clique em qualquer linha para aprofundar.
+            </p>
+          </div>
+          {matrixLoading && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-300">
+              <Loader2 size={14} className="animate-spin" /> Carregando matriz de categorias...
+            </span>
+          )}
+        </div>
+
+        {matrixRows.length > 0 ? (
+          <table className="min-w-full text-left text-xs">
+            <thead className="border-b border-white/10 bg-slate-950/85 text-[11px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-3 py-3 font-semibold">Categoria (Mãe / Filha)</th>
+                <th className="px-3 py-3 font-semibold">Receita Estimada 30d</th>
+                <th className="px-3 py-3 font-semibold">Ticket Médio</th>
+                <th className="px-3 py-3 font-semibold">Distribuição de Medalhas</th>
+                <th className="px-3 py-3 font-semibold">% Full</th>
+                <th className="px-3 py-3 font-semibold">% Catálogo</th>
+                <th className="px-3 py-3 font-semibold">Índice de Monopolização</th>
+                <th className="px-3 py-3 text-right font-semibold">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {matrixRows.map((row) => {
+                const isSelected = category?.id === row.id;
+                const mBadge =
+                  row.monopolyLevel === 'Baixo'
+                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                    : row.monopolyLevel === 'Alto'
+                      ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                      : 'border-amber-400/40 bg-amber-400/15 text-amber-300';
+                const md = row.medalDistribution;
+
+                return (
+                  <tr
+                    key={row.id}
+                    onClick={() => onSelectCategory(row.id)}
+                    className={`cursor-pointer transition hover:bg-white/[0.04] ${
+                      isSelected ? 'bg-amber-400/[0.08]' : row.level === 'child' ? 'bg-slate-950/35' : ''
+                    }`}
+                  >
+                    <td className="px-3 py-3">
+                      <div className={`flex items-center gap-2 ${row.level === 'child' ? 'pl-5' : ''}`}>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
+                            row.level === 'mother'
+                              ? 'bg-amber-400/20 text-amber-300'
+                              : 'bg-sky-500/15 text-sky-300'
+                          }`}
+                        >
+                          {row.level === 'mother' ? 'MÃE' : '↳ FILHA'}
+                        </span>
+                        <div>
+                          <p className="font-bold text-white">{row.name}</p>
+                          <p className="text-[10px] text-slate-400">
+                            <span className="font-mono text-sky-300">{row.id}</span>
+                            {row.parentName ? ` · Subnicho de ${row.parentName}` : ''}
+                            {row.totalItems ? ` · ${fmtInt(row.totalItems)} itens` : ''}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-extrabold text-emerald-400">
+                      {fmtBRL(row.estimatedMonthlyRevenue)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">
+                      {fmtBRL(row.averageTicket)}
+                    </td>
+                    <td className="min-w-[210px] px-3 py-3">
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="bg-sky-400"
+                          title={`Oficiais: ${fmtPct(md.officialStorePct)}`}
+                          style={{ width: `${md.officialStorePct}%` }}
+                        />
+                        <div
+                          className="bg-emerald-400"
+                          title={`Platinum: ${fmtPct(md.platinumPct)}`}
+                          style={{ width: `${md.platinumPct}%` }}
+                        />
+                        <div
+                          className="bg-amber-400"
+                          title={`Gold/Líder: ${fmtPct(md.goldPct + md.silverPct)}`}
+                          style={{ width: `${md.goldPct + md.silverPct}%` }}
+                        />
+                        <div
+                          className="bg-slate-500"
+                          title={`Sem Medalha: ${fmtPct(md.noMedalPct)}`}
+                          style={{ width: `${md.noMedalPct}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] text-slate-400">
+                        <span className="text-sky-300">Ofic. {Math.round(md.officialStorePct)}%</span>
+                        <span className="text-emerald-300">Plat. {Math.round(md.platinumPct)}%</span>
+                        <span className="text-amber-300">
+                          Gold/Líder {Math.round(md.goldPct + md.silverPct)}%
+                        </span>
+                        <span>S/Med. {Math.round(md.noMedalPct)}%</span>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-bold text-emerald-300">
+                      ⚡ {fmtPct(row.fullPct)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-bold text-purple-300">
+                      {fmtPct(row.catalogPct)}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${mBadge}`}>
+                          Monopólio {row.monopolyLevel}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-200">
+                          ({fmtPct(row.monopolyIndexPct)})
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-slate-400">
+                        {row.concentratedSellersCount} de {row.uniqueSellersCount} vendedores concentram 75% das vendas
+                      </p>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectCategory(row.id);
+                        }}
+                        className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 hover:bg-amber-300"
+                      >
+                        Abrir Nicho
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="py-6 text-center text-xs text-slate-400">
+            {matrixLoading
+              ? 'Calculando indicadores em tempo real das categorias mães e filhas...'
+              : 'Selecione uma categoria acima para iniciar o detalhamento.'}
+          </div>
+        )}
+      </div>
+
       {/* Painel Analítico Consolidado quando há categoria carregada */}
       {category && analytics && (
         <>
@@ -1716,9 +2201,9 @@ export function CategoryAnalysisModule({
               tone="text-amber-300"
             />
             <KpiTile
-              label="Receita por Vendedor"
-              value={fmtBRL(analytics.revenuePerSeller)}
-              sub={`${analytics.uniqueSellersCount} vendedores distintos nos líderes`}
+              label="Proporção de Monopólio"
+              value={`${analytics.concentratedSellersCount} / ${analytics.uniqueSellersCount} lojas`}
+              sub={`${analytics.concentratedSellersCount} vendedores concentram 75% das vendas (${fmtPct(analytics.sellerConcentrationRatioPct)})`}
               icon={<Store size={15} />}
               tone="text-sky-300"
             />
@@ -1731,22 +2216,30 @@ export function CategoryAnalysisModule({
             />
           </div>
 
-          {/* Card de Nível de Competitividade / Monopólio + Proporções Operacionais */}
+          {/* Card de Nível de Competitividade / Monopólio + Proporções Operacionais & Medalhas */}
           <div className="grid gap-5 lg:grid-cols-12">
             <div className="glass-panel space-y-4 rounded-3xl p-6 lg:col-span-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={18} className="text-amber-400" />
                   <h3 className="text-base font-bold text-white">
-                    Índice de Monopólio &amp; Barreira de Entrada
+                    Índice de Monopolização Real &amp; Barreira
                   </h3>
                 </div>
                 <span className={`rounded-full border px-3 py-1 text-xs font-extrabold ${monopolyTone.badge}`}>
-                  Concentração {analytics.monopolyLevel}
+                  Monopólio {analytics.monopolyLevel}
                 </span>
               </div>
 
               <p className="text-xs leading-relaxed text-slate-300">{analytics.monopolySummary}</p>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-xs text-slate-300">
+                Proporção real vendedores vs. concentradores:{' '}
+                <strong className="text-amber-300">
+                  {analytics.concentratedSellersCount} de {analytics.uniqueSellersCount} vendedores
+                </strong>{' '}
+                concentram 75% das vendas do nicho ({fmtPct(analytics.sellerConcentrationRatioPct)} da base ativa).
+              </div>
 
               <div className="space-y-3 pt-1">
                 <div>
@@ -1777,10 +2270,10 @@ export function CategoryAnalysisModule({
               </div>
             </div>
 
-            {/* Proporções Operacionais: Clássico vs Premium, Full vs Correios, Catálogo vs Comum */}
+            {/* Proporções Operacionais + Distribuição de Medalhas */}
             <div className="glass-panel space-y-4 rounded-3xl p-6 lg:col-span-6">
               <h3 className="text-base font-bold text-white">
-                Estrutura Operacional do Nicho (Modalidade &amp; Logística)
+                Estrutura Operacional &amp; Distribuição de Medalhas
               </h3>
               <div className="space-y-3.5 text-xs">
                 <div>
@@ -1815,6 +2308,43 @@ export function CategoryAnalysisModule({
                   <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-800">
                     <div className="bg-purple-500" style={{ width: `${analytics.catalogPct}%` }} />
                     <div className="bg-slate-600" style={{ width: `${analytics.commonPct}%` }} />
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <div className="mb-1.5 flex flex-wrap justify-between gap-1 text-[11px]">
+                    <span className="font-semibold text-sky-300">
+                      Oficiais: {fmtPct(analytics.medalDistribution.officialStorePct)}
+                    </span>
+                    <span className="font-semibold text-emerald-300">
+                      Platinum: {fmtPct(analytics.medalDistribution.platinumPct)}
+                    </span>
+                    <span className="font-semibold text-amber-300">
+                      Gold/Líder: {fmtPct(analytics.medalDistribution.goldPct + analytics.medalDistribution.silverPct)}
+                    </span>
+                    <span className="font-semibold text-slate-300">
+                      Sem Medalha: {fmtPct(analytics.medalDistribution.noMedalPct)}
+                    </span>
+                  </div>
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="bg-sky-400"
+                      style={{ width: `${analytics.medalDistribution.officialStorePct}%` }}
+                    />
+                    <div
+                      className="bg-emerald-400"
+                      style={{ width: `${analytics.medalDistribution.platinumPct}%` }}
+                    />
+                    <div
+                      className="bg-amber-400"
+                      style={{
+                        width: `${analytics.medalDistribution.goldPct + analytics.medalDistribution.silverPct}%`,
+                      }}
+                    />
+                    <div
+                      className="bg-slate-500"
+                      style={{ width: `${analytics.medalDistribution.noMedalPct}%` }}
+                    />
                   </div>
                 </div>
               </div>

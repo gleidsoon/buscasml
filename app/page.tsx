@@ -36,7 +36,6 @@ import {
   Menu,
   MessageSquare,
   Package,
-  Scale,
   Search,
   Sparkles,
   Star,
@@ -53,9 +52,9 @@ import {
   AGE_ALERT_LABEL,
   DEFAULT_COMMISSION_PCT,
   breakdownAt,
-  computeShippingWeight,
   evaluateListingQuality,
   extractKeywords,
+  extractReviewInsights,
   suggestPrice,
   type AgeAlert,
   type CalculatorBreakdown,
@@ -64,6 +63,7 @@ import {
   type KeywordStat,
   type ListingQualityCriterionId,
   type ListingQualityReport,
+  type ReviewInsightsSummary,
   type SuggestedPrice,
 } from '@/lib/mlEngine';
 import type {
@@ -78,6 +78,7 @@ import {
   writeMonitorStore,
   type AdvancedFilterState,
   type Analysis,
+  type CategoryMatrixRow,
   type CategoryOverview,
   type CompetitorRow,
   type Dossier,
@@ -133,6 +134,11 @@ type StatusEnvelope = {
 type SearchEnvelope = { ok: true; data: Analysis };
 type RankingEnvelope = { ok: true; ranking: RankingPayload };
 type CategoriesEnvelope = { ok: true; categories: RootCategoryItem[] };
+type CategoriesMatrixEnvelope = {
+  ok: true;
+  categories: RootCategoryItem[];
+  matrixRows: CategoryMatrixRow[];
+};
 type TrendsEnvelope = { ok: true; trendsData: TrendsModulePayload };
 type SellerEnvelope = { ok: true; sellerDossier: SellerDossierPayload };
 type MediaEnvelope = { ok: true; media: MediaExtractorPayload };
@@ -162,10 +168,6 @@ type CalcForm = {
   isSupermarket: boolean;
   marginMode: 'pct' | 'brl';
   marginTarget: string;
-  physicalWeightGrams: string;
-  lengthCm: string;
-  widthCm: string;
-  heightCm: string;
   monthlyUnits: string;
 };
 
@@ -212,7 +214,7 @@ const INITIAL_CALC: CalcForm = {
   categoryLabel: '',
   salePrice: '99,90',
   supplierCost: '35,00',
-  packagingCost: '2,50',
+  packagingCost: '0,00',
   taxPct: '6',
   classicPct: String(DEFAULT_COMMISSION_PCT.gold_special),
   premiumPct: String(DEFAULT_COMMISSION_PCT.gold_pro),
@@ -223,10 +225,6 @@ const INITIAL_CALC: CalcForm = {
   isSupermarket: false,
   marginMode: 'pct',
   marginTarget: '20',
-  physicalWeightGrams: '450',
-  lengthCm: '24',
-  widthCm: '16',
-  heightCm: '10',
   monthlyUnits: '100',
 };
 
@@ -512,6 +510,15 @@ async function requestRootCategories(bearer: string | null): Promise<RootCategor
   return env.categories;
 }
 
+async function requestCategoryMatrix(bearer: string | null): Promise<CategoryMatrixRow[]> {
+  const res = await fetch('/api/ml?action=categories&matrix=1', {
+    headers: authHeaders(bearer),
+    cache: 'no-store',
+  });
+  const env = await readEnvelope<CategoriesMatrixEnvelope>(res);
+  return Array.isArray(env.matrixRows) ? env.matrixRows : [];
+}
+
 async function requestTrendsModule(
   category: string,
   bearer: string | null,
@@ -558,6 +565,7 @@ type ReviewsFetchEnvelope = {
   ratingAverage: number | null;
   totalReviews: number | null;
   distribution: ReviewStarBreakdown[];
+  insights?: ReviewInsightsSummary;
   hasMore: boolean;
   objectId: string | null;
   isItem: boolean;
@@ -1845,6 +1853,7 @@ function ProductReviewsSection({
   const [loadingFilter, setLoadingFilter] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
 
   useEffect(() => {
     setFilter('all');
@@ -1858,7 +1867,29 @@ function ProductReviewsSection({
     setActiveObjectId(reviews?.objectId ?? null);
     setActiveIsItem(reviews?.isItem);
     setLightboxUrl(null);
+    setSelectedTopic(null);
   }, [itemId, upId, catalogId, reviews, ratingAverage, ratingCount]);
+
+  const liveInsights = useMemo<ReviewInsightsSummary>(() => {
+    const computed = extractReviewInsights(comments);
+    if (computed.analyzedCommentsCount > 0) return computed;
+    return reviews?.insights ?? computed;
+  }, [comments, reviews?.insights]);
+
+  const displayedComments = useMemo(() => {
+    if (!selectedTopic) return comments;
+    const normTopic = selectedTopic
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    return comments.filter((c) => {
+      const hay = `${c.title ?? ''} ${c.content ?? ''}`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return hay.includes(normTopic);
+    });
+  }, [comments, selectedTopic]);
 
   const allCustomerPhotos = useMemo(() => {
     const seen = new Set<string>();
@@ -2014,6 +2045,113 @@ function ProductReviewsSection({
         </p>
       ) : (
         <div className="space-y-6">
+          {/* Painel Automático de Insights de Avaliações (Elogios, Pontos de Atenção & Termos Citados) */}
+          {(liveInsights.positiveTraits.length > 0 ||
+            liveInsights.negativeTraits.length > 0 ||
+            liveInsights.topCitedWords.length > 0) && (
+            <div className="rounded-2xl border border-sky-400/25 bg-sky-500/[0.06] p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-sky-300">
+                  <Sparkles size={14} className="text-amber-400" /> Insights de Avaliações dos Compradores
+                </p>
+                {selectedTopic && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTopic(null)}
+                    className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-amber-300 hover:bg-white/10"
+                  >
+                    Limpar filtro &ldquo;{selectedTopic}&rdquo;
+                  </button>
+                )}
+              </div>
+
+              <p className="text-xs leading-relaxed text-slate-300">{liveInsights.summary}</p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {liveInsights.positiveTraits.length > 0 && (
+                  <div className="rounded-xl border border-emerald-500/25 bg-slate-950/65 p-3">
+                    <p className="mb-2 text-[11px] font-bold uppercase text-emerald-300">
+                      ✓ Elogios Mais Citados
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {liveInsights.positiveTraits.map((tr) => {
+                        const active = selectedTopic === tr.term;
+                        return (
+                          <button
+                            key={tr.term}
+                            type="button"
+                            onClick={() => setSelectedTopic(active ? null : tr.term)}
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                              active
+                                ? 'border-emerald-400 bg-emerald-500 text-slate-950'
+                                : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                            }`}
+                          >
+                            {tr.term} ({tr.count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {liveInsights.negativeTraits.length > 0 && (
+                  <div className="rounded-xl border border-rose-500/25 bg-slate-950/65 p-3">
+                    <p className="mb-2 text-[11px] font-bold uppercase text-rose-300">
+                      ⚠ Pontos de Atenção / Reclamações
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {liveInsights.negativeTraits.map((tr) => {
+                        const active = selectedTopic === tr.term;
+                        return (
+                          <button
+                            key={tr.term}
+                            type="button"
+                            onClick={() => setSelectedTopic(active ? null : tr.term)}
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                              active
+                                ? 'border-rose-400 bg-rose-500 text-white'
+                                : 'border-rose-500/35 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20'
+                            }`}
+                          >
+                            {tr.term} ({tr.count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {liveInsights.topCitedWords.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <span className="text-[11px] font-semibold text-slate-400">Palavras mais citadas:</span>
+                  {liveInsights.topCitedWords.slice(0, 10).map((w) => {
+                    const active = selectedTopic === w.word;
+                    const toneCls =
+                      w.sentiment === 'positive'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                        : w.sentiment === 'negative'
+                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                          : 'border-white/10 bg-slate-900/80 text-slate-300';
+                    return (
+                      <button
+                        key={w.word}
+                        type="button"
+                        onClick={() => setSelectedTopic(active ? null : w.word)}
+                        className={`rounded-lg border px-2 py-0.5 text-[11px] transition ${
+                          active ? 'border-amber-400 bg-amber-400 font-bold text-slate-950' : toneCls
+                        }`}
+                      >
+                        {w.word} ({w.count})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-6 md:grid-cols-12">
             {/* Coluna Nota Média + Barra 5 a 1 estrelas clicável + Atributos */}
             <div className="space-y-5 md:col-span-5">
@@ -2144,13 +2282,13 @@ function ProductReviewsSection({
                   <Loader2 size={15} className="animate-spin text-amber-400" />
                   Carregando opiniões filtradas do Mercado Livre...
                 </div>
-              ) : comments.length === 0 ? (
+              ) : displayedComments.length === 0 ? (
                 <p className="rounded-xl border border-white/10 bg-slate-950/40 p-4 text-xs text-slate-400">
                   Nenhuma opinião encontrada para este filtro específico.
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {comments.map((c) => (
+                  {displayedComments.map((c) => (
                     <article
                       key={c.id}
                       className="rounded-xl border border-white/10 bg-slate-950/60 p-4 transition hover:border-white/20"
@@ -3370,28 +3508,28 @@ function SimpleModalitiesCard({
         </span>
       </div>
 
-      {/* Destaque Principal: Quanto Sobrou no Bolso e Margem Final (%) */}
-      <div className="grid grid-cols-2 gap-4 rounded-2xl border border-white/10 bg-slate-950/70 p-5">
-        <div>
+      {/* Destaque Principal: Quanto Sobrou no Bolso e Margem Final (%) — sem corte de texto */}
+      <div className="grid gap-4 overflow-visible rounded-2xl border border-white/10 bg-slate-950/70 p-5 sm:grid-cols-2">
+        <div className="min-w-0 overflow-visible py-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Quanto Sobrou no Bolso
           </p>
-          <p className={`mt-1.5 text-3xl font-black ${statusTone.profitColor}`}>
+          <p className={`mt-1.5 py-1 text-2xl font-black leading-normal sm:text-3xl ${statusTone.profitColor}`}>
             {hasPrice ? formatBRL(b.contribution) : 'R$ 0,00'}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">Lucro líquido por venda</p>
         </div>
 
-        <div>
+        <div className="min-w-0 overflow-visible py-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Margem Final (%)
           </p>
-          <p className={`mt-1.5 text-3xl font-black ${statusTone.profitColor}`}>
+          <p className={`mt-1.5 py-1 text-2xl font-black leading-normal sm:text-3xl ${statusTone.profitColor}`}>
             {hasPrice ? formatPercent(marginPct) : '0,0%'}
           </p>
-          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+          <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
             <div
-              className={`h-full rounded-full transition-all ${statusTone.barColor}`}
+              className={`h-2 rounded-full transition-all ${statusTone.barColor}`}
               style={{ width: `${Math.min(100, Math.max(0, marginPct * 2.5))}%` }}
             />
           </div>
@@ -3399,20 +3537,24 @@ function SimpleModalitiesCard({
       </div>
 
       {/* Resumo Direto: Tarifa do ML e Custo Total */}
-      <div className="grid grid-cols-2 gap-3 text-xs">
+      <div className="grid gap-3 text-xs sm:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
           <p className="font-medium text-slate-400">Tarifa do ML ({formatDecimal(b.commissionPct, 1)}%)</p>
-          <p className="mt-1 text-lg font-bold text-white">{formatBRL(mlFeeTotal, 'R$ 0,00')}</p>
+          <p className="mt-1 py-0.5 text-lg font-bold leading-normal text-white">
+            {formatBRL(mlFeeTotal, 'R$ 0,00')}
+          </p>
           <p className="mt-0.5 text-[11px] text-slate-400">
             {b.fixedFee > 0
-              ? `${formatBRL(b.commission)} comissão + ${formatBRL(b.fixedFee)} taxa fixa`
+              ? `${formatBRL(b.commission)} comissão + ${formatBRL(b.fixedFee)} taxa fixa (< R$ 79)`
               : 'Isento de taxa fixa (≥ R$ 79)'}
           </p>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
           <p className="font-medium text-slate-400">Custo Total da Venda</p>
-          <p className="mt-1 text-lg font-bold text-slate-200">{formatBRL(b.totalCost, 'R$ 0,00')}</p>
+          <p className="mt-1 py-0.5 text-lg font-bold leading-normal text-slate-200">
+            {formatBRL(b.totalCost, 'R$ 0,00')}
+          </p>
           <p className="mt-0.5 text-[11px] text-slate-400">
             Produto {formatBRL(b.productCost)} + Imposto {formatBRL(b.tax)} + Frete {formatBRL(b.shipping)}
           </p>
@@ -3425,7 +3567,7 @@ function SimpleModalitiesCard({
           <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
             Preço de Venda Sugerido para sua Meta
           </p>
-          <p className="mt-0.5 text-2xl font-black text-white">
+          <p className="mt-0.5 py-0.5 text-2xl font-black leading-normal text-white">
             {suggested.price !== null ? formatBRL(suggested.price) : 'Reduza as taxas/meta'}
           </p>
         </div>
@@ -3458,17 +3600,6 @@ function CalculatorView({
 
   const quickPctTargets = ['10', '15', '20', '25', '30'];
 
-  const weightCalc = useMemo(
-    () =>
-      computeShippingWeight(
-        parseInputNumber(calc.physicalWeightGrams),
-        parseInputNumber(calc.lengthCm),
-        parseInputNumber(calc.widthCm),
-        parseInputNumber(calc.heightCm),
-      ),
-    [calc.physicalWeightGrams, calc.lengthCm, calc.widthCm, calc.heightCm],
-  );
-
   const batchUnits = Math.max(1, Math.round(parseInputNumber(calc.monthlyUnits) || 1));
   const monthlyGross = ee.classic.price * batchUnits;
   const monthlyNetClassic = ee.classic.contribution * batchUnits;
@@ -3476,24 +3607,24 @@ function CalculatorView({
 
   return (
     <section className="space-y-6">
-      {/* Painel Principal de Entradas */}
+      {/* Painel Principal Limpo e Direto */}
       <div className="glass-panel rounded-3xl p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h1 className="flex items-center gap-2.5 text-xl font-extrabold text-white sm:text-2xl">
-              <Calculator size={22} className="text-amber-400" /> Calculadora de Margem, Tarifas &amp; Peso Cubado
+              <Calculator size={22} className="text-amber-400" /> Calculadora de Margem &amp; Preço Ideal
             </h1>
             <p className="mt-0.5 text-xs text-slate-400">
-              Simule repasse líquido no Clássico e Premium, calcule Peso Físico vs. Cubado e projete o lucro mensal por lote.
+              Simulação direta com tarifas oficiais do Mercado Livre (incluindo taxa fixa de R$ 6,50 abaixo de R$ 79) sincronizada com o anúncio analisado.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {calc.title && <Pill tone="blue">Produto: {calc.title.slice(0, 50)}</Pill>}
+            {calc.title && <Pill tone="blue">Anúncio: {calc.title.slice(0, 50)}</Pill>}
             {calc.categoryLabel && <Pill tone="yellow">{calc.categoryLabel.slice(0, 40)}</Pill>}
           </div>
         </div>
 
-        {/* 4 Campos Principais */}
+        {/* 4 Campos Principais Diretos: Preço de Venda, Custo do Produto, Imposto % e Frete R$ */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
             <label className="block text-xs font-bold uppercase tracking-wide text-amber-300">
@@ -3504,8 +3635,13 @@ function CalculatorView({
               className="mt-2 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 py-3 text-xl font-extrabold text-white outline-none focus:border-amber-400"
               value={calc.salePrice}
               onChange={(e) => onChange({ salePrice: e.target.value })}
-              placeholder="99,90"
+              placeholder="39,90"
             />
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {ee.classic.fixedFee > 0
+                ? `Aplica taxa fixa ML de ${formatBRL(ee.classic.fixedFee)} (< R$ 79)`
+                : 'Acima de R$ 79: sem taxa fixa ML'}
+            </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
@@ -3517,13 +3653,14 @@ function CalculatorView({
               className="mt-2 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 py-3 text-xl font-extrabold text-white outline-none focus:border-sky-400"
               value={calc.supplierCost}
               onChange={(e) => onChange({ supplierCost: e.target.value })}
-              placeholder="35,00"
+              placeholder="15,00"
             />
+            <p className="mt-1.5 text-[11px] text-slate-400">Custo de aquisição no fornecedor</p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
             <label className="block text-xs font-bold uppercase tracking-wide text-slate-300">
-              3. Imposto da Nota (%)
+              3. Imposto (%)
             </label>
             <input
               inputMode="decimal"
@@ -3532,12 +3669,13 @@ function CalculatorView({
               onChange={(e) => onChange({ taxPct: e.target.value })}
               placeholder="6"
             />
+            <p className="mt-1.5 text-[11px] text-slate-400">Alíquota sobre a nota fiscal</p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold uppercase tracking-wide text-emerald-300">
-                4. Custo de Frete (R$)
+                4. Frete (R$)
               </label>
               <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-300">
                 <input
@@ -3546,7 +3684,7 @@ function CalculatorView({
                   onChange={(e) => onChange({ mlCoversShipping: e.target.checked })}
                   className="h-3.5 w-3.5 accent-emerald-400"
                 />
-                Frete R$ 0
+                Comprador paga / R$ 0
               </label>
             </div>
             <input
@@ -3555,28 +3693,17 @@ function CalculatorView({
               className="mt-2 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 py-3 text-xl font-extrabold text-white outline-none focus:border-emerald-400 disabled:opacity-50"
               value={calc.mlCoversShipping ? '0,00' : calc.shippingCost}
               onChange={(e) => onChange({ shippingCost: e.target.value })}
-              placeholder="21,45"
+              placeholder="0,00"
             />
+            <p className="mt-1.5 text-[11px] text-slate-400">Custo de envio pago pelo lojista</p>
           </div>
         </div>
 
-        {/* Linha Complementar: Embalagem/Extras, Comissões da Categoria e Volume Mensal */}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Linha Enxuta de Comissões da Categoria & Volume de Lote */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
             <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
-              Embalagem / Custo Extra (R$)
-            </label>
-            <input
-              inputMode="decimal"
-              value={calc.packagingCost}
-              onChange={(e) => onChange({ packagingCost: e.target.value })}
-              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-white outline-none focus:border-sky-400"
-            />
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
-              Comissão Clássico (%)
+              Comissão Clássico da Categoria (%)
             </label>
             <input
               inputMode="decimal"
@@ -3588,7 +3715,7 @@ function CalculatorView({
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
             <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400">
-              Comissão Premium (%)
+              Comissão Premium da Categoria (%)
             </label>
             <input
               inputMode="decimal"
@@ -3600,7 +3727,7 @@ function CalculatorView({
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3.5">
             <label className="block text-[11px] font-bold uppercase tracking-wide text-emerald-300">
-              Volume Mensal Projetado (un.)
+              Simulação de Lote Mensal (un.)
             </label>
             <input
               inputMode="numeric"
@@ -3611,86 +3738,12 @@ function CalculatorView({
           </div>
         </div>
 
-        {/* Simulador de Peso Físico vs. Peso Cubado (C × L × A / 6000) */}
-        <div className="mt-4 rounded-2xl border border-sky-400/25 bg-sky-500/[0.06] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-300">
-                <Scale size={14} /> Cálculo de Peso Físico vs. Peso Cubado (Mercado Envios)
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Fórmula volumétrica: (Comprimento × Largura × Altura em cm) / 6000. Prevalece o maior peso.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                onChange({
-                  mlCoversShipping: false,
-                  shippingCost: formatInputNumber(weightCalc.suggestedMeliShippingBrl),
-                })
-              }
-              className="rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-extrabold text-white transition hover:bg-sky-400"
-            >
-              Aplicar Frete Sugerido ({formatBRL(weightCalc.suggestedMeliShippingBrl)})
-            </button>
-          </div>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <label className="space-y-1 text-xs">
-              <span className="text-slate-400">Peso Físico (g)</span>
-              <input
-                inputMode="numeric"
-                value={calc.physicalWeightGrams}
-                onChange={(e) => onChange({ physicalWeightGrams: e.target.value })}
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
-              />
-            </label>
-            <label className="space-y-1 text-xs">
-              <span className="text-slate-400">Comprimento (cm)</span>
-              <input
-                inputMode="decimal"
-                value={calc.lengthCm}
-                onChange={(e) => onChange({ lengthCm: e.target.value })}
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
-              />
-            </label>
-            <label className="space-y-1 text-xs">
-              <span className="text-slate-400">Largura (cm)</span>
-              <input
-                inputMode="decimal"
-                value={calc.widthCm}
-                onChange={(e) => onChange({ widthCm: e.target.value })}
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
-              />
-            </label>
-            <label className="space-y-1 text-xs">
-              <span className="text-slate-400">Altura (cm)</span>
-              <input
-                inputMode="decimal"
-                value={calc.heightCm}
-                onChange={(e) => onChange({ heightCm: e.target.value })}
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 font-bold text-white outline-none"
-              />
-            </label>
-            <div className="rounded-xl border border-white/10 bg-slate-950/80 p-2.5 text-xs lg:col-span-2">
-              <p className="text-[10px] uppercase text-slate-400">Peso Faturável Cobrado</p>
-              <p className="mt-0.5 text-sm font-extrabold text-amber-300">
-                {formatInt(weightCalc.billableWeightGrams)} g ({weightCalc.weightType})
-              </p>
-              <p className="text-[10px] text-slate-400">
-                Físico: {formatInt(weightCalc.physicalWeightGrams)}g · Cubado: {formatInt(weightCalc.volumetricWeightGrams)}g
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Seletor Rápido de Meta de Margem */}
+        {/* 5. Meta de Margem */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
               <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
-                Meta de Lucro: Quanto você quer ganhar por venda?
+                5. Meta de Margem: Quanto você quer ganhar por venda?
               </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 <button
@@ -3702,18 +3755,18 @@ function CalculatorView({
                       : 'border border-white/10 bg-slate-900 text-slate-300'
                   }`}
                 >
-                  Quero ganhar % de margem
+                  Meta em % de margem
                 </button>
                 <button
                   type="button"
-                  onClick={() => onChange({ marginMode: 'brl', marginTarget: '25,00' })}
+                  onClick={() => onChange({ marginMode: 'brl', marginTarget: '15,00' })}
                   className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
                     calc.marginMode === 'brl'
                       ? 'bg-sky-500 text-white'
                       : 'border border-white/10 bg-slate-900 text-slate-300'
                   }`}
                 >
-                  Quero ganhar R$ fixo por venda
+                  Meta em R$ fixo por venda
                 </button>
               </div>
             </div>
@@ -3757,19 +3810,25 @@ function CalculatorView({
           <p className="flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
             <Package size={14} className="text-sky-400" /> Faturamento Bruto ({formatInt(batchUnits)} un.)
           </p>
-          <p className="mt-1.5 text-2xl font-black text-white">{formatBRL(monthlyGross)}</p>
+          <p className="mt-1.5 py-0.5 text-2xl font-black leading-normal text-white">
+            {formatBRL(monthlyGross)}
+          </p>
         </div>
         <div className="glass-panel rounded-2xl p-4">
           <p className="text-xs font-bold uppercase text-emerald-300">
             Lucro Líquido do Lote no Clássico
           </p>
-          <p className="mt-1.5 text-2xl font-black text-emerald-400">{formatBRL(monthlyNetClassic)}</p>
+          <p className="mt-1.5 py-0.5 text-2xl font-black leading-normal text-emerald-400">
+            {formatBRL(monthlyNetClassic)}
+          </p>
         </div>
         <div className="glass-panel rounded-2xl p-4">
           <p className="text-xs font-bold uppercase text-amber-300">
             Lucro Líquido do Lote no Premium
           </p>
-          <p className="mt-1.5 text-2xl font-black text-amber-300">{formatBRL(monthlyNetPremium)}</p>
+          <p className="mt-1.5 py-0.5 text-2xl font-black leading-normal text-amber-300">
+            {formatBRL(monthlyNetPremium)}
+          </p>
         </div>
       </div>
 
@@ -3928,7 +3987,7 @@ const SIDEBAR_MODULES: SidebarNavItem[] = [
   {
     id: 'calculadora',
     label: 'Calculadora de Margem',
-    shortDesc: 'Lucro & Peso Cubado',
+    shortDesc: 'Lucro & Tarifas ML',
     group: 'conversao',
     icon: <Calculator size={17} />,
   },
@@ -3944,9 +4003,22 @@ const MODULE_TITLES: Record<ModuleId, string> = {
   monitor: 'Monitor de Produtos & Vendedores',
   auditor: 'Análise da Listagem · Score 0–100',
   midias: 'Clipes e Imagens de Alta Resolução',
-  calculadora: 'Calculadora de Margem & Peso Cubado',
+  calculadora: 'Calculadora de Margem & Preço Ideal',
   raiox: 'Raio-X Completo do Produto',
 };
+
+function isCategoryCodeQuery(q: string): boolean {
+  return /^MLB\d{3,7}$/i.test(q.trim());
+}
+
+function isAdLinkOrCodeQuery(q: string): boolean {
+  const clean = q.trim();
+  return (
+    /^MLBU?-?\d{8,}$/i.test(clean) ||
+    /^MLBU\d{6,}$/i.test(clean) ||
+    /mercadolivre\.com\.br|mercadolivre\.com|meli\.la/i.test(clean)
+  );
+}
 
 export default function BuscasMLPro() {
   const [activeModule, setActiveModule] = useState<ModuleId>('home');
@@ -3963,8 +4035,10 @@ export default function BuscasMLPro() {
   const [productFilters, setProductFilters] = useState<AdvancedFilterState>(DEFAULT_ADVANCED_FILTERS);
   const [localFilters, setLocalFilters] = useState<AdvancedFilterState>(DEFAULT_LOCAL_FILTERS);
 
-  // Estado de Análise de Categoria
+  // Estado de Análise de Categoria + Matriz de Categorias Mães e Filhas
   const [rootCategories, setRootCategories] = useState<RootCategoryItem[]>([]);
+  const [categoryMatrixRows, setCategoryMatrixRows] = useState<CategoryMatrixRow[]>([]);
+  const [loadingCategoryMatrix, setLoadingCategoryMatrix] = useState<boolean>(false);
   const [categoryAnalysisResult, setCategoryAnalysisResult] = useState<KeywordAnalysis | null>(null);
 
   // Estado de Tendências Dedicado
@@ -4004,6 +4078,8 @@ export default function BuscasMLPro() {
   const refreshRef = useRef<Promise<string | null> | null>(null);
   const exchangeStartedRef = useRef(false);
   const searchSeqRef = useRef(0);
+  const autoLoadedRef = useRef<Record<string, boolean>>({});
+  const lastModuleQueryRef = useRef<Record<string, string>>({});
 
   const ee = useMemo(() => computeMarginCalculator(calc), [calc]);
 
@@ -4102,9 +4178,22 @@ export default function BuscasMLPro() {
       .catch(() => undefined);
 
     getBearer()
-      .then((bearer) => requestRootCategories(bearer))
-      .then((cats) => {
-        if (active) setRootCategories(cats);
+      .then((bearer) => {
+        void requestRootCategories(bearer)
+          .then((cats) => {
+            if (active) setRootCategories(cats);
+          })
+          .catch(() => undefined);
+
+        setLoadingCategoryMatrix(true);
+        void requestCategoryMatrix(bearer)
+          .then((rows) => {
+            if (active && rows.length > 0) setCategoryMatrixRows(rows);
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            if (active) setLoadingCategoryMatrix(false);
+          });
       })
       .catch(() => undefined);
 
@@ -4112,6 +4201,31 @@ export default function BuscasMLPro() {
       active = false;
     };
   }, [getBearer]);
+
+  /* ---------- Sincronização Automática da Calculadora com o Dossiê Ativo ---------- */
+
+  useEffect(() => {
+    if (!dossier) return;
+    const cPct =
+      dossier.fees.categoryFees.range_128?.gold_special ?? DEFAULT_COMMISSION_PCT.gold_special;
+    const pPct =
+      dossier.fees.categoryFees.range_128?.gold_pro ?? DEFAULT_COMMISSION_PCT.gold_pro;
+    setCalc((prev) => ({
+      ...prev,
+      title: dossier.title,
+      categoryLabel: dossier.categoryPath ?? dossier.categoryId ?? prev.categoryLabel,
+      salePrice: dossier.price !== null ? formatInputNumber(dossier.price) : prev.salePrice,
+      listing: kindFromLabel(dossier.listingType ?? dossier.listingTypeId) ?? 'classico',
+      classicPct: String(cPct).replace('.', ','),
+      premiumPct: String(pPct).replace('.', ','),
+      shippingCost:
+        dossier.fees.shippingListCost !== null
+          ? formatInputNumber(dossier.fees.shippingListCost)
+          : prev.shippingCost,
+      mlCoversShipping: dossier.fees.freeShippingByMeli,
+      isSupermarket: dossier.isSupermarket,
+    }));
+  }, [dossier]);
 
   /* ---------- Carregamento do Ranking da Home ---------- */
 
@@ -4177,13 +4291,18 @@ export default function BuscasMLPro() {
       q: string,
       targetVariant: 'produtos' | 'locais',
       hints?: { origin?: string | null; uf?: string | null },
+      syncUniversal = true,
     ) => {
+      const clean = q.trim();
+      if (!clean) return;
+      lastModuleQueryRef.current[targetVariant] = clean.toLowerCase();
+      if (syncUniversal) setUniversalQuery(clean);
       const seq = ++searchSeqRef.current;
       navigateTo(targetVariant);
-      setLoading(`Pesquisando anúncios de "${q}"...`);
+      setLoading(`Pesquisando anúncios de "${clean}"...`);
       try {
         const bearer = await getBearer();
-        const data = await requestAnalysis(q, bearer, 'termo', {
+        const data = await requestAnalysis(clean, bearer, 'termo', {
           origin: hints?.origin ?? (targetVariant === 'locais' ? 'nacional' : null),
           uf: hints?.uf ?? null,
           limit: 24,
@@ -4195,6 +4314,7 @@ export default function BuscasMLPro() {
         } else {
           setDossier(data.dossier);
           setAuditorDossier(data.dossier);
+          setCompetitorDossier(data.dossier);
           navigateTo('raiox');
         }
       } catch (err) {
@@ -4209,9 +4329,12 @@ export default function BuscasMLPro() {
   );
 
   const openAdDossier = useCallback(
-    async (codeOrUrl: string, openInAuditor = false) => {
+    async (codeOrUrl: string, openInAuditor = false, syncUniversal = true) => {
       const clean = codeOrUrl.trim();
       if (!clean) return;
+      lastModuleQueryRef.current.auditor = clean.toLowerCase();
+      lastModuleQueryRef.current.raiox = clean.toLowerCase();
+      if (syncUniversal) setUniversalQuery(clean);
       const seq = ++searchSeqRef.current;
       const currentOrigin = activeModule !== 'raiox' ? activeModule : returnModule;
       setReturnModule(currentOrigin);
@@ -4245,9 +4368,11 @@ export default function BuscasMLPro() {
   );
 
   const openCategoryAnalysis = useCallback(
-    async (catOrTerm: string, isCategoryId = true) => {
+    async (catOrTerm: string, isCategoryId = true, syncUniversal = true) => {
       const clean = catOrTerm.trim();
       if (!clean) return;
+      lastModuleQueryRef.current.categorias = clean.toLowerCase();
+      if (syncUniversal) setUniversalQuery(clean);
       const seq = ++searchSeqRef.current;
       navigateTo('categorias');
       setLoading(`Analisando nicho e concentração de ${clean}...`);
@@ -4275,9 +4400,11 @@ export default function BuscasMLPro() {
   );
 
   const inspectSeller = useCallback(
-    async (sellerQuery: string) => {
+    async (sellerQuery: string, syncUniversal = true) => {
       const clean = sellerQuery.trim();
       if (!clean) return;
+      lastModuleQueryRef.current.vendedores = clean.toLowerCase();
+      if (syncUniversal) setUniversalQuery(clean);
       navigateTo('vendedores');
       setLoadingSeller(true);
       setNotice(null);
@@ -4323,9 +4450,11 @@ export default function BuscasMLPro() {
   );
 
   const extractMediaFor = useCallback(
-    async (q: string) => {
+    async (q: string, syncUniversal = true) => {
       const clean = q.trim();
       if (!clean) return;
+      lastModuleQueryRef.current.midias = clean.toLowerCase();
+      if (syncUniversal) setUniversalQuery(clean);
       navigateTo('midias');
       setLoadingMedia(true);
       setNotice(null);
@@ -4342,19 +4471,137 @@ export default function BuscasMLPro() {
     [getBearer, navigateTo],
   );
 
+  /* ---------- Sincronização Inteligente entre Abas & Fim das Telas Vazias (0) ---------- */
+
+  useEffect(() => {
+    const uq = universalQuery.trim();
+    const isCat = isCategoryCodeQuery(uq);
+    const isAd = isAdLinkOrCodeQuery(uq);
+    const isPlainTerm = Boolean(uq) && !isCat && !isAd;
+
+    if (activeModule === 'produtos') {
+      if (isPlainTerm && lastModuleQueryRef.current.produtos !== uq.toLowerCase()) {
+        void runProductSearch(uq, 'produtos', undefined, false);
+      } else if (!productSearchResult && !autoLoadedRef.current.produtos) {
+        autoLoadedRef.current.produtos = true;
+        const seed = dossier?.title
+          ? dossier.title.split(/\s+/).slice(0, 4).join(' ')
+          : 'fone bluetooth sem fio';
+        void runProductSearch(seed, 'produtos', undefined, false);
+      }
+      return;
+    }
+
+    if (activeModule === 'locais') {
+      if (isPlainTerm && lastModuleQueryRef.current.locais !== uq.toLowerCase()) {
+        void runProductSearch(uq, 'locais', { origin: 'nacional' }, false);
+      } else if (!localSearchResult && !autoLoadedRef.current.locais) {
+        autoLoadedRef.current.locais = true;
+        const seed =
+          productSearchResult?.query ||
+          (dossier?.title ? dossier.title.split(/\s+/).slice(0, 4).join(' ') : 'parafusadeira sem fio');
+        void runProductSearch(seed, 'locais', { origin: 'nacional' }, false);
+      }
+      return;
+    }
+
+    if (activeModule === 'categorias') {
+      if (categoryMatrixRows.length === 0 && !loadingCategoryMatrix) {
+        setLoadingCategoryMatrix(true);
+        getBearer()
+          .then((bearer) => requestCategoryMatrix(bearer))
+          .then((rows) => {
+            if (rows.length > 0) setCategoryMatrixRows(rows);
+          })
+          .catch(() => undefined)
+          .finally(() => setLoadingCategoryMatrix(false));
+      }
+      if (isCat && lastModuleQueryRef.current.categorias !== uq.toLowerCase()) {
+        void openCategoryAnalysis(uq.toUpperCase(), true, false);
+      } else if (!categoryAnalysisResult && !autoLoadedRef.current.categorias) {
+        autoLoadedRef.current.categorias = true;
+        const seedCat = dossier?.categoryId || 'MLB1051';
+        void openCategoryAnalysis(seedCat, true, false);
+      }
+      return;
+    }
+
+    if (activeModule === 'auditor') {
+      if (isAd && lastModuleQueryRef.current.auditor !== uq.toLowerCase() && !auditorDossier) {
+        void openAdDossier(uq, true, false);
+      }
+      return;
+    }
+
+    if (activeModule === 'midias') {
+      if (uq && lastModuleQueryRef.current.midias !== uq.toLowerCase()) {
+        void extractMediaFor(uq, false);
+      } else if (!mediaData && !autoLoadedRef.current.midias && dossier) {
+        autoLoadedRef.current.midias = true;
+        void extractMediaFor(
+          dossier.mlbuId ?? dossier.itemId ?? dossier.productId ?? dossier.title,
+          false,
+        );
+      }
+      return;
+    }
+
+    if (activeModule === 'vendedores') {
+      if (!sellerDossier && !autoLoadedRef.current.vendedores && dossier?.seller?.id) {
+        autoLoadedRef.current.vendedores = true;
+        void inspectSeller(String(dossier.seller.id), false);
+      }
+    }
+  }, [
+    activeModule,
+    auditorDossier,
+    categoryAnalysisResult,
+    categoryMatrixRows.length,
+    dossier,
+    extractMediaFor,
+    getBearer,
+    inspectSeller,
+    loadingCategoryMatrix,
+    localSearchResult,
+    mediaData,
+    openAdDossier,
+    openCategoryAnalysis,
+    productSearchResult,
+    runProductSearch,
+    sellerDossier,
+    universalQuery,
+  ]);
+
   const handleUniversalSearch = (e: FormEvent) => {
     e.preventDefault();
     const q = universalQuery.trim();
     if (!q) return;
-    if (/^MLB\d{3,7}$/i.test(q)) {
+    if (isCategoryCodeQuery(q)) {
       void openCategoryAnalysis(q.toUpperCase(), true);
       return;
     }
-    if (
-      /^MLBU?-?\d{6,}$/i.test(q) ||
-      /mercadolivre\.com\.br|mercadolivre\.com|meli\.la/i.test(q)
-    ) {
-      void openAdDossier(q, false);
+    if (isAdLinkOrCodeQuery(q)) {
+      if (activeModule === 'auditor') {
+        void openAdDossier(q, true);
+      } else if (activeModule === 'midias') {
+        void extractMediaFor(q);
+      } else if (activeModule === 'vendedores') {
+        void compareCompetitorsForAd(q);
+      } else {
+        void openAdDossier(q, false);
+      }
+      return;
+    }
+    if (activeModule === 'vendedores') {
+      void inspectSeller(q);
+      return;
+    }
+    if (activeModule === 'midias') {
+      void extractMediaFor(q);
+      return;
+    }
+    if (activeModule === 'categorias') {
+      void openCategoryAnalysis(q, false);
       return;
     }
     void runProductSearch(q, activeModule === 'locais' ? 'locais' : 'produtos');
@@ -5069,6 +5316,8 @@ export default function BuscasMLPro() {
           {activeModule === 'categorias' && (
             <CategoryAnalysisModule
               rootCategories={rootCategories}
+              matrixRows={categoryMatrixRows}
+              matrixLoading={loadingCategoryMatrix}
               categoryResult={categoryAnalysisResult}
               loading={loading}
               onSelectCategory={(catId) => void openCategoryAnalysis(catId, true)}

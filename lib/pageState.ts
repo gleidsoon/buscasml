@@ -76,8 +76,11 @@ export type ScrapedReviews = {
   attributes: ReviewAttribute[];
   comments: ReviewComment[];
   customerPhotos: string[];
+  clips: ProductVideo[];
   resolvedItemId: string | null;
   resolvedUpId: string | null;
+  /** Quantas avaliações apontam para cada item MLB do mesmo MLBU (variações/anúncios irmãos). */
+  itemIdCounts?: Record<string, number>;
 };
 
 export type PageSignals = {
@@ -1195,7 +1198,7 @@ export function readHtmlPolycards(html: string): PolyItem[] {
 
 /* ---------- montagem ---------- */
 
-function emptySignals(): PageSignals {
+export function emptySignals(): PageSignals {
   return {
     sources: [],
     pageType: 'unknown',
@@ -1249,6 +1252,7 @@ function emptySignals(): PageSignals {
       attributes: [],
       comments: [],
       customerPhotos: [],
+      clips: [],
       resolvedItemId: null,
       resolvedUpId: null,
     },
@@ -1320,9 +1324,14 @@ function parseMlReviewItemsInto(target: ScrapedReviews, rawList: unknown[]): voi
       str(at(co, 'comment.denounce.url')) ??
       str(at(co, 'comment.menu_options.items.0.url')) ??
       null;
-    if (denounceUrl && !target.resolvedItemId) {
+    if (denounceUrl) {
       const mItem = denounceUrl.match(/item_id=(MLB\d{6,})/i);
-      if (mItem) target.resolvedItemId = mItem[1].toUpperCase();
+      if (mItem) {
+        const foundId = mItem[1].toUpperCase();
+        if (!target.resolvedItemId) target.resolvedItemId = foundId;
+        target.itemIdCounts = target.itemIdCounts ?? {};
+        target.itemIdCounts[foundId] = (target.itemIdCounts[foundId] ?? 0) + 1;
+      }
     }
     if (!target.resolvedUpId) {
       const upId =
@@ -1396,10 +1405,29 @@ export function parseNoIndexReviewsPayload(rawText: string): ScrapedReviews {
     attributes: [],
     comments: [],
     customerPhotos: [],
+    clips: [],
     resolvedItemId: null,
     resolvedUpId: null,
   };
   if (!rawText || !rawText.trim()) return out;
+
+  const unescaped = rawText.replace(/\\u002F/gi, '/');
+  const seenClips = new Set<string>();
+  for (const vm of unescaped.matchAll(/https?:\/\/[^"'\s)\\]+\.(?:mp4|m3u8)(?:\?[^"'\s)\\]*)?/gi)) {
+    const vUrl = vm[0];
+    if (!seenClips.has(vUrl)) {
+      seenClips.add(vUrl);
+      out.clips.push({
+        id: `clip-${out.clips.length + 1}`,
+        url: vUrl,
+        thumbnail: null,
+        mimeType: vUrl.toLowerCase().includes('.m3u8') ? 'hls' : 'mp4',
+        title: `Clipe Demonstrativo #${out.clips.length + 1}`,
+        durationSeconds: null,
+      });
+    }
+    if (out.clips.length >= 8) break;
+  }
 
   const trimmed = rawText.trim();
 
@@ -2091,5 +2119,84 @@ export function extractSellerPageSignals(
     nickname: storeTitle && !/^Mercado\s*Li[vb]re/i.test(storeTitle) ? storeTitle : null,
     officialStoreId,
     polycards: sig.polycards,
+  };
+}
+
+/**
+ * Extrai especificações técnicas estruturadas ("Chave: Valor") do texto plano da descrição
+ * quando a página SSR sofre bloqueio ou o vendedor detalha medidas/material na descrição.
+ */
+export function parseDescriptionSpecs(plainText: string | null | undefined): SpecAttribute[] {
+  if (!plainText) return [];
+  const out: SpecAttribute[] = [];
+  const seen = new Set<string>();
+  const lines = plainText
+    .replace(/([a-záéíóúãõç])([A-ZÁÉÍÓÚ][a-záéíóúãõç]+\s*:)/g, '$1\n$2')
+    .split(/\r?\n|[•·|]+/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.length < 4 || line.length > 130) continue;
+    const m = line.match(/^([A-Za-zÀ-ÿ0-9\s/()-]{2,36})\s*:\s*([^:]{2,85})$/);
+    if (!m) continue;
+    const name = m[1].trim();
+    const value = m[2].trim();
+    if (/^(https?|obs|aten[çc][ãa]o|nota|importante|d[úu]vidas)$/i.test(name)) continue;
+    const k = name.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ name, value });
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
+/**
+ * Extrai o card de produto em destaque (`card-featured` ou primeiro polycard)
+ * de páginas `/social/...` para as quais links curtos como `meli.la/...` redirecionam.
+ */
+export function extractSocialFeaturedProduct(html: string): {
+  itemId: string | null;
+  mlbuId: string | null;
+  productId: string | null;
+  categoryId: string | null;
+  title: string | null;
+  price: number | null;
+  originalPrice: number | null;
+  freeShipping: boolean;
+  image: string | null;
+  targetUrl: string | null;
+} | null {
+  if (!html) return null;
+  const unescaped = html.replace(/\\u002F/gi, '/');
+  const polyIdx = unescaped.indexOf('"polycards":[{');
+  if (polyIdx < 0) return null;
+
+  const slice = unescaped.slice(polyIdx, polyIdx + 5500);
+  const itemId = slice.match(/"id"\s*:\s*"(MLB\d{7,})"/i)?.[1]?.toUpperCase() ?? null;
+  const mlbuId = slice.match(/"user_product_id"\s*:\s*"(MLBU\d{6,})"/i)?.[1]?.toUpperCase() ?? null;
+  const rawPid = slice.match(/"pid"\s*:\s*"(MLB\d{6,})"/i)?.[1]?.toUpperCase() ?? null;
+  const productId = rawPid && !rawPid.startsWith('MLBU') && rawPid !== itemId ? rawPid : null;
+  const categoryId = slice.match(/"category_id"\s*:\s*"(MLB\d+)"/i)?.[1]?.toUpperCase() ?? null;
+  const rawTitle = slice.match(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]{5,200})"/i)?.[1] ?? null;
+  const curPriceStr = slice.match(/"current_price"\s*:\s*\{\s*"value"\s*:\s*(\d+(?:\.\d+)?)/i)?.[1];
+  const prevPriceStr = slice.match(/"previous_price"\s*:\s*\{\s*"value"\s*:\s*(\d+(?:\.\d+)?)/i)?.[1];
+  const picId = slice.match(/"pictures"\s*:\s*\[\s*\{\s*"id"\s*:\s*"([^"]+)"/i)?.[1] ?? null;
+  const rawUrl = slice.match(/"url"\s*:\s*"([^"]*mercadolivre\.com\.br\/[^"]+)"/i)?.[1] ?? null;
+  const freeShipping = /Frete\s+gr[áa]tis/i.test(slice);
+
+  if (!itemId && !mlbuId) return null;
+
+  return {
+    itemId,
+    mlbuId,
+    productId,
+    categoryId,
+    title: rawTitle,
+    price: curPriceStr ? Number(curPriceStr) : null,
+    originalPrice: prevPriceStr ? Number(prevPriceStr) : null,
+    freeShipping,
+    image: picId ? normalizeMlImageUrl(picId) : null,
+    targetUrl: rawUrl ? (rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`) : null,
   };
 }

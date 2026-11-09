@@ -2,10 +2,13 @@ import type {
   AgeAlert,
   CategoryAnalyticsSummary,
   CategoryFees,
+  CategoryMedalDistribution,
   Commission,
   KeywordStat,
   ListingQualityReport,
+  MonopolyLevel,
   Periods,
+  ReviewInsightsSummary,
   SalesEstimate,
   SellerPortfolioAnalytics,
 } from '@/lib/mlEngine';
@@ -107,6 +110,7 @@ export type ProductReviewsData = {
   attributes: ReviewAttribute[];
   customerPhotos: string[];
   comments: ReviewComment[];
+  insights?: ReviewInsightsSummary;
   hasMore: boolean;
   objectId: string | null;
   isItem: boolean;
@@ -117,6 +121,7 @@ export type ProductSummary = {
   itemId: string | null;
   mlbuId?: string | null;
   categoryId: string | null;
+  categoryName?: string | null;
   title: string;
   brand: string | null;
   model: string | null;
@@ -233,6 +238,27 @@ export type CategoryOverview = {
 export type RootCategoryItem = {
   id: string;
   name: string;
+};
+
+export type CategoryMatrixRow = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  parentName: string | null;
+  level: 'mother' | 'child';
+  totalItems?: number | null;
+  sampleSize?: number;
+  estimatedMonthlyRevenue: number;
+  estimatedMonthlySales: number;
+  averageTicket: number;
+  medalDistribution: CategoryMedalDistribution;
+  fullPct: number;
+  catalogPct: number;
+  uniqueSellersCount: number;
+  concentratedSellersCount: number;
+  sellerConcentrationRatioPct: number;
+  monopolyIndexPct: number;
+  monopolyLevel: MonopolyLevel;
 };
 
 export type RankingCategoryTab = {
@@ -383,7 +409,15 @@ export type AdvancedFilterState = {
   logistic: 'todos' | 'full' | 'frete_gratis' | 'flex';
   adType: 'todos' | 'catalogo' | 'comum';
   minRating: 'todos' | '4.0' | '4.5' | '4.8';
-  ageRange: 'todos' | '30' | '60' | '90' | '180' | 'mais_180';
+  ageRange: 'todos' | '30' | '60' | '90' | '140' | '180' | 'mais_180';
+  ageMinDays: string;
+  ageMaxDays: string;
+  selectedCategories: string[];
+  selectedBrands: string[];
+  hideOfficialStores: boolean;
+  hideMedaledSellers: boolean;
+  hideCatalog: boolean;
+  sameTitleOrImageRef: string;
   origin: 'todos' | 'nacional' | 'internacional';
   uf: string; // '' = todos os estados, 'SP', 'PR', etc.
   sort: AdvancedSortKey;
@@ -402,6 +436,14 @@ export const DEFAULT_ADVANCED_FILTERS: AdvancedFilterState = {
   adType: 'todos',
   minRating: 'todos',
   ageRange: 'todos',
+  ageMinDays: '',
+  ageMaxDays: '',
+  selectedCategories: [],
+  selectedBrands: [],
+  hideOfficialStores: false,
+  hideMedaledSellers: false,
+  hideCatalog: false,
+  sameTitleOrImageRef: '',
   origin: 'todos',
   uf: '',
   sort: 'faturamento_desc',
