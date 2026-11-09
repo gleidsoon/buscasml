@@ -297,13 +297,15 @@ function KpiTile({
   tone?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-4">
-      <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        <span>{label}</span>
-        <span className="text-sky-400">{icon}</span>
+    <div className="overflow-visible rounded-2xl border border-white/[0.08] bg-slate-950/70 p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        <span className="truncate">{label}</span>
+        <span className="shrink-0 text-sky-400/90">{icon}</span>
       </div>
-      <p className={`mt-2 text-xl font-black sm:text-2xl ${tone}`}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-slate-400">{sub}</p>}
+      <p className={`mt-2 text-xl font-black tabular-nums tracking-tight sm:text-2xl ${tone}`}>
+        {value}
+      </p>
+      {sub && <p className="mt-1 truncate text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
 }
@@ -353,165 +355,164 @@ export function HomeOverviewModule({
     {
       id: 'produtos',
       title: 'Busca Avançada de Produtos',
-      desc: 'Filtre por faturamento 30d, vendas, modalidade, Full, catálogo, nota e idade com exportação CSV.',
+      desc: 'Faturamento 30d, vendas, modalidade, Full, catálogo, nota e janela de idade (CSV).',
       badge: 'Multi-filtros',
       icon: <Search size={18} className="text-sky-400" />,
-      accent: 'hover:border-sky-400/45',
+      accent: 'hover:border-sky-400/40',
     },
     {
       id: 'locais',
       title: 'Produtos Locais (Brasil vs. CBT)',
-      desc: 'Separe vendedores nacionais de internacionais e filtre fornecedores e concorrentes por Estado (UF).',
-      badge: '27 Estados UF',
+      desc: 'Isole estoque nacional de internacional e mapeie concorrentes por Estado (UF).',
+      badge: '27 UFs',
       icon: <MapPin size={18} className="text-emerald-400" />,
-      accent: 'hover:border-emerald-400/45',
+      accent: 'hover:border-emerald-400/40',
     },
     {
       id: 'categorias',
       title: 'Análise de Categoria & Monopólio',
-      desc: 'Explore a árvore oficial do ML, concentração Top 5 vendedores/marcas, ticket médio e faixas de preço.',
+      desc: 'Matriz Mãe/Filha, concentração Top 5 vendedores/marcas e distribuição de medalhas.',
       badge: 'Árvore Oficial',
       icon: <Layers size={18} className="text-amber-400" />,
-      accent: 'hover:border-amber-400/45',
+      accent: 'hover:border-amber-400/40',
     },
     {
       id: 'tendencias',
       title: 'Tendências & Sazonalidade',
-      desc: 'Termos em ascensão cruzados com concorrência, preço médio de entrada e potencial de demanda.',
+      desc: 'Termos em ascensão cruzados com concorrência, ticket de entrada e adoção Full.',
       badge: 'Em Alta',
       icon: <TrendingUp size={18} className="text-rose-400" />,
-      accent: 'hover:border-rose-400/45',
+      accent: 'hover:border-rose-400/40',
     },
     {
       id: 'vendedores',
-      title: 'Raio-X de Vendedores & Concorrência',
-      desc: 'Dossiê completo de lojas por Nickname ou ID, termômetro de reputação e portfólio em Curva ABC.',
+      title: 'Raio-X de Vendedores & Lojas',
+      desc: 'Dossiê por Nickname ou ID, reputação, faturamento 30d e portfólio em Curva ABC.',
       badge: 'Curva ABC',
       icon: <Store size={18} className="text-purple-400" />,
-      accent: 'hover:border-purple-400/45',
+      accent: 'hover:border-purple-400/40',
     },
     {
       id: 'auditor',
-      title: 'Análise da Listagem (Score 0–100)',
-      desc: 'Auditoria completa de SEO, título, fotos HD, vídeo, ficha técnica, logística e plano de ação.',
+      title: 'Análise da Listagem (0–100)',
+      desc: 'Régua SEO 60 chars, fotos HD, vídeo, ficha técnica, logística e plano de ação.',
       badge: 'Auditor SEO',
       icon: <ClipboardCheck size={18} className="text-teal-400" />,
-      accent: 'hover:border-teal-400/45',
+      accent: 'hover:border-teal-400/40',
     },
     {
       id: 'midias',
       title: 'Clipes e Imagens HD',
-      desc: 'Extraia e baixe fotos oficiais de alta resolução (-O.webp), fotos reais de clientes e vídeos.',
+      desc: 'Extraia e baixe fotos oficiais de alta resolução (-O.webp), reviews e vídeos.',
       badge: 'Download HD',
       icon: <Film size={18} className="text-pink-400" />,
-      accent: 'hover:border-pink-400/45',
+      accent: 'hover:border-pink-400/40',
     },
     {
       id: 'monitor',
       title: 'Monitor de Produtos & Lojas',
-      desc: 'Acompanhe histórico de snapshots com variações de preço, estoque, vendas e giro diário.',
+      desc: 'Histórico de snapshots com variações de preço, estoque, vendas e giro diário.',
       badge: `${monitoredProductsCount + monitoredSellersCount} salvos`,
       icon: <Bookmark size={18} className="text-amber-300" />,
-      accent: 'hover:border-amber-300/45',
+      accent: 'hover:border-amber-300/40',
     },
   ];
 
   return (
     <div className="space-y-6">
-      {/* Resumo Executivo do Mercado */}
-      <div className="glass-panel rounded-3xl p-6">
+      {/* F-Pattern: Cabeçalho Executivo Enxuto + KPIs Primários em Destaque */}
+      <div className="glass-panel rounded-3xl p-5 sm:p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-              <Zap size={12} /> Inteligência de Mercado em Tempo Real
-            </span>
-            <h1 className="mt-2 text-2xl font-extrabold text-white sm:text-3xl">
-              Visão Geral &amp; Pulso do Mercado Livre
+            <h1 className="text-xl font-extrabold tracking-tight text-white sm:text-2xl">
+              Pulso do Mercado Livre
             </h1>
-            <p className="mt-1 text-xs text-slate-400 sm:text-sm">
-              Navegue pelos módulos analíticos, monitore concorrentes e identifique oportunidades de alta margem.
+            <p className="text-xs text-slate-400">
+              Indicadores em tempo real da categoria ativa ({ranking?.selectedCategory.name ?? 'Geral Brasil'})
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() => onNavigate('produtos')}
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-sky-500/20 transition hover:from-sky-400 hover:to-blue-500"
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 shadow-sm transition hover:bg-amber-300"
             >
-              <Search size={14} /> Nova Pesquisa Avançada
+              <Search size={14} /> Explorar Produtos
             </button>
             <button
               type="button"
               onClick={() => onNavigate('calculadora')}
-              className="inline-flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2.5 text-xs font-bold text-amber-300 transition hover:bg-amber-400/20"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300"
             >
               <Calculator size={14} /> Simular Margem
             </button>
           </div>
         </div>
 
-        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiTile
             label="Ticket Médio dos Líderes"
             value={fmtBRL(pulse.avgTicket)}
-            sub={`Categoria ativa: ${ranking?.selectedCategory.name ?? 'Mercado Livre Brasil'}`}
+            sub={ranking?.selectedCategory.name ?? 'Mercado Livre Brasil'}
             icon={<Tag size={15} />}
             tone="text-amber-300"
           />
           <KpiTile
             label="Domínio Logística Full"
-            value={`${pulse.fullPct}% no Top Ranking`}
-            sub="Proporção de anúncios líderes com envio Full"
+            value={`${pulse.fullPct}%`}
+            sub="Share de envio Full no Top Ranking"
             icon={<Truck size={15} />}
             tone="text-emerald-400"
           />
           <KpiTile
             label="Termos em Ascensão"
-            value={pulse.trendsCount > 0 ? `${pulse.trendsCount} tendências` : 'Carregando...'}
-            sub={`Volume amostral: +${fmtInt(pulse.totalSoldSample)} vendas`}
+            value={pulse.trendsCount > 0 ? `${pulse.trendsCount} termos` : 'Carregando...'}
+            sub={`Amostra: +${fmtInt(pulse.totalSoldSample)} un. vendidas`}
             icon={<Flame size={15} />}
             tone="text-sky-300"
           />
           <KpiTile
             label="Radar de Monitoramento"
             value={`${monitoredProductsCount} prod · ${monitoredSellersCount} lojas`}
-            sub="Snapshots salvos localmente com variação Δ"
+            sub="Snapshots locais com variação Δ"
             icon={<BookmarkCheck size={15} />}
             tone="text-white"
           />
         </div>
       </div>
 
-      {/* Ações Rápidas para Todos os Módulos */}
+      {/* Grade Escaneável de Módulos */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-white sm:text-lg">Ações Rápidas &amp; Módulos da Plataforma</h2>
-          <span className="text-xs text-slate-400">Selecione uma ferramenta especializada</span>
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300">
+            Módulos de Inteligência
+          </h2>
+          <span className="text-xs text-slate-400">Acesso rápido às 8 ferramentas</span>
         </div>
-        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {quickActions.map((act) => (
             <button
               key={act.id}
               type="button"
               onClick={() => onNavigate(act.id)}
-              className={`glass-card group flex flex-col justify-between rounded-2xl p-4 text-left transition ${act.accent}`}
+              className={`glass-card group flex flex-col justify-between rounded-2xl p-5 text-left transition ${act.accent}`}
             >
               <div>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-950/80">
                     {act.icon}
                   </div>
-                  <span className="rounded-full border border-white/10 bg-slate-950/80 px-2.5 py-0.5 text-[10px] font-bold text-slate-300">
+                  <span className="rounded-full border border-white/10 bg-slate-950/70 px-2.5 py-0.5 text-[10px] font-semibold text-slate-300">
                     {act.badge}
                   </span>
                 </div>
-                <h3 className="mt-3 text-sm font-bold text-white group-hover:text-amber-300">
+                <h3 className="mt-3.5 text-sm font-bold text-white transition group-hover:text-amber-300">
                   {act.title}
                 </h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">{act.desc}</p>
               </div>
-              <div className="mt-3 flex items-center gap-1 text-xs font-semibold text-sky-400">
-                <span>Abrir módulo</span>
+              <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-sky-400">
+                <span>Acessar</span>
                 <ArrowUpRight size={13} className="transition group-hover:translate-x-0.5" />
               </div>
             </button>
@@ -524,9 +525,9 @@ export function HomeOverviewModule({
         <div className="glass-panel rounded-2xl p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-amber-400" />
-              <h3 className="text-sm font-bold text-white">
-                 Buscas Rápidas — Termos Mais Quentes do Mês
+              <Sparkles size={15} className="text-amber-400" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                Termos em Alta no Mês
               </h3>
             </div>
             <button
@@ -534,7 +535,7 @@ export function HomeOverviewModule({
               onClick={() => onNavigate('tendencias')}
               className="text-xs font-semibold text-sky-400 hover:text-sky-300"
             >
-              Ver painel completo de Tendências →
+              Ver radar completo →
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -545,7 +546,7 @@ export function HomeOverviewModule({
                 onClick={() => onQuickSearchTerm(t.keyword)}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/75 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300"
               >
-                <span className="font-bold text-amber-400">#{t.position}</span>
+                <span className="font-bold tabular-nums text-amber-400">#{t.position}</span>
                 <span>{t.keyword}</span>
               </button>
             ))}
@@ -593,7 +594,27 @@ export function AdvancedProductSearchModule({
   isProductMonitored: (code: string | null) => boolean;
 }) {
   const [searchInput, setSearchInput] = useState(result?.query ?? '');
-  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (filters.priceMin || filters.priceMax) count++;
+    if (filters.sales30dMin || filters.sales30dMax) count++;
+    if (filters.rev30dMin || filters.rev30dMax) count++;
+    if (filters.ageMinDays || filters.ageMaxDays || filters.ageRange !== 'todos') count++;
+    if (filters.modality !== 'todos') count++;
+    if (filters.logistic !== 'todos') count++;
+    if (filters.adType !== 'todos') count++;
+    if (filters.minRating !== 'todos') count++;
+    if (filters.hideOfficialStores) count++;
+    if (filters.hideMedaledSellers) count++;
+    if (filters.hideCatalog) count++;
+    if (filters.sameTitleOrImageRef) count++;
+    if (filters.selectedCategories.length > 0) count++;
+    if (filters.selectedBrands.length > 0) count++;
+    if (filters.uf) count++;
+    return count;
+  }, [filters]);
 
   useEffect(() => {
     if (result?.query) {
@@ -739,49 +760,107 @@ export function AdvancedProductSearchModule({
 
   return (
     <section className="space-y-5">
-      {/* Cabeçalho do Módulo + Barra de Pesquisa */}
-      <div className="glass-panel rounded-3xl p-5 sm:p-6">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/35 bg-sky-500/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-sky-300">
-                {modeVariant === 'locais' ? (
-                  <>
-                    <MapPin size={12} /> Fornecedores &amp; Operação Regional
-                  </>
-                ) : (
-                  <>
-                    <Search size={12} /> Garimpo Analítico Multi-Filtros
-                  </>
-                )}
-              </span>
-              {modeVariant === 'locais' && (
-                <span className="rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
-                  Brasil vs. Internacional (CBT) + Filtro UF
-                </span>
-              )}
-            </div>
-            <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
+      {/* F-PATTERN: 5 KPIs Consolidados no Topo Absoluto quando há amostra carregada */}
+      {rawProducts.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <KpiTile
+            label="Preço Médio"
+            value={fmtBRL(topStats.avgPrice)}
+            sub={`${visible.length} de ${rawProducts.length} anúncios`}
+            icon={<Tag size={14} />}
+            tone="text-amber-300"
+          />
+          <KpiTile
+            label="Receita Total 30d"
+            value={fmtBRL(topStats.totalRev30d)}
+            sub="Faturamento mensal da amostra"
+            icon={<BarChart3 size={14} />}
+            tone="text-emerald-400"
+          />
+          <KpiTile
+            label="Vendas Estimadas 30d"
+            value={`${fmtInt(topStats.totalSales30d)} un.`}
+            sub={`Acumulado: ${fmtInt(topStats.totalSoldAcc)} un.`}
+            icon={<TrendingUp size={14} />}
+            tone="text-sky-300"
+          />
+          <KpiTile
+            label="Adoção Full"
+            value={fmtPct(topStats.fullPct)}
+            sub="Mercado Envios Full"
+            icon={<Truck size={14} />}
+            tone="text-white"
+          />
+          <KpiTile
+            label={modeVariant === 'locais' ? '% Estoque Nacional' : '% Catálogo'}
+            value={fmtPct(modeVariant === 'locais' ? topStats.nationalPct : topStats.catPct)}
+            sub={
+              modeVariant === 'locais'
+                ? `Catálogo: ${fmtPct(topStats.catPct)}`
+                : `Nacionais: ${fmtPct(topStats.nationalPct)}`
+            }
+            icon={modeVariant === 'locais' ? <Globe size={14} /> : <Boxes size={14} />}
+            tone="text-purple-300"
+          />
+        </div>
+      )}
+
+      {/* Barra Unificada de Contexto, Presets Rápidos & Filtros Colapsáveis (Sem duplicar hero search gigante) */}
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
               {modeVariant === 'locais'
-                ? 'Produtos Locais & Mapeamento por Estado (UF)'
+                ? 'Produtos Locais & Estados (UF)'
                 : 'Busca Avançada de Produtos'}
             </h1>
-            <p className="mt-0.5 text-xs text-slate-400">
-              {modeVariant === 'locais'
-                ? 'Isole vendedores com estoque nacional no Brasil de ofertas internacionais (CBT) e filtre polos logísticos por Estado.'
-                : 'Combine filtros de preço, vendas 30d, faturamento mensal, logística, modalidade, catálogo, nota e idade do anúncio.'}
-            </p>
+            {result?.query && (
+              <span className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-xs font-bold text-sky-300">
+                &ldquo;{result.query}&rdquo;
+              </span>
+            )}
+            <form onSubmit={handleSubmit} className="flex items-center gap-1.5">
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder={modeVariant === 'locais' ? 'Trocar produto/UF...' : 'Trocar termo/nicho...'}
+                  className="w-44 rounded-xl border border-white/10 bg-slate-950/90 py-1.5 pl-8 pr-2.5 text-xs text-white placeholder-slate-500 outline-none focus:w-56 focus:border-sky-400 sm:w-52"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading !== null}
+                className="inline-flex items-center gap-1 rounded-xl bg-sky-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-sky-400 disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={13} className="animate-spin" /> : 'Buscar'}
+              </button>
+            </form>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setFiltersExpanded((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-white/25"
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
+                filtersExpanded || activeFiltersCount > 0
+                  ? 'border-amber-400/50 bg-amber-400/15 text-amber-300'
+                  : 'border-white/10 bg-slate-900/80 text-slate-200 hover:border-white/25'
+              }`}
             >
-              <Filter size={14} className="text-amber-400" />
-              {filtersExpanded ? 'Ocultar Filtros' : 'Mostrar Filtros'}
+              <Filter size={13} />
+              <span>Filtros Avançados</span>
+              {activeFiltersCount > 0 && (
+                <span className="rounded-full bg-amber-400 px-1.5 py-0.2 text-[10px] font-black text-slate-950">
+                  {activeFiltersCount}
+                </span>
+              )}
             </button>
+
             <button
               type="button"
               disabled={visible.length === 0}
@@ -791,86 +870,111 @@ export function AdvancedProductSearchModule({
                   modeVariant === 'locais' ? 'buscasml-produtos-locais' : 'buscasml-busca-avancada',
                 )
               }
-              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Download size={14} /> Exportar CSV ({visible.length})
+              <Download size={13} /> CSV ({visible.length})
             </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search
-              size={18}
-              className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sky-400"
-            />
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder={
-                modeVariant === 'locais'
-                  ? 'Digite o produto ou nicho para mapear vendedores nacionais e estados (UF)...'
-                  : 'Pesquise por palavra-chave, nicho, marca ou modelo no Mercado Livre...'
-              }
-              className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3 pl-11 pr-4 text-sm text-white placeholder-slate-400 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-500/20"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading !== null}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition hover:from-sky-400 hover:to-blue-500 disabled:opacity-60"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-            Pesquisar Mercado
-          </button>
-        </form>
-
-        {/* Sugestões rápidas de nichos */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400">Experimente:</span>
-          {sampleSuggestions.map((s) => (
+        {/* Pílulas de Presets Inteligentes (1-Click) + Sugestões de Nicho */}
+        <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] pt-3 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Presets:
+            </span>
             <button
-              key={s}
               type="button"
-              onClick={() => {
-                setSearchInput(s);
-                onRunSearch(s, {
-                  origin:
-                    filters.origin !== 'todos'
-                      ? filters.origin
-                      : modeVariant === 'locais'
-                        ? 'nacional'
-                        : null,
-                  uf: filters.uf || null,
-                });
-              }}
-              className="rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-amber-400/40 hover:text-amber-300"
+              onClick={() => applyQuickPreset('oportunidade_140d')}
+              className="rounded-lg border border-rose-400/35 bg-rose-500/12 px-2.5 py-1 text-[11px] font-bold text-rose-200 transition hover:bg-rose-500/25"
             >
-              {s}
+              🎯 Oportunidades 0–140d
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => applyQuickPreset('alta_receita')}
+              className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold text-amber-300 transition hover:bg-amber-400/20"
+            >
+              💰 Alta Receita (≥ R$ 10k)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickPreset('alto_giro')}
+              className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 transition hover:bg-emerald-500/20"
+            >
+              ⚡ Alto Giro (≥ 30/mês)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickPreset('novos_60d')}
+              className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20"
+            >
+              🌱 Recentes (0–60d)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickPreset('full_catalogo')}
+              className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-2.5 py-1 text-[11px] font-semibold text-purple-300 transition hover:bg-purple-500/20"
+            >
+              📦 Catálogo + Full
+            </button>
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={() => applyQuickPreset('limpar')}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-400 hover:text-white"
+              >
+                <RotateCcw size={11} /> Limpar
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500">Nichos:</span>
+            {sampleSuggestions.slice(0, 4).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setSearchInput(s);
+                  onRunSearch(s, {
+                    origin:
+                      filters.origin !== 'todos'
+                        ? filters.origin
+                        : modeVariant === 'locais'
+                          ? 'nacional'
+                          : null,
+                    uf: filters.uf || null,
+                  });
+                }}
+                className="rounded-lg border border-white/10 bg-slate-950/70 px-2 py-0.5 text-[11px] text-slate-300 transition hover:border-amber-400/40 hover:text-amber-300"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Barra Dedicada de Origem + Estados (UF) em destaque no módulo Produtos Locais */}
         {modeVariant === 'locais' && (
-          <div className="mt-5 space-y-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4">
+          <div className="mt-4 space-y-2.5 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wide text-emerald-300">
-                  Origem do Estoque:
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[11px] font-bold uppercase tracking-wide text-emerald-300">
+                  Origem:
                 </span>
                 {(
                   [
-                    { id: 'nacional', label: '🇧🇷 Somente Vendedores Nacionais (Brasil)' },
-                    { id: 'internacional', label: '🌐 Somente Internacional (CBT)' },
-                    { id: 'todos', label: 'Todas as Origens' },
+                    { id: 'nacional', label: '🇧🇷 Nacional (Brasil)' },
+                    { id: 'internacional', label: '🌐 Internacional (CBT)' },
+                    { id: 'todos', label: 'Todas' },
                   ] as const
                 ).map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
                     onClick={() => onPatchFilters({ origin: opt.id })}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                    className={`rounded-xl px-3 py-1 text-xs font-bold transition ${
                       filters.origin === opt.id
                         ? 'bg-emerald-500 text-slate-950 shadow'
                         : 'border border-white/10 bg-slate-950/70 text-slate-300 hover:border-emerald-400/40'
@@ -882,12 +986,11 @@ export function AdvancedProductSearchModule({
               </div>
 
               <div className="flex items-center gap-2">
-                <MapPin size={14} className="text-amber-400" />
-                <span className="text-xs font-semibold text-slate-300">Estado (UF):</span>
+                <MapPin size={13} className="text-amber-400" />
                 <select
                   value={filters.uf}
                   onChange={(e) => onPatchFilters({ uf: e.target.value })}
-                  className="rounded-xl border border-white/15 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-amber-400"
+                  className="rounded-xl border border-white/15 bg-slate-950 px-3 py-1 text-xs font-semibold text-white outline-none focus:border-amber-400"
                 >
                   <option value="">Todos os 27 Estados (Brasil)</option>
                   {BRAZIL_UFS.map((u) => (
@@ -899,18 +1002,17 @@ export function AdvancedProductSearchModule({
               </div>
             </div>
 
-            {/* Pílulas rápidas de Estados com contagem ao vivo */}
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => onPatchFilters({ uf: '' })}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                className={`rounded-lg px-2.5 py-0.5 text-[11px] font-bold transition ${
                   !filters.uf
                     ? 'bg-amber-400 text-slate-950'
                     : 'border border-white/10 bg-slate-950/60 text-slate-300 hover:text-white'
                 }`}
               >
-                Brasil Inteiro ({rawProducts.length})
+                Brasil ({rawProducts.length})
               </button>
               {['SP', 'PR', 'SC', 'MG', 'RJ', 'RS', 'GO', 'ES', 'BA', 'PE', 'CE', 'DF'].map((ufCode) => {
                 const cnt = ufCounts.get(ufCode) ?? 0;
@@ -920,7 +1022,7 @@ export function AdvancedProductSearchModule({
                     key={ufCode}
                     type="button"
                     onClick={() => onPatchFilters({ uf: active ? '' : ufCode })}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                    className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold tabular-nums transition ${
                       active
                         ? 'bg-amber-400 font-bold text-slate-950'
                         : cnt > 0
@@ -936,61 +1038,9 @@ export function AdvancedProductSearchModule({
           </div>
         )}
 
-        {/* Painel Completo de Filtros Analíticos ("Cérebro") */}
+        {/* Painel Completo de Filtros Analíticos ("Cérebro") — Colapsável */}
         {filtersExpanded && (
-          <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
-            {/* Presets Analíticos Rápidos */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Filtros Inteligentes:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => applyQuickPreset('oportunidade_140d')}
-                  className="rounded-xl border border-rose-400/35 bg-rose-500/15 px-3 py-1 text-xs font-bold text-rose-200 hover:bg-rose-500/25"
-                >
-                  🎯 Oportunidades 0–140d (Sem Medalha/Oficial)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickPreset('alta_receita')}
-                  className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-400/20"
-                >
-                  💰 Alta Receita (≥ R$ 10 mil/mês)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickPreset('alto_giro')}
-                  className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
-                >
-                  ⚡ Alto Giro (≥ 30 vendas/mês)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickPreset('novos_60d')}
-                  className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
-                >
-                  🌱 Recentes (0–60 dias)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickPreset('full_catalogo')}
-                  className="rounded-xl border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs font-semibold text-purple-300 hover:bg-purple-500/20"
-                >
-                  📦 Catálogo + Full
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => applyQuickPreset('limpar')}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white"
-              >
-                <RotateCcw size={12} /> Limpar filtros
-              </button>
-            </div>
-
+          <div className="mt-4 space-y-4 border-t border-white/10 pt-4">
             {/* Grade de Faixas Numéricas: Preço, Vendas 30d, Faturamento 30d e Janela de Idade (dias) */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
@@ -1003,14 +1053,14 @@ export function AdvancedProductSearchModule({
                     placeholder="Mín (ex: 49)"
                     value={filters.priceMin}
                     onChange={(e) => onPatchFilters({ priceMin: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                   <input
                     inputMode="decimal"
                     placeholder="Máx (ex: 350)"
                     value={filters.priceMax}
                     onChange={(e) => onPatchFilters({ priceMax: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                 </div>
               </div>
@@ -1025,14 +1075,14 @@ export function AdvancedProductSearchModule({
                     placeholder="Mín (ex: 15)"
                     value={filters.sales30dMin}
                     onChange={(e) => onPatchFilters({ sales30dMin: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                   <input
                     inputMode="numeric"
                     placeholder="Máx (ex: 1000)"
                     value={filters.sales30dMax}
                     onChange={(e) => onPatchFilters({ sales30dMax: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                 </div>
               </div>
@@ -1047,14 +1097,14 @@ export function AdvancedProductSearchModule({
                     placeholder="Mín (ex: 5000)"
                     value={filters.rev30dMin}
                     onChange={(e) => onPatchFilters({ rev30dMin: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                   <input
                     inputMode="decimal"
                     placeholder="Máx"
                     value={filters.rev30dMax}
                     onChange={(e) => onPatchFilters({ rev30dMax: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                 </div>
               </div>
@@ -1069,14 +1119,14 @@ export function AdvancedProductSearchModule({
                     placeholder="Mín (ex: 0)"
                     value={filters.ageMinDays}
                     onChange={(e) => onPatchFilters({ ageMinDays: e.target.value, ageRange: 'todos' })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                   <input
                     inputMode="numeric"
                     placeholder="Máx (ex: 140)"
                     value={filters.ageMaxDays}
                     onChange={(e) => onPatchFilters({ ageMaxDays: e.target.value, ageRange: 'todos' })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-sky-400"
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs tabular-nums text-white outline-none focus:border-sky-400"
                   />
                 </div>
               </div>
@@ -1086,7 +1136,7 @@ export function AdvancedProductSearchModule({
             <div className="grid gap-3 lg:grid-cols-12">
               <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/60 p-3 lg:col-span-7">
                 <span className="mr-1 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-amber-300">
-                  <EyeOff size={12} /> Ocultar Concorrência Pesada:
+                  <EyeOff size={12} /> Ocultar:
                 </span>
                 <button
                   type="button"
@@ -1097,7 +1147,7 @@ export function AdvancedProductSearchModule({
                       : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
                   }`}
                 >
-                  Ocultar Lojas Oficiais
+                  Lojas Oficiais
                 </button>
                 <button
                   type="button"
@@ -1108,7 +1158,7 @@ export function AdvancedProductSearchModule({
                       : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
                   }`}
                 >
-                  Ocultar Vendedores com Medalha
+                  Vendedores com Medalha
                 </button>
                 <button
                   type="button"
@@ -1119,7 +1169,7 @@ export function AdvancedProductSearchModule({
                       : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40'
                   }`}
                 >
-                  Ocultar Catálogo
+                  Catálogo
                 </button>
               </div>
 
@@ -1150,7 +1200,7 @@ export function AdvancedProductSearchModule({
                   <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
                     <div className="mb-2 flex items-center justify-between text-[11px]">
                       <span className="font-bold uppercase tracking-wide text-slate-400">
-                        Múltiplas Categorias ({filters.selectedCategories.length} selecionadas)
+                        Múltiplas Categorias ({filters.selectedCategories.length})
                       </span>
                       {filters.selectedCategories.length > 0 && (
                         <button
@@ -1188,7 +1238,7 @@ export function AdvancedProductSearchModule({
                   <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
                     <div className="mb-2 flex items-center justify-between text-[11px]">
                       <span className="font-bold uppercase tracking-wide text-slate-400">
-                        Múltiplas Marcas ({filters.selectedBrands.length} selecionadas)
+                        Múltiplas Marcas ({filters.selectedBrands.length})
                       </span>
                       {filters.selectedBrands.length > 0 && (
                         <button
@@ -1224,7 +1274,7 @@ export function AdvancedProductSearchModule({
               </div>
             )}
 
-            {/* Seletores Categóricos: Modalidade, Logística, Tipo, Nota, Idade, Origem e UF */}
+            {/* Seletores Categóricos */}
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
               <label className="space-y-1 text-xs">
                 <span className="font-semibold text-slate-400">Modalidade</span>
@@ -1341,75 +1391,45 @@ export function AdvancedProductSearchModule({
         )}
       </div>
 
-      {/* Resumo Estatístico do Topo (5 Métricas Consolidadas) */}
-      {rawProducts.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <KpiTile
-            label="Preço Médio"
-            value={fmtBRL(topStats.avgPrice)}
-            sub={`${visible.length} de ${rawProducts.length} anúncios filtrados`}
-            icon={<Tag size={14} />}
-            tone="text-amber-300"
-          />
-          <KpiTile
-            label="Receita Total 30d"
-            value={fmtBRL(topStats.totalRev30d)}
-            sub="Soma mensal estimada da amostra"
-            icon={<BarChart3 size={14} />}
-            tone="text-emerald-400"
-          />
-          <KpiTile
-            label="Vendas Estimadas 30d"
-            value={`${fmtInt(topStats.totalSales30d)} un.`}
-            sub={`Acumulado histórico: ${fmtInt(topStats.totalSoldAcc)}`}
-            icon={<TrendingUp size={14} />}
-            tone="text-sky-300"
-          />
-          <KpiTile
-            label="Adoção Full"
-            value={fmtPct(topStats.fullPct)}
-            sub="Anúncios operando no Mercado Envios Full"
-            icon={<Truck size={14} />}
-            tone="text-white"
-          />
-          <KpiTile
-            label={modeVariant === 'locais' ? '% Estoque Nacional' : '% Catálogo'}
-            value={fmtPct(modeVariant === 'locais' ? topStats.nationalPct : topStats.catPct)}
-            sub={
-              modeVariant === 'locais'
-                ? `Catálogo na amostra: ${fmtPct(topStats.catPct)}`
-                : `Vendedores nacionais: ${fmtPct(topStats.nationalPct)}`
-            }
-            icon={modeVariant === 'locais' ? <Globe size={14} /> : <Boxes size={14} />}
-            tone="text-purple-300"
-          />
-        </div>
-      )}
-
-      {/* Barra de Controle de Ordenação e Alternância Tabela Analítica Densa vs Cards */}
+      {/* Barra de Ordenação, Termos SEO Vencedores & Alternância Tabela / Cards */}
       {rawProducts.length > 0 && (
         <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-            <span className="font-bold text-white">
-              Resultado para &ldquo;{result?.query}&rdquo;:
-            </span>
-            <span>
-              exibindo <strong>{visible.length}</strong> de {rawProducts.length} anúncios
+            <span className="tabular-nums">
+              Exibindo <strong className="text-white">{visible.length}</strong> de {rawProducts.length} anúncios
             </span>
             {filters.uf && (
               <span className="rounded-full border border-amber-400/40 bg-amber-400/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-300">
                 UF: {filters.uf}
               </span>
             )}
+            {keywords && keywords.words.length > 0 && (
+              <div className="hidden items-center gap-1.5 border-l border-white/10 pl-3 xl:flex">
+                <span className="text-[11px] font-semibold text-slate-400">Top SEO:</span>
+                {keywords.words.slice(0, 6).map((w) => (
+                  <button
+                    key={w.term}
+                    type="button"
+                    onClick={() => {
+                      setSearchInput(w.term);
+                      onRunSearch(w.term);
+                    }}
+                    className="rounded-md border border-white/10 bg-slate-950/80 px-2 py-0.5 text-[11px] text-slate-300 transition hover:border-sky-400/40 hover:text-sky-300"
+                  >
+                    {w.term} <span className="tabular-nums text-[10px] text-amber-300">{Math.round(w.share * 100)}%</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <label className="flex items-center gap-2 text-xs text-slate-400">
               <span>Ordenar:</span>
               <select
                 value={filters.sort}
                 onChange={(e) => onPatchFilters({ sort: e.target.value as AdvancedSortKey })}
-                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white outline-none"
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-sky-400"
               >
                 <option value="faturamento_desc">Maior Faturamento 30d</option>
                 <option value="vendas_30d_desc">Mais Vendas 30d</option>
@@ -1426,51 +1446,26 @@ export function AdvancedProductSearchModule({
               <button
                 type="button"
                 onClick={() => onPatchFilters({ view: 'table' })}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-bold transition ${
                   filters.view === 'table'
                     ? 'bg-amber-400 text-slate-950'
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                <List size={14} /> Tabela Analítica
+                <List size={13} /> Tabela
               </button>
               <button
                 type="button"
                 onClick={() => onPatchFilters({ view: 'grid' })}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-bold transition ${
                   filters.view === 'grid'
                     ? 'bg-amber-400 text-slate-950'
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                <LayoutGrid size={14} /> Cards
+                <LayoutGrid size={13} /> Cards
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tags SEO extraídas da amostra */}
-      {keywords && keywords.words.length > 0 && (
-        <div className="glass-panel rounded-2xl p-4">
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-300">
-            Termos de Alta Frequência nos Títulos Vencedores
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {keywords.words.slice(0, 14).map((w) => (
-              <button
-                key={w.term}
-                type="button"
-                onClick={() => {
-                  setSearchInput(w.term);
-                  onRunSearch(w.term);
-                }}
-                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1 text-xs text-slate-200 transition hover:border-sky-400/40 hover:text-sky-300"
-              >
-                {w.term}{' '}
-                <span className="text-[10px] text-amber-300">{Math.round(w.share * 100)}%</span>
-              </button>
-            ))}
           </div>
         </div>
       )}
@@ -1478,47 +1473,47 @@ export function AdvancedProductSearchModule({
       {/* Estado Inicial / Vazio / Listagem */}
       {rawProducts.length === 0 ? (
         <div className="glass-panel rounded-3xl p-10 text-center">
-          <Search size={32} className="mx-auto text-sky-400" />
+          <Search size={30} className="mx-auto text-sky-400" />
           <h3 className="mt-3 text-base font-bold text-white">
             {modeVariant === 'locais'
-              ? 'Pesquise um produto para mapear vendedores nacionais, internacionais e estados (UF)'
-              : 'Pesquise qualquer produto ou nicho para abrir a matriz analítica'}
+              ? 'Use a barra superior ou um nicho acima para mapear vendedores por UF'
+              : 'Use a barra superior ou clique em um nicho para abrir a matriz analítica'}
           </h3>
-          <p className="mx-auto mt-1 max-w-xl text-xs text-slate-400">
-            Use a barra acima ou clique em uma das sugestões rápidas para calcular faturamento 30d, vendas estimadas, logística e qualidade competitiva.
+          <p className="mx-auto mt-1 max-w-lg text-xs text-slate-400">
+            Faturamento 30d, vendas estimadas, logística Full, catálogo e filtros de oportunidade (0–140d).
           </p>
         </div>
       ) : visible.length === 0 ? (
         <div className="glass-panel rounded-3xl p-8 text-center">
           <p className="text-sm font-bold text-white">
-            Nenhum anúncio da amostra corresponde à combinação atual de filtros.
+            Nenhum anúncio corresponde aos {activeFiltersCount} filtro(s) ativo(s).
           </p>
           <button
             type="button"
             onClick={onResetFilters}
             className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950"
           >
-            <RotateCcw size={14} /> Resetar filtros para ver os {rawProducts.length} anúncios
+            <RotateCcw size={14} /> Resetar filtros ({rawProducts.length} anúncios)
           </button>
         </div>
       ) : filters.view === 'table' ? (
-        /* TABELA ANALÍTICA DENSA */
-        <div className="glass-panel overflow-x-auto rounded-2xl">
+        /* TABELA ANALÍTICA DENSA COM CABEÇALHO FIXO (STICKY) */
+        <div className="glass-panel max-h-[720px] overflow-auto rounded-2xl">
           <table className="min-w-full text-left text-xs">
-            <thead className="border-b border-white/10 bg-slate-950/85 text-[11px] uppercase tracking-wider text-slate-400">
+            <thead className="sticky top-0 z-10 border-b border-white/10 bg-slate-950/95 text-[11px] uppercase tracking-wider text-slate-400 backdrop-blur-md">
               <tr>
-                <th className="px-3 py-3 font-semibold">#</th>
-                <th className="px-3 py-3 font-semibold">Anúncio / Código</th>
-                <th className="px-3 py-3 font-semibold">Preço</th>
-                <th className="px-3 py-3 font-semibold">Vendas 30d</th>
-                <th className="px-3 py-3 font-semibold">Receita 30d</th>
-                <th className="px-3 py-3 font-semibold">Modalidade &amp; Logística</th>
-                <th className="px-3 py-3 font-semibold">Vendedor / UF</th>
-                <th className="px-3 py-3 font-semibold">Nota &amp; Idade</th>
-                <th className="px-3 py-3 text-right font-semibold">Ações</th>
+                <th className="px-3.5 py-3.5 font-semibold">#</th>
+                <th className="px-3.5 py-3.5 font-semibold">Anúncio / Código</th>
+                <th className="px-3.5 py-3.5 font-semibold">Preço</th>
+                <th className="px-3.5 py-3.5 font-semibold">Vendas 30d</th>
+                <th className="px-3.5 py-3.5 font-semibold">Receita 30d</th>
+                <th className="px-3.5 py-3.5 font-semibold">Modalidade &amp; Logística</th>
+                <th className="px-3.5 py-3.5 font-semibold">Vendedor / UF</th>
+                <th className="px-3.5 py-3.5 font-semibold">Nota &amp; Idade</th>
+                <th className="px-3.5 py-3.5 text-right font-semibold">Ação</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-white/[0.06]">
               {visible.map((p, idx) => {
                 const code = productCodeOf(p);
                 const sales30 = monthlySalesOf(p);
@@ -1532,81 +1527,72 @@ export function AdvancedProductSearchModule({
 
                 return (
                   <tr key={`${code ?? 'row'}-${idx}`} className="transition hover:bg-white/[0.03]">
-                    <td className="px-3 py-3 font-extrabold text-amber-300">#{idx + 1}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex min-w-[250px] max-w-[340px] items-center gap-3">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1">
+                    <td className="px-3.5 py-3.5 font-extrabold tabular-nums text-amber-300">#{idx + 1}</td>
+                    <td className="px-3.5 py-3.5">
+                      <div className="flex min-w-[240px] max-w-[340px] items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1">
                           <ThumbImg src={p.image} alt={p.title} />
                         </div>
                         <div className="min-w-0">
                           <button
                             type="button"
                             onClick={() => onOpenProduct(p)}
-                            className="line-clamp-2 text-left font-bold text-slate-100 hover:text-amber-300"
+                            className="line-clamp-2 text-left font-bold text-slate-100 transition hover:text-amber-300"
                           >
                             {p.title}
                           </button>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
                             <span className="font-mono text-sky-300">{p.mlbuId ?? p.itemId ?? p.productId ?? '—'}</span>
-                            <span className="rounded bg-white/5 px-1.5 py-0.5">
+                            <span className="rounded bg-white/[0.06] px-1.5 py-0.5">
                               {isCat ? 'Catálogo' : 'Comum'}
                             </span>
-                            {p.isInternational ? (
+                            {p.isInternational && (
                               <span className="rounded bg-rose-500/20 px-1.5 py-0.5 font-bold text-rose-300">
-                                Internacional CBT
-                              </span>
-                            ) : (
-                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-300">
-                                Brasil
+                                CBT
                               </span>
                             )}
                           </div>
                         </div>
                       </div>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
+                    <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                       <p className="text-sm font-extrabold text-amber-300">{fmtBRL(p.price)}</p>
                       {p.originalPrice && p.price && p.originalPrice > p.price && (
                         <p className="text-[10px] text-slate-500 line-through">{fmtBRL(p.originalPrice)}</p>
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
+                    <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                       <p className="font-bold text-white">{fmtInt(sales30)} / mês</p>
                       <p className="text-[11px] text-slate-400">
-                        {p.velocity ? `${fmtDec(p.velocity.daily, 1)}/dia` : `Total: ${fmtInt(p.soldQuantity)}`}
+                        {p.velocity ? `${fmtDec(p.velocity.daily, 1)}/dia` : `Acum.: ${fmtInt(p.soldQuantity)}`}
                       </p>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
+                    <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                       <p className="text-sm font-extrabold text-emerald-400">{fmtBRL(rev30)}</p>
-                      <p className="text-[10px] text-slate-400">Acum.: {fmtInt(p.soldQuantity)} un.</p>
+                      <p className="text-[10px] text-slate-400">Total: {fmtInt(p.soldQuantity)} un.</p>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3.5 py-3.5">
                       <div className="flex flex-wrap gap-1">
-                        <span className="rounded-full border border-sky-400/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-300">
+                        <span className="rounded-md border border-white/10 bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-slate-200">
                           {p.listingType ?? 'Clássico'}
                         </span>
                         {p.fulfillment && (
-                          <span className="rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                          <span className="rounded-md border border-emerald-500/35 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                             ⚡ Full
                           </span>
                         )}
-                        {p.freeShipping && (
-                          <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                        {p.freeShipping && !p.fulfillment && (
+                          <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-300">
                             Frete Grátis
-                          </span>
-                        )}
-                        {p.hasFlex && (
-                          <span className="rounded-full border border-purple-400/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-200">
-                            Flex
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3.5 py-3.5">
                       <button
                         type="button"
                         onClick={() => sellerKey && onInspectSeller(sellerKey)}
-                        className="text-left font-semibold text-slate-200 hover:text-amber-300"
+                        className="text-left font-semibold text-slate-200 transition hover:text-amber-300"
                         title="Abrir Raio-X deste vendedor"
                       >
                         {p.seller?.nickname ?? 'Loja Verificada'}
@@ -1620,7 +1606,7 @@ export function AdvancedProductSearchModule({
                         <span>{p.seller?.medal ?? 'Ativo'}</span>
                       </div>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
+                    <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                       {p.ratingAverage !== null ? (
                         <p className="inline-flex items-center gap-1 font-bold text-amber-300">
                           <Star size={11} className="fill-amber-400 text-amber-400" />
@@ -1634,31 +1620,32 @@ export function AdvancedProductSearchModule({
                         {p.daysOnAir !== null ? `${fmtInt(p.daysOnAir)}d no ar` : 'Idade n/d'}
                       </p>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3.5 py-3.5">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* 1 Primary Action por linha + Secondary Ghost Icon Buttons */}
                         <button
                           type="button"
                           onClick={() => onOpenProduct(p)}
                           disabled={!code}
-                          className="rounded-lg bg-sky-500 px-2.5 py-1.5 text-[11px] font-bold text-white transition hover:bg-sky-400 disabled:opacity-40"
+                          className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-40"
                         >
                           Raio-X
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleFindSameImageOrTitle(p)}
-                          title="Buscar produtos com mesma imagem ou título"
-                          className="rounded-lg border border-sky-400/30 bg-sky-500/10 p-1.5 text-sky-300 transition hover:bg-sky-500/20"
+                          onClick={() => onSimulateProduct(p)}
+                          title="Simular margem na calculadora"
+                          className="rounded-lg border border-white/10 bg-slate-900/90 p-1.5 text-slate-300 transition hover:border-amber-400/40 hover:text-amber-300"
                         >
-                          <ImageIcon size={13} />
+                          <Calculator size={13} />
                         </button>
                         <button
                           type="button"
-                          onClick={() => onSimulateProduct(p)}
-                          title="Simular margem na calculadora"
-                          className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-1.5 text-amber-300 transition hover:bg-amber-400/20"
+                          onClick={() => handleFindSameImageOrTitle(p)}
+                          title="Buscar mesma imagem ou título"
+                          className="rounded-lg border border-white/10 bg-slate-900/90 p-1.5 text-slate-300 transition hover:border-sky-400/40 hover:text-sky-300"
                         >
-                          <Calculator size={13} />
+                          <ImageIcon size={13} />
                         </button>
                         <button
                           type="button"
@@ -1667,7 +1654,7 @@ export function AdvancedProductSearchModule({
                           className={`rounded-lg border p-1.5 transition ${
                             monitored
                               ? 'border-emerald-400/45 bg-emerald-500/20 text-emerald-300'
-                              : 'border-white/10 bg-slate-900 text-slate-300 hover:border-amber-400/40 hover:text-amber-300'
+                              : 'border-white/10 bg-slate-900/90 text-slate-300 hover:border-amber-400/40 hover:text-amber-300'
                           }`}
                         >
                           {monitored ? <BookmarkCheck size={13} /> : <Bookmark size={13} />}
@@ -1693,8 +1680,8 @@ export function AdvancedProductSearchModule({
 
             return (
               <article key={`${code ?? 'card'}-${idx}`} className="glass-card flex flex-col overflow-hidden rounded-2xl">
-                <div className="relative flex h-48 items-center justify-center bg-white p-4">
-                  <span className="absolute left-3 top-3 rounded-lg bg-slate-950/85 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                <div className="relative flex h-44 items-center justify-center bg-white p-4">
+                  <span className="absolute left-3 top-3 rounded-lg bg-slate-950/85 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-300">
                     #{idx + 1}
                   </span>
                   <button
@@ -1712,31 +1699,26 @@ export function AdvancedProductSearchModule({
                   <ThumbImg src={p.image} alt={p.title} />
                 </div>
 
-                <div className="flex flex-1 flex-col gap-3 p-4">
+                <div className="flex flex-1 flex-col gap-3 p-5">
                   <div className="flex flex-wrap gap-1.5 text-[10px]">
-                    <span className="rounded-full border border-sky-400/35 bg-sky-500/12 px-2 py-0.5 font-semibold text-sky-300">
+                    <span className="rounded-md border border-white/10 bg-slate-900 px-2 py-0.5 font-semibold text-slate-200">
                       {p.listingType ?? 'Clássico'}
                     </span>
                     {p.fulfillment && (
-                      <span className="rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2 py-0.5 font-bold text-emerald-300">
+                      <span className="rounded-md border border-emerald-500/35 bg-emerald-500/15 px-2 py-0.5 font-bold text-emerald-300">
                         ⚡ Full
                       </span>
                     )}
                     {uf && (
-                      <span className="rounded-full border border-amber-400/35 bg-amber-400/12 px-2 py-0.5 font-bold text-amber-300">
-                        UF: {uf}
-                      </span>
-                    )}
-                    {p.isInternational && (
-                      <span className="rounded-full border border-rose-500/35 bg-rose-500/15 px-2 py-0.5 font-bold text-rose-300">
-                        Internacional CBT
+                      <span className="rounded-md border border-amber-400/35 bg-amber-400/12 px-2 py-0.5 font-bold text-amber-300">
+                        {uf}
                       </span>
                     )}
                     {p.categoryId && (
                       <button
                         type="button"
                         onClick={() => onOpenCategory(p.categoryId as string)}
-                        className="rounded-full border border-white/10 bg-slate-900 px-2 py-0.5 text-slate-300 hover:text-amber-300"
+                        className="rounded-md border border-white/10 bg-slate-900 px-2 py-0.5 text-slate-300 hover:text-amber-300"
                       >
                         {p.categoryId}
                       </button>
@@ -1745,31 +1727,31 @@ export function AdvancedProductSearchModule({
 
                   <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-bold text-white">{p.title}</h3>
 
-                  <div className="flex items-center justify-between gap-2 rounded-xl border border-white/5 bg-slate-950/65 px-2.5 py-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
                     <button
                       type="button"
                       onClick={() => sellerKey && onInspectSeller(sellerKey)}
-                      className="flex min-w-0 items-center gap-1.5 truncate text-slate-200 hover:text-amber-300"
+                      className="flex min-w-0 items-center gap-1.5 truncate hover:text-amber-300"
                     >
                       <Store size={12} className="shrink-0 text-emerald-400" />
                       <span className="truncate font-semibold">{p.seller?.nickname ?? 'Loja Oficial ML'}</span>
                     </button>
                     {p.ratingAverage !== null && (
-                      <span className="inline-flex shrink-0 items-center gap-1 font-bold text-amber-300">
+                      <span className="inline-flex shrink-0 items-center gap-1 font-bold tabular-nums text-amber-300">
                         <Star size={11} className="fill-amber-400 text-amber-400" />
                         {fmtDec(p.ratingAverage, 1)}
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-baseline justify-between">
+                  <div className="flex items-baseline justify-between pt-1 tabular-nums">
                     <p className="text-2xl font-black text-amber-300">{fmtBRL(p.price)}</p>
                     <span className="text-[11px] text-slate-400">
                       {p.daysOnAir !== null ? `${fmtInt(p.daysOnAir)}d no ar` : ''}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-slate-950/60 p-2.5 text-xs">
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.08] bg-slate-950/60 p-3 text-xs tabular-nums">
                     <div>
                       <p className="text-[10px] uppercase text-slate-400">Vendas 30d</p>
                       <p className="font-bold text-white">{fmtInt(sales30)} un.</p>
@@ -1780,29 +1762,30 @@ export function AdvancedProductSearchModule({
                     </div>
                   </div>
 
-                  <div className="mt-auto grid grid-cols-3 gap-2 pt-1">
+                  <div className="mt-auto flex items-center gap-2 pt-1">
                     <button
                       type="button"
                       onClick={() => onOpenProduct(p)}
                       disabled={!code}
-                      className="inline-flex items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 py-2 text-xs font-bold text-white"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-400 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-40"
                     >
                       <Search size={13} /> Raio-X
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleFindSameImageOrTitle(p)}
-                      title="Buscar mesma imagem/título"
-                      className="inline-flex items-center justify-center gap-1 rounded-xl border border-sky-400/35 bg-sky-500/10 py-2 text-xs font-bold text-sky-300"
+                      onClick={() => onSimulateProduct(p)}
+                      title="Simular Margem"
+                      className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-400/40 hover:text-amber-300"
                     >
-                      <ImageIcon size={13} /> Similar
+                      <Calculator size={13} /> Margem
                     </button>
                     <button
                       type="button"
-                      onClick={() => onSimulateProduct(p)}
-                      className="inline-flex items-center justify-center gap-1 rounded-xl border border-amber-400/40 bg-amber-400/10 py-2 text-xs font-bold text-amber-300"
+                      onClick={() => handleFindSameImageOrTitle(p)}
+                      title="Buscar mesma imagem/título"
+                      className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-slate-900 p-2 text-slate-300 hover:border-sky-400/40 hover:text-sky-300"
                     >
-                      <Calculator size={13} /> Margem
+                      <ImageIcon size={14} />
                     </button>
                   </div>
                 </div>
@@ -1884,80 +1867,72 @@ export function CategoryAnalysisModule({
 
   return (
     <section className="space-y-6">
-      {/* Cabeçalho + Seletor da Árvore Oficial de Categorias */}
-      <div className="glass-panel rounded-3xl p-6">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-              <Layers size={12} /> Inteligência de Nicho &amp; Concentração
-            </span>
-            <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-              Análise de Categoria &amp; Nível de Monopólio
+      {/* Barra Compacta de Navegação da Árvore Oficial & Seletor de Nicho */}
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Layers size={18} className="text-amber-400" />
+            <h1 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
+              Análise de Categoria &amp; Monopólio
             </h1>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Navegue pela árvore oficial do Mercado Livre ou pesquise um nicho para medir tamanho de mercado, ticket médio e domínio dos Top 5 players.
-            </p>
+            {category && (
+              <span className="rounded-lg border border-amber-400/35 bg-amber-400/10 px-2.5 py-0.5 text-xs font-bold text-amber-300">
+                {category.name} ({category.id})
+              </span>
+            )}
           </div>
-          {category && (
-            <button
-              type="button"
-              onClick={() => onUseCategoryFees(category)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-400/15 px-4 py-2 text-xs font-bold text-amber-300 hover:bg-amber-400/25"
-            >
-              <Calculator size={14} /> Simular Comissões desta Categoria
-            </button>
-          )}
-        </div>
 
-        <div className="grid gap-3 lg:grid-cols-12">
-          <form onSubmit={handleSubmit} className="flex gap-2 lg:col-span-7">
-            <div className="relative flex-1">
-              <Search
-                size={16}
-                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400"
-              />
-              <input
-                value={catInput}
-                onChange={(e) => setCatInput(e.target.value)}
-                placeholder="Digite um nicho (ex: Ferramentas Elétricas) ou código MLB (ex: MLB1051)..."
-                className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-2.5 pl-10 pr-4 text-xs text-white placeholder-slate-400 outline-none focus:border-amber-400 sm:text-sm"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading !== null}
-              className="inline-flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 px-5 py-2.5 text-xs font-extrabold text-slate-950 shadow transition hover:from-amber-300 hover:to-yellow-400 disabled:opacity-60"
-            >
-              {loading ? <Loader2 size={15} className="animate-spin" /> : <Layers size={15} />}
-              Analisar Nicho
-            </button>
-          </form>
-
-          <div className="lg:col-span-5">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={category?.id ?? ''}
               onChange={(e) => e.target.value && onSelectCategory(e.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 px-3.5 py-2.5 text-xs font-semibold text-white outline-none focus:border-amber-400 sm:text-sm"
+              className="rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-amber-400"
             >
-              <option value="">Selecionar Categoria Raiz Oficial do ML (32 macro-nichos)...</option>
+              <option value="">Selecionar Macro-Categoria Oficial (32 nichos)...</option>
               {rootCategories.map((rc) => (
                 <option key={rc.id} value={rc.id}>
                   {rc.name} ({rc.id})
                 </option>
               ))}
             </select>
+
+            <form onSubmit={handleSubmit} className="flex items-center gap-1.5">
+              <input
+                value={catInput}
+                onChange={(e) => setCatInput(e.target.value)}
+                placeholder="Nicho ou código MLB..."
+                className="w-40 rounded-xl border border-white/10 bg-slate-950/90 px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:w-52 focus:border-amber-400 sm:w-48"
+              />
+              <button
+                type="submit"
+                disabled={loading !== null}
+                className="inline-flex items-center gap-1 rounded-xl bg-amber-400 px-3 py-1.5 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={13} className="animate-spin" /> : 'Analisar'}
+              </button>
+            </form>
+
+            {category && (
+              <button
+                type="button"
+                onClick={() => onUseCategoryFees(category)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/90 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300"
+              >
+                <Calculator size={13} /> Simular Taxas
+              </button>
+            )}
           </div>
         </div>
 
         {/* Pílulas rápidas de categorias raiz quando nenhuma selecionada */}
         {!category && rootCategories.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {rootCategories.slice(0, 14).map((rc) => (
+          <div className="mt-3.5 flex flex-wrap gap-1.5 border-t border-white/[0.07] pt-3">
+            {rootCategories.slice(0, 12).map((rc) => (
               <button
                 key={rc.id}
                 type="button"
                 onClick={() => onSelectCategory(rc.id)}
-                className="rounded-xl border border-white/10 bg-slate-950/75 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-amber-400/45 hover:text-amber-300"
+                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:border-amber-400/45 hover:text-amber-300"
               >
                 {rc.name}
               </button>
@@ -1967,9 +1942,9 @@ export function CategoryAnalysisModule({
 
         {/* Árvore Breadcrumb + Subcategorias Diretas */}
         {category && (
-          <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
+          <div className="mt-3.5 space-y-2.5 border-t border-white/[0.07] pt-3">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="font-semibold text-slate-400">Árvore Oficial:</span>
+              <span className="font-semibold text-slate-400">Árvore:</span>
               {(category.pathFromRoot && category.pathFromRoot.length > 0
                 ? category.pathFromRoot
                 : [{ id: category.id, name: category.name }]
@@ -1989,189 +1964,220 @@ export function CategoryAnalysisModule({
                   {idx < arr.length - 1 && <ChevronRight size={12} className="text-slate-500" />}
                 </span>
               ))}
-              <span className="ml-2 rounded-full border border-white/10 bg-slate-950 px-2.5 py-0.5 font-mono text-[11px] text-sky-300">
-                {category.id}
-              </span>
               {category.totalItems !== null && (
-                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
-                  {fmtInt(category.totalItems)} anúncios totais na categoria
+                <span className="ml-auto rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-300">
+                  {fmtInt(category.totalItems)} anúncios totais
                 </span>
               )}
             </div>
 
             {category.childrenCategories.length > 0 && (
-              <div>
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Explorar Subcategorias de {category.name} ({category.childrenCategories.length}):
-                </p>
-                <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-1">
-                  {category.childrenCategories.map((ch) => (
-                    <button
-                      key={ch.id}
-                      type="button"
-                      onClick={() => onSelectCategory(ch.id)}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/75 px-3 py-1.5 text-xs text-slate-200 transition hover:border-amber-400/45 hover:text-amber-300"
-                    >
-                      <span>{ch.name}</span>
-                      {ch.totalItems !== null && (
-                        <span className="text-[10px] text-slate-400">({fmtInt(ch.totalItems)})</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex max-h-28 flex-wrap items-center gap-1.5 overflow-y-auto pr-1">
+                <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Subcategorias ({category.childrenCategories.length}):
+                </span>
+                {category.childrenCategories.map((ch) => (
+                  <button
+                    key={ch.id}
+                    type="button"
+                    onClick={() => onSelectCategory(ch.id)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1 text-[11px] text-slate-200 transition hover:border-amber-400/45 hover:text-amber-300"
+                  >
+                    <span>{ch.name}</span>
+                    {ch.totalItems !== null && (
+                      <span className="tabular-nums text-[10px] text-slate-400">({fmtInt(ch.totalItems)})</span>
+                    )}
+                  </button>
+                ))}
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Tabela Consolidada de Categorias Mães e Filhas (Visível imediatamente ao abrir a aba) */}
+      {/* F-PATTERN: 4 KPIs Consolidados da Categoria Selecionada em Destaque Imediato */}
+      {category && analytics && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiTile
+            label="Faturamento 30d do Nicho"
+            value={fmtBRL(analytics.estimatedMonthlyRevenue)}
+            sub={`Amostra: ${analytics.sampleSize} líderes · ${fmtInt(analytics.estimatedMonthlySales)} un./mês`}
+            icon={<BarChart3 size={15} />}
+            tone="text-emerald-400"
+          />
+          <KpiTile
+            label="Ticket Médio & Mediana"
+            value={fmtBRL(analytics.averageTicket)}
+            sub={`Mediana: ${fmtBRL(analytics.medianPrice)} (${fmtBRL(analytics.minPrice)}–${fmtBRL(analytics.maxPrice)})`}
+            icon={<Tag size={15} />}
+            tone="text-amber-300"
+          />
+          <KpiTile
+            label="Proporção de Monopólio"
+            value={`${analytics.concentratedSellersCount} / ${analytics.uniqueSellersCount} lojas`}
+            sub={`Concentram 75% das vendas (${fmtPct(analytics.sellerConcentrationRatioPct)})`}
+            icon={<Store size={15} />}
+            tone="text-sky-300"
+          />
+          <KpiTile
+            label="Comissões da Categoria"
+            value={`${fmtDec(category.fees.categoryFees.range_128?.gold_special ?? 12, 1)}% / ${fmtDec(category.fees.categoryFees.range_128?.gold_pro ?? 17, 1)}%`}
+            sub="Clássico vs. Premium (acima de R$ 79)"
+            icon={<Calculator size={15} />}
+            tone="text-white"
+          />
+        </div>
+      )}
+
+      {/* Matriz Consolidada de Categorias Mães e Filhas (Visível imediatamente ao abrir a aba) */}
       <div className="glass-panel overflow-x-auto rounded-3xl p-5 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-base font-extrabold text-white sm:text-lg">
-              <Layers size={18} className="text-amber-400" />
+            <h2 className="flex items-center gap-2 text-base font-extrabold text-white">
+              <Layers size={17} className="text-amber-400" />
               Matriz de Categorias Mães e Filhas (Mercado Livre Brasil)
             </h2>
             <p className="mt-0.5 text-xs text-slate-400">
-              Comparativo real de Receita Mensal 30d, Ticket Médio, Distribuição de Medalhas, % Full, % Catálogo e Proporção de Monopólio. Clique em qualquer linha para aprofundar.
+              Receita Mensal 30d, Ticket Médio, Medalhas, % Full, % Catálogo e Índice de Monopolização real.
             </p>
           </div>
           {matrixLoading && (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-300">
-              <Loader2 size={14} className="animate-spin" /> Carregando matriz de categorias...
+              <Loader2 size={14} className="animate-spin" /> Atualizando matriz...
             </span>
           )}
         </div>
 
         {matrixRows.length > 0 ? (
-          <table className="min-w-full text-left text-xs">
-            <thead className="border-b border-white/10 bg-slate-950/85 text-[11px] uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="px-3 py-3 font-semibold">Categoria (Mãe / Filha)</th>
-                <th className="px-3 py-3 font-semibold">Receita Estimada 30d</th>
-                <th className="px-3 py-3 font-semibold">Ticket Médio</th>
-                <th className="px-3 py-3 font-semibold">Distribuição de Medalhas</th>
-                <th className="px-3 py-3 font-semibold">% Full</th>
-                <th className="px-3 py-3 font-semibold">% Catálogo</th>
-                <th className="px-3 py-3 font-semibold">Índice de Monopolização</th>
-                <th className="px-3 py-3 text-right font-semibold">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {matrixRows.map((row) => {
-                const isSelected = category?.id === row.id;
-                const mBadge =
-                  row.monopolyLevel === 'Baixo'
-                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                    : row.monopolyLevel === 'Alto'
-                      ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
-                      : 'border-amber-400/40 bg-amber-400/15 text-amber-300';
-                const md = row.medalDistribution;
+          <div className="max-h-[540px] overflow-auto rounded-2xl border border-white/[0.06]">
+            <table className="min-w-full text-left text-xs">
+              <thead className="sticky top-0 z-10 border-b border-white/10 bg-slate-950/95 text-[11px] uppercase tracking-wider text-slate-400 backdrop-blur-md">
+                <tr>
+                  <th className="px-3.5 py-3.5 font-semibold">Categoria (Mãe / Filha)</th>
+                  <th className="px-3.5 py-3.5 font-semibold">Receita Estimada 30d</th>
+                  <th className="px-3.5 py-3.5 font-semibold">Ticket Médio</th>
+                  <th className="px-3.5 py-3.5 font-semibold">Distribuição de Medalhas</th>
+                  <th className="px-3.5 py-3.5 font-semibold">% Full</th>
+                  <th className="px-3.5 py-3.5 font-semibold">% Catálogo</th>
+                  <th className="px-3.5 py-3.5 font-semibold">Índice de Monopolização</th>
+                  <th className="px-3.5 py-3.5 text-right font-semibold">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.06]">
+                {matrixRows.map((row) => {
+                  const isSelected = category?.id === row.id;
+                  const mBadge =
+                    row.monopolyLevel === 'Baixo'
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                      : row.monopolyLevel === 'Alto'
+                        ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                        : 'border-amber-400/40 bg-amber-400/15 text-amber-300';
+                  const md = row.medalDistribution;
 
-                return (
-                  <tr
-                    key={row.id}
-                    onClick={() => onSelectCategory(row.id)}
-                    className={`cursor-pointer transition hover:bg-white/[0.04] ${
-                      isSelected ? 'bg-amber-400/[0.08]' : row.level === 'child' ? 'bg-slate-950/35' : ''
-                    }`}
-                  >
-                    <td className="px-3 py-3">
-                      <div className={`flex items-center gap-2 ${row.level === 'child' ? 'pl-5' : ''}`}>
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
-                            row.level === 'mother'
-                              ? 'bg-amber-400/20 text-amber-300'
-                              : 'bg-sky-500/15 text-sky-300'
-                          }`}
-                        >
-                          {row.level === 'mother' ? 'MÃE' : '↳ FILHA'}
-                        </span>
-                        <div>
-                          <p className="font-bold text-white">{row.name}</p>
-                          <p className="text-[10px] text-slate-400">
-                            <span className="font-mono text-sky-300">{row.id}</span>
-                            {row.parentName ? ` · Subnicho de ${row.parentName}` : ''}
-                            {row.totalItems ? ` · ${fmtInt(row.totalItems)} itens` : ''}
-                          </p>
+                  return (
+                    <tr
+                      key={row.id}
+                      onClick={() => onSelectCategory(row.id)}
+                      className={`cursor-pointer transition hover:bg-white/[0.04] ${
+                        isSelected ? 'bg-amber-400/[0.08]' : row.level === 'child' ? 'bg-slate-950/35' : ''
+                      }`}
+                    >
+                      <td className="px-3.5 py-3.5">
+                        <div className={`flex items-center gap-2 ${row.level === 'child' ? 'pl-5' : ''}`}>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
+                              row.level === 'mother'
+                                ? 'bg-amber-400/20 text-amber-300'
+                                : 'bg-sky-500/15 text-sky-300'
+                            }`}
+                          >
+                            {row.level === 'mother' ? 'MÃE' : '↳ FILHA'}
+                          </span>
+                          <div>
+                            <p className="font-bold text-white">{row.name}</p>
+                            <p className="text-[10px] text-slate-400">
+                              <span className="font-mono text-sky-300">{row.id}</span>
+                              {row.parentName ? ` · ${row.parentName}` : ''}
+                              {row.totalItems ? ` · ${fmtInt(row.totalItems)} itens` : ''}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-extrabold text-emerald-400">
-                      {fmtBRL(row.estimatedMonthlyRevenue)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">
-                      {fmtBRL(row.averageTicket)}
-                    </td>
-                    <td className="min-w-[210px] px-3 py-3">
-                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
-                        <div
-                          className="bg-sky-400"
-                          title={`Oficiais: ${fmtPct(md.officialStorePct)}`}
-                          style={{ width: `${md.officialStorePct}%` }}
-                        />
-                        <div
-                          className="bg-emerald-400"
-                          title={`Platinum: ${fmtPct(md.platinumPct)}`}
-                          style={{ width: `${md.platinumPct}%` }}
-                        />
-                        <div
-                          className="bg-amber-400"
-                          title={`Gold/Líder: ${fmtPct(md.goldPct + md.silverPct)}`}
-                          style={{ width: `${md.goldPct + md.silverPct}%` }}
-                        />
-                        <div
-                          className="bg-slate-500"
-                          title={`Sem Medalha: ${fmtPct(md.noMedalPct)}`}
-                          style={{ width: `${md.noMedalPct}%` }}
-                        />
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] text-slate-400">
-                        <span className="text-sky-300">Ofic. {Math.round(md.officialStorePct)}%</span>
-                        <span className="text-emerald-300">Plat. {Math.round(md.platinumPct)}%</span>
-                        <span className="text-amber-300">
-                          Gold/Líder {Math.round(md.goldPct + md.silverPct)}%
-                        </span>
-                        <span>S/Med. {Math.round(md.noMedalPct)}%</span>
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-bold text-emerald-300">
-                      ⚡ {fmtPct(row.fullPct)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-bold text-purple-300">
-                      {fmtPct(row.catalogPct)}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${mBadge}`}>
-                          Monopólio {row.monopolyLevel}
-                        </span>
-                        <span className="text-[11px] font-bold text-slate-200">
-                          ({fmtPct(row.monopolyIndexPct)})
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-[10px] text-slate-400">
-                        {row.concentratedSellersCount} de {row.uniqueSellersCount} vendedores concentram 75% das vendas
-                      </p>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectCategory(row.id);
-                        }}
-                        className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 hover:bg-amber-300"
-                      >
-                        Abrir Nicho
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3.5 font-extrabold tabular-nums text-emerald-400">
+                        {fmtBRL(row.estimatedMonthlyRevenue)}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3.5 font-bold tabular-nums text-amber-300">
+                        {fmtBRL(row.averageTicket)}
+                      </td>
+                      <td className="min-w-[200px] px-3.5 py-3.5">
+                        <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                          <div
+                            className="bg-sky-400"
+                            title={`Oficiais: ${fmtPct(md.officialStorePct)}`}
+                            style={{ width: `${md.officialStorePct}%` }}
+                          />
+                          <div
+                            className="bg-emerald-400"
+                            title={`Platinum: ${fmtPct(md.platinumPct)}`}
+                            style={{ width: `${md.platinumPct}%` }}
+                          />
+                          <div
+                            className="bg-amber-400"
+                            title={`Gold/Líder: ${fmtPct(md.goldPct + md.silverPct)}`}
+                            style={{ width: `${md.goldPct + md.silverPct}%` }}
+                          />
+                          <div
+                            className="bg-slate-500"
+                            title={`Sem Medalha: ${fmtPct(md.noMedalPct)}`}
+                            style={{ width: `${md.noMedalPct}%` }}
+                          />
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] tabular-nums text-slate-400">
+                          <span className="text-sky-300">Ofic. {Math.round(md.officialStorePct)}%</span>
+                          <span className="text-emerald-300">Plat. {Math.round(md.platinumPct)}%</span>
+                          <span className="text-amber-300">
+                            Líder {Math.round(md.goldPct + md.silverPct)}%
+                          </span>
+                          <span>S/Med. {Math.round(md.noMedalPct)}%</span>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3.5 font-bold tabular-nums text-emerald-300">
+                        ⚡ {fmtPct(row.fullPct)}
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3.5 font-bold tabular-nums text-purple-300">
+                        {fmtPct(row.catalogPct)}
+                      </td>
+                      <td className="px-3.5 py-3.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold ${mBadge}`}>
+                            {row.monopolyLevel}
+                          </span>
+                          <span className="text-[11px] font-bold tabular-nums text-slate-200">
+                            ({fmtPct(row.monopolyIndexPct)})
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] tabular-nums text-slate-400">
+                          {row.concentratedSellersCount}/{row.uniqueSellersCount} lojas = 75% vendas
+                        </p>
+                      </td>
+                      <td className="whitespace-nowrap px-3.5 py-3.5 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectCategory(row.id);
+                          }}
+                          className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 transition hover:bg-amber-300"
+                        >
+                          Explorar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="py-6 text-center text-xs text-slate-400">
             {matrixLoading
@@ -2184,38 +2190,6 @@ export function CategoryAnalysisModule({
       {/* Painel Analítico Consolidado quando há categoria carregada */}
       {category && analytics && (
         <>
-          {/* KPIs Consolidados da Amostra da Categoria */}
-          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiTile
-              label="Faturamento 30d do Nicho"
-              value={fmtBRL(analytics.estimatedMonthlyRevenue)}
-              sub={`Amostra líder: ${analytics.sampleSize} produtos · ${fmtInt(analytics.estimatedMonthlySales)} vendas/mês`}
-              icon={<BarChart3 size={15} />}
-              tone="text-emerald-400"
-            />
-            <KpiTile
-              label="Ticket Médio & Mediana"
-              value={fmtBRL(analytics.averageTicket)}
-              sub={`Mediana: ${fmtBRL(analytics.medianPrice)} (${fmtBRL(analytics.minPrice)} a ${fmtBRL(analytics.maxPrice)})`}
-              icon={<Tag size={15} />}
-              tone="text-amber-300"
-            />
-            <KpiTile
-              label="Proporção de Monopólio"
-              value={`${analytics.concentratedSellersCount} / ${analytics.uniqueSellersCount} lojas`}
-              sub={`${analytics.concentratedSellersCount} vendedores concentram 75% das vendas (${fmtPct(analytics.sellerConcentrationRatioPct)})`}
-              icon={<Store size={15} />}
-              tone="text-sky-300"
-            />
-            <KpiTile
-              label="Comissões da Categoria"
-              value={`${fmtDec(category.fees.categoryFees.range_128?.gold_special ?? 12, 1)}% / ${fmtDec(category.fees.categoryFees.range_128?.gold_pro ?? 17, 1)}%`}
-              sub="Clássico vs. Premium (acima de R$ 79)"
-              icon={<Calculator size={15} />}
-              tone="text-white"
-            />
-          </div>
-
           {/* Card de Nível de Competitividade / Monopólio + Proporções Operacionais & Medalhas */}
           <div className="grid gap-5 lg:grid-cols-12">
             <div className="glass-panel space-y-4 rounded-3xl p-6 lg:col-span-6">
@@ -2580,26 +2554,21 @@ export function TrendsModuleView({
 
   return (
     <section className="space-y-6">
-      <div className="glass-panel rounded-3xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-400/35 bg-rose-500/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-rose-300">
-              <Flame size={12} /> Radar de Demanda &amp; Sazonalidade
-            </span>
-            <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-              Tendências do Mercado Livre por Nicho
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Flame size={18} className="text-rose-400" />
+            <h1 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
+              Tendências &amp; Sazonalidade por Nicho
             </h1>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Cruzamento oficial das buscas em ascensão com volume de concorrentes, preço médio de entrada e nível de adoção Full.
-            </p>
           </div>
 
-          {data && (
-            <div className="w-full sm:w-72">
+          <div className="flex flex-wrap items-center gap-2">
+            {data && (
               <select
                 value={selectedCat}
                 onChange={(e) => onSelectCategory(e.target.value)}
-                className="w-full rounded-2xl border border-white/15 bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white outline-none focus:border-amber-400"
+                className="rounded-xl border border-white/10 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-amber-400"
               >
                 <option value="all">🔥 Geral Brasil (Todas as Categorias)</option>
                 {data.rootCategories.map((c) => (
@@ -2608,78 +2577,76 @@ export function TrendsModuleView({
                   </option>
                 ))}
               </select>
+            )}
+
+            <div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/10 bg-slate-950 p-1 text-xs">
+              {(['all', 'Muito Alta', 'Alta', 'Crescente'] as const).map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setDemandFilter(lvl)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                    demandFilter === lvl
+                      ? 'bg-amber-400 text-slate-950'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {lvl === 'all' ? 'Todas' : lvl}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Abas rápidas das categorias principais */}
         {data && (
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-            {data.categories.map((cat) => {
-              const active = selectedCat === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => onSelectCategory(cat.id)}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
-                    active
-                      ? 'border-amber-400/60 bg-amber-400/15 text-amber-300'
-                      : 'border-white/10 bg-slate-950/60 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <span>{cat.icon}</span>
-                  <span>{cat.shortName}</span>
-                </button>
-              );
-            })}
+          <div className="mt-3.5 flex items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {data.categories.map((cat) => {
+                const active = selectedCat === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => onSelectCategory(cat.id)}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                      active
+                        ? 'border-amber-400/60 bg-amber-400/15 text-amber-300'
+                        : 'border-white/10 bg-slate-950/60 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>{cat.icon}</span>
+                    <span>{cat.shortName}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {loading && (
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-sky-300">
+                <Loader2 size={14} className="animate-spin" /> Atualizando...
+              </span>
+            )}
           </div>
         )}
-
-        {/* Filtro rápido por Potencial de Demanda */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-semibold text-slate-400">Potencial de Demanda:</span>
-            {(['all', 'Muito Alta', 'Alta', 'Crescente'] as const).map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => setDemandFilter(lvl)}
-                className={`rounded-xl px-3 py-1 font-bold transition ${
-                  demandFilter === lvl
-                    ? 'bg-sky-500 text-white'
-                    : 'border border-white/10 bg-slate-950/70 text-slate-300'
-                }`}
-              >
-                {lvl === 'all' ? 'Todos os Níveis' : lvl}
-              </button>
-            ))}
-          </div>
-          {loading && (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-300">
-              <Loader2 size={14} className="animate-spin" /> Atualizando radar de tendências...
-            </span>
-          )}
-        </div>
       </div>
 
-      {/* Tabela / Cards de Termos Ranqueados */}
+      {/* Tabela de Termos Ranqueados com Sticky Header */}
       {visibleTrends.length > 0 && (
-        <div className="glass-panel overflow-x-auto rounded-3xl">
+        <div className="glass-panel max-h-[640px] overflow-auto rounded-3xl">
           <table className="min-w-full text-left text-xs">
-            <thead className="border-b border-white/10 bg-slate-950/85 text-[11px] uppercase tracking-wider text-slate-400">
+            <thead className="sticky top-0 z-10 border-b border-white/10 bg-slate-950/95 text-[11px] uppercase tracking-wider text-slate-400 backdrop-blur-md">
               <tr>
                 <th className="px-4 py-3.5 font-semibold">Pos.</th>
                 <th className="px-4 py-3.5 font-semibold">Termo em Ascensão</th>
                 <th className="px-4 py-3.5 font-semibold">Potencial de Demanda</th>
                 <th className="px-4 py-3.5 font-semibold">Sazonalidade</th>
                 <th className="px-4 py-3.5 font-semibold">Concorrentes</th>
-                <th className="px-4 py-3.5 font-semibold">Preço Médio de Entrada</th>
+                <th className="px-4 py-3.5 font-semibold">Ticket de Entrada</th>
                 <th className="px-4 py-3.5 font-semibold">Adoção Full</th>
-                <th className="px-4 py-3.5 text-right font-semibold">Explorar Oportunidade</th>
+                <th className="px-4 py-3.5 text-right font-semibold">Ação</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-white/[0.06]">
               {visibleTrends.map((t) => {
                 const demandBadge =
                   t.demandLevel === 'Muito Alta'
@@ -2690,7 +2657,7 @@ export function TrendsModuleView({
 
                 return (
                   <tr key={`${t.position}-${t.keyword}`} className="transition hover:bg-white/[0.03]">
-                    <td className="px-4 py-3.5 font-black text-amber-300">#{t.position}</td>
+                    <td className="px-4 py-3.5 font-black tabular-nums text-amber-300">#{t.position}</td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-3">
                         {t.sampleImage && (
@@ -2710,13 +2677,13 @@ export function TrendsModuleView({
                       </span>
                     </td>
                     <td className="px-4 py-3.5 font-medium text-slate-200">{t.seasonalityLabel}</td>
-                    <td className="px-4 py-3.5 font-bold text-slate-200">
+                    <td className="px-4 py-3.5 font-bold tabular-nums text-slate-200">
                       {t.competingListings > 0 ? `${fmtInt(t.competingListings)} anúncios` : 'Nicho aberto'}
                     </td>
-                    <td className="px-4 py-3.5 font-extrabold text-amber-300">
+                    <td className="px-4 py-3.5 font-extrabold tabular-nums text-amber-300">
                       {fmtBRL(t.avgEntryPrice)}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 tabular-nums">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-800">
                           <div
@@ -2732,15 +2699,15 @@ export function TrendsModuleView({
                         <button
                           type="button"
                           onClick={() => onSearchKeywordInProducts(t.keyword)}
-                          className="rounded-lg bg-sky-500 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-sky-400"
+                          className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 transition hover:bg-amber-300"
                         >
-                          Analisar Produtos
+                          Analisar
                         </button>
                         <button
                           type="button"
                           onClick={() => onSearchKeywordInLocals(t.keyword)}
                           title="Mapear fornecedores nacionais e UFs"
-                          className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/20"
+                          className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:border-emerald-400/40 hover:text-emerald-300"
                         >
                           UF / Local
                         </button>
@@ -2748,7 +2715,7 @@ export function TrendsModuleView({
                           type="button"
                           onClick={() => onExtractMediaForKeyword(t.keyword)}
                           title="Extrair fotos HD e clipes deste termo"
-                          className="rounded-lg border border-white/10 bg-slate-900 p-1.5 text-slate-300 hover:text-amber-300"
+                          className="rounded-lg border border-white/10 bg-slate-900 p-1.5 text-slate-300 transition hover:border-amber-400/40 hover:text-amber-300"
                         >
                           <Film size={13} />
                         </button>
@@ -2777,7 +2744,7 @@ export function TrendsModuleView({
                 className="glass-card group flex cursor-pointer flex-col overflow-hidden rounded-2xl"
               >
                 <div className="relative flex h-40 items-center justify-center bg-white p-3">
-                  <span className="absolute left-2.5 top-2.5 rounded-md bg-amber-400 px-2 py-0.5 text-[11px] font-extrabold text-slate-950">
+                  <span className="absolute left-2.5 top-2.5 rounded-md bg-amber-400 px-2 py-0.5 text-[11px] font-extrabold tabular-nums text-slate-950">
                     #{item.position}º
                   </span>
                   <ThumbImg src={item.image} alt={item.title} />
@@ -2787,7 +2754,7 @@ export function TrendsModuleView({
                   <h4 className="line-clamp-2 font-bold text-white group-hover:text-amber-300">
                     {item.title}
                   </h4>
-                  <p className="mt-auto pt-1 text-xl font-black text-amber-300">{fmtBRL(item.price)}</p>
+                  <p className="mt-auto pt-1 text-xl font-black tabular-nums text-amber-300">{fmtBRL(item.price)}</p>
                 </div>
               </article>
             ))}

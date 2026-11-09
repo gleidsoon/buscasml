@@ -765,22 +765,24 @@ function Stat({
   valueClass?: string;
 }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+    <div className="overflow-visible rounded-xl border border-white/[0.08] bg-slate-950/60 p-4">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
         {icon}
         {label}
       </p>
-      <p className={`mt-1.5 break-words text-lg font-bold ${valueClass}`}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      <p className={`kpi-num mt-1.5 break-words text-lg font-extrabold leading-snug tabular-nums ${valueClass}`}>
+        {value}
+      </p>
+      {hint && <p className="mt-1 text-[11px] leading-snug text-slate-400">{hint}</p>}
     </div>
   );
 }
 
 function Mini({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-slate-950/60 p-2.5">
-      <p className="text-[11px] text-slate-500">{label}</p>
-      <p className="mt-0.5 truncate font-semibold text-slate-200">{value}</p>
+    <div className="overflow-visible rounded-xl border border-white/[0.06] bg-slate-950/60 p-2.5">
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className="kpi-num mt-0.5 truncate font-semibold tabular-nums text-slate-100">{value}</p>
       {sub && <p className="truncate text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
@@ -3251,10 +3253,14 @@ function DossierView({
               </div>
             )}
 
-            <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-white/10 pt-4">
-              <p className="text-4xl font-black tracking-tight text-amber-300">{formatBRL(d.price)}</p>
+            <div className="mt-4 flex flex-wrap items-end gap-3 overflow-visible border-t border-white/10 pt-4">
+              <p className="kpi-num text-4xl font-black tracking-tight tabular-nums text-amber-300">
+                {formatBRL(d.price)}
+              </p>
               {d.originalPrice !== null && d.price !== null && d.originalPrice > d.price && (
-                <p className="pb-1 text-sm text-slate-500 line-through">{formatBRL(d.originalPrice)}</p>
+                <p className="pb-1 text-sm tabular-nums text-slate-500 line-through">
+                  {formatBRL(d.originalPrice)}
+                </p>
               )}
               {d.discountPct !== null && d.discountPct > 0 && (
                 <Pill tone="green">{d.discountPct}% OFF</Pill>
@@ -3514,7 +3520,7 @@ function SimpleModalitiesCard({
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Quanto Sobrou no Bolso
           </p>
-          <p className={`mt-1.5 py-1 text-2xl font-black leading-normal sm:text-3xl ${statusTone.profitColor}`}>
+          <p className={`kpi-num mt-1.5 py-1 text-2xl font-black leading-normal tabular-nums sm:text-3xl ${statusTone.profitColor}`}>
             {hasPrice ? formatBRL(b.contribution) : 'R$ 0,00'}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">Lucro líquido por venda</p>
@@ -3524,7 +3530,7 @@ function SimpleModalitiesCard({
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Margem Final (%)
           </p>
-          <p className={`mt-1.5 py-1 text-2xl font-black leading-normal sm:text-3xl ${statusTone.profitColor}`}>
+          <p className={`kpi-num mt-1.5 py-1 text-2xl font-black leading-normal tabular-nums sm:text-3xl ${statusTone.profitColor}`}>
             {hasPrice ? formatPercent(marginPct) : '0,0%'}
           </p>
           <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
@@ -3538,9 +3544,9 @@ function SimpleModalitiesCard({
 
       {/* Resumo Direto: Tarifa do ML e Custo Total */}
       <div className="grid gap-3 text-xs sm:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+        <div className="overflow-visible rounded-2xl border border-white/10 bg-slate-950/50 p-4">
           <p className="font-medium text-slate-400">Tarifa do ML ({formatDecimal(b.commissionPct, 1)}%)</p>
-          <p className="mt-1 py-0.5 text-lg font-bold leading-normal text-white">
+          <p className="kpi-num mt-1 py-0.5 text-lg font-bold leading-normal tabular-nums text-white">
             {formatBRL(mlFeeTotal, 'R$ 0,00')}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-400">
@@ -3550,9 +3556,9 @@ function SimpleModalitiesCard({
           </p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+        <div className="overflow-visible rounded-2xl border border-white/10 bg-slate-950/50 p-4">
           <p className="font-medium text-slate-400">Custo Total da Venda</p>
-          <p className="mt-1 py-0.5 text-lg font-bold leading-normal text-slate-200">
+          <p className="kpi-num mt-1 py-0.5 text-lg font-bold leading-normal tabular-nums text-slate-200">
             {formatBRL(b.totalCost, 'R$ 0,00')}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-400">
@@ -3562,12 +3568,12 @@ function SimpleModalitiesCard({
       </div>
 
       {/* Preço Sugerido para bater a meta */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 overflow-visible rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
             Preço de Venda Sugerido para sua Meta
           </p>
-          <p className="mt-0.5 py-0.5 text-2xl font-black leading-normal text-white">
+          <p className="kpi-num mt-0.5 py-0.5 text-2xl font-black leading-normal tabular-nums text-white">
             {suggested.price !== null ? formatBRL(suggested.price) : 'Reduza as taxas/meta'}
           </p>
         </div>
@@ -3575,7 +3581,7 @@ function SimpleModalitiesCard({
           <button
             type="button"
             onClick={() => onApplySuggested(suggested.price as number)}
-            className="rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-extrabold text-slate-950 shadow-md transition hover:bg-amber-300"
+            className="rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-extrabold tabular-nums text-slate-950 shadow-md transition hover:bg-amber-300"
           >
             Usar {formatBRL(suggested.price)}
           </button>
@@ -4592,6 +4598,10 @@ export default function BuscasMLPro() {
       }
       return;
     }
+    if (activeModule === 'auditor') {
+      void openAdDossier(q, true);
+      return;
+    }
     if (activeModule === 'vendedores') {
       void inspectSeller(q);
       return;
@@ -5157,8 +5167,8 @@ export default function BuscasMLPro() {
 
       {/* ÁREA PRINCIPAL (HEADER STICKY + CONTEÚDO DO MÓDULO ATIVO) */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-[#040711]/85 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[#040711]/90 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-2.5">
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
@@ -5173,13 +5183,16 @@ export default function BuscasMLPro() {
                   {MODULE_TITLES[activeModule]}
                 </p>
                 <p className="hidden text-[11px] text-slate-400 sm:block">
-                  Pesquisa universal: digite produto, categoria MLB ou cole qualquer link/código de anúncio
+                  Busca global inteligente integrada ao módulo ativo
                 </p>
               </div>
             </div>
 
-            {/* Pesquisa Universal Rápida no Topo */}
-            <form onSubmit={handleUniversalSearch} className="order-3 flex w-full gap-2 md:order-2 md:w-auto md:flex-1 md:max-w-md">
+            {/* Barra Única de Pesquisa Global Inteligente (Context-Aware) */}
+            <form
+              onSubmit={handleUniversalSearch}
+              className="order-3 flex w-full gap-2 md:order-2 md:w-auto md:flex-1 md:max-w-xl"
+            >
               <div className="relative flex-1">
                 <Search
                   size={15}
@@ -5188,13 +5201,14 @@ export default function BuscasMLPro() {
                 <input
                   value={universalQuery}
                   onChange={(e) => setUniversalQuery(e.target.value)}
-                  placeholder="Busca rápida: produto, MLB, MLBU ou link..."
-                  className="w-full rounded-xl border border-white/10 bg-[#050914]/95 py-2 pl-9 pr-8 text-xs text-white placeholder-slate-400 outline-none focus:border-sky-400"
+                  placeholder={`Pesquisar em ${MODULE_TITLES[activeModule]}: produto, MLB, MLBU, loja ou link...`}
+                  className="w-full rounded-xl border border-white/10 bg-[#050914]/95 py-2 pl-9 pr-8 text-xs text-white placeholder-slate-400 outline-none transition focus:border-sky-400"
                 />
                 {universalQuery && (
                   <button
                     type="button"
                     onClick={() => setUniversalQuery('')}
+                    aria-label="Limpar busca"
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                   >
                     <X size={13} />
@@ -5204,9 +5218,9 @@ export default function BuscasMLPro() {
               <button
                 type="submit"
                 disabled={loading !== null}
-                className="rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-sky-400 disabled:opacity-50"
+                className="rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 px-4 py-2 text-xs font-extrabold text-slate-950 shadow-sm shadow-amber-500/20 transition hover:brightness-105 disabled:opacity-50"
               >
-                Ir
+                Buscar
               </button>
             </form>
 
@@ -5215,11 +5229,11 @@ export default function BuscasMLPro() {
               <button
                 type="button"
                 onClick={() => navigateTo('monitor')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-400/40 hover:text-amber-300"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300"
               >
                 <Bookmark size={14} className="text-amber-400" />
                 <span className="hidden sm:inline">Monitor</span>
-                <span className="rounded-full bg-amber-400/20 px-1.5 py-0.2 text-[10px] font-bold text-amber-300">
+                <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-amber-300">
                   {totalMonitoredCount}
                 </span>
               </button>

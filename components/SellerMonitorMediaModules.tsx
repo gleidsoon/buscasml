@@ -205,108 +205,97 @@ export function SellersAndCompetitorsModule({
 
   return (
     <section className="space-y-6">
-      {/* Cabeçalho + Alternador Raio-X de Lojista vs Comparador de Ofertas */}
-      <div className="glass-panel rounded-3xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-400/35 bg-purple-500/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-purple-300">
-              <Users size={12} /> Inteligência Competitiva &amp; Espionagem de Lojas
-            </span>
-            <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-              Concorrência &amp; Raio-X de Vendedores
-            </h1>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Audite qualquer lojista por Nickname, ID ou anúncio (Curva ABC 80/15/5 e Reputação) ou compare ofertas equivalentes.
-            </p>
+      {/* Barra Compacta de Comando: Alternador Loja vs Comparador + Input Contextual + Exemplos */}
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex rounded-xl border border-white/10 bg-slate-950 p-1">
+              <button
+                type="button"
+                onClick={() => setSubTab('loja')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  subTab === 'loja' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Store size={13} /> Raio-X de Vendedor (Loja)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubTab('comparador')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  subTab === 'comparador' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Users size={13} /> Comparador de Concorrentes
+              </button>
+            </div>
           </div>
 
-          <div className="flex rounded-2xl border border-white/10 bg-slate-950 p-1">
-            <button
-              type="button"
-              onClick={() => setSubTab('loja')}
-              className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition ${
-                subTab === 'loja' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <Store size={14} /> Raio-X de Vendedor (Loja)
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab('comparador')}
-              className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition ${
-                subTab === 'comparador' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <Users size={14} /> Comparador de Concorrentes
-            </button>
-          </div>
-        </div>
-
-        {subTab === 'loja' ? (
-          <div className="mt-5">
-            <form onSubmit={handleSellerSubmit} className="flex flex-col gap-3 sm:flex-row">
+          {subTab === 'loja' ? (
+            <form onSubmit={handleSellerSubmit} className="flex flex-1 items-center justify-end gap-2 sm:max-w-md">
               <div className="relative flex-1">
                 <Store
-                  size={18}
-                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-purple-400"
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-purple-400"
                 />
                 <input
                   value={sellerInput}
                   onChange={(e) => setSellerInput(e.target.value)}
-                  placeholder="Digite o Nickname da loja, Seller ID numérico, link da vitrine ou link/código MLB de um anúncio..."
-                  className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3 pl-11 pr-4 text-sm text-white placeholder-slate-400 outline-none focus:border-purple-400"
+                  placeholder="Nickname, Seller ID ou link/MLB..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/90 py-2 pl-9 pr-3 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-400"
                 />
               </div>
               <button
                 type="submit"
                 disabled={loadingSeller}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:from-purple-400 hover:to-indigo-500 disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
               >
-                {loadingSeller ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-                Mapear Vendedor
+                {loadingSeller ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                Mapear Loja
               </button>
             </form>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-              <span>Exemplos rápidos:</span>
-              {['DEFANTISHOP', '532200362', 'LOJA OFICIAL SAMSUNG', 'WAP OFICIAL', 'MONDIAL OFICIAL'].map((ex) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => {
-                    setSellerInput(ex);
-                    onSearchSeller(ex);
-                  }}
-                  className="rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 text-slate-300 hover:border-purple-400/40 hover:text-purple-300"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-5">
-            <form onSubmit={handleCompSubmit} className="flex flex-col gap-3 sm:flex-row">
+          ) : (
+            <form onSubmit={handleCompSubmit} className="flex flex-1 items-center justify-end gap-2 sm:max-w-md">
               <div className="relative flex-1">
                 <Search
-                  size={18}
-                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sky-400"
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sky-400"
                 />
                 <input
                   value={compInput}
                   onChange={(e) => setCompInput(e.target.value)}
-                  placeholder="Cole o link de um anúncio ou código MLB / MLBU para listar e comparar ofertas concorrentes..."
-                  className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3 pl-11 pr-4 text-sm text-white placeholder-slate-400 outline-none focus:border-sky-400"
+                  placeholder="Link ou código MLB / MLBU para comparar..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/90 py-2 pl-9 pr-3 text-xs text-white placeholder-slate-500 outline-none focus:border-sky-400"
                 />
               </div>
               <button
                 type="submit"
                 disabled={loadingCompetitor}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
               >
-                {loadingCompetitor ? <Loader2 size={16} className="animate-spin" /> : <Users size={16} />}
-                Comparar Ofertas
+                {loadingCompetitor ? <Loader2 size={13} className="animate-spin" /> : <Users size={13} />}
+                Comparar
               </button>
             </form>
+          )}
+        </div>
+
+        {subTab === 'loja' && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/[0.07] pt-2.5 text-[11px] text-slate-400">
+            <span className="font-semibold text-slate-500">Lojas Rápidas:</span>
+            {['DEFANTISHOP', '532200362', 'LOJA OFICIAL SAMSUNG', 'WAP OFICIAL', 'MONDIAL OFICIAL'].map((ex) => (
+              <button
+                key={ex}
+                type="button"
+                onClick={() => {
+                  setSellerInput(ex);
+                  onSearchSeller(ex);
+                }}
+                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-0.5 text-slate-300 transition hover:border-purple-400/40 hover:text-purple-300"
+              >
+                {ex}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -314,194 +303,128 @@ export function SellersAndCompetitorsModule({
       {/* CONTEÚDO ABA 1: DOSSIÊ COMPLETO DO VENDEDOR + CURVA ABC */}
       {subTab === 'loja' && sellerDossier && (
         <div className="space-y-6">
-          {/* Cabeçalho do Dossiê do Lojista */}
-          <div className="grid gap-5 lg:grid-cols-12">
-            <div className="glass-panel space-y-4 rounded-3xl p-6 lg:col-span-7">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-0.5 text-[11px] font-bold text-emerald-300">
-                      <Award size={11} className="mr-1 inline" />
-                      {sellerDossier.seller.medal}
-                    </span>
-                    {sellerDossier.seller.officialStoreId && (
-                      <span className="rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-0.5 text-[11px] font-bold text-sky-300">
-                        Loja Oficial #{sellerDossier.seller.officialStoreId}
-                      </span>
-                    )}
-                    <span className="rounded-full border border-white/10 bg-slate-950 px-2.5 py-0.5 font-mono text-[11px] text-slate-300">
-                      ID: {sellerDossier.seller.id ?? '—'}
-                    </span>
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                        sellerDossier.seller.isInternational
-                          ? 'bg-rose-500/20 text-rose-300'
-                          : 'bg-emerald-500/15 text-emerald-300'
-                      }`}
-                    >
-                      {sellerDossier.seller.isInternational ? 'Internacional (CBT)' : 'Operação Nacional (Brasil)'}
-                    </span>
-                  </div>
+          {/* F-PATTERN: 4 KPIs Primários do Lojista no Topo */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="overflow-visible rounded-2xl border border-emerald-500/25 bg-slate-950/75 p-4 sm:p-5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+                Faturamento Mensal Est.
+              </p>
+              <p className="mt-2 text-2xl font-black tabular-nums tracking-tight text-white">
+                {fmtBRL(sellerDossier.portfolio.estimatedMonthlyRevenue)}
+              </p>
+              <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                ~{fmtInt(sellerDossier.portfolio.estimatedMonthlySales)} vendas/mês ({sellerDossier.portfolio.portfolioSampleCount} itens)
+              </p>
+            </div>
 
-                  <h2 className="mt-2.5 text-2xl font-black text-white">
-                    {sellerDossier.seller.nickname ?? `Lojista #${sellerDossier.seller.id}`}
-                  </h2>
-                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span className="inline-flex items-center gap-1 text-slate-200">
-                      <MapPin size={13} className="text-amber-400" />
-                      {sellerDossier.seller.city && sellerDossier.seller.state
-                        ? `${sellerDossier.seller.city} - ${sellerDossier.seller.state}`
-                        : sellerDossier.seller.state ?? 'Brasil'}
-                    </span>
-                    <span>·</span>
-                    <span>
-                      {sellerDossier.seller.accountYears !== null
-                        ? `${sellerDossier.seller.accountYears} ano(s) de Mercado Livre`
-                        : 'Conta verificada'}
-                    </span>
-                    <span>·</span>
-                    <span className="text-sky-300">{sellerDossier.resolvedFrom}</span>
-                  </p>
-                </div>
+            <div className="overflow-visible rounded-2xl border border-amber-400/25 bg-slate-950/75 p-4 sm:p-5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                Ticket Médio da Loja
+              </p>
+              <p className="mt-2 text-2xl font-black tabular-nums tracking-tight text-white">
+                {fmtBRL(sellerDossier.portfolio.averageTicket)}
+              </p>
+              <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                Full: {fmtPct(sellerDossier.portfolio.fullPct)} · Catálogo: {fmtPct(sellerDossier.portfolio.catalogPct)}
+              </p>
+            </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onToggleMonitorSeller(sellerDossier)}
-                    className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
-                      sellerMonitored
-                        ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300'
-                        : 'border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20'
-                    }`}
-                  >
-                    {sellerMonitored ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
-                    {sellerMonitored ? 'Vendedor Monitorado' : 'Monitorar Vendedor'}
-                  </button>
-                  {sellerDossier.seller.storePermalink && (
-                    <a
-                      href={sellerDossier.seller.storePermalink}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
-                    >
-                      <ExternalLink size={14} /> Abrir Loja no ML
-                    </a>
+            <div className="overflow-visible rounded-2xl border border-white/10 bg-slate-950/75 p-4 sm:p-5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Vendas Concluídas da Conta
+              </p>
+              <p className="mt-2 text-2xl font-black tabular-nums tracking-tight text-emerald-400">
+                {sellerDossier.seller.completedSales !== null
+                  ? `+${fmtInt(sellerDossier.seller.completedSales)}`
+                  : 'Alta Reputação'}
+              </p>
+              <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                Reclamações:{' '}
+                {sellerDossier.seller.claimsRate !== null
+                  ? fmtPct(sellerDossier.seller.claimsRate * 100)
+                  : '< 1,0%'}
+              </p>
+            </div>
+
+            <div className="overflow-visible rounded-2xl border border-white/10 bg-slate-950/75 p-4 sm:p-5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
+                Tendência do Portfólio
+              </p>
+              <p className="mt-2 text-2xl font-black tracking-tight text-white">
+                {sellerDossier.portfolio.salesTrend ?? 'Estável'}
+              </p>
+              <p className="mt-1 truncate text-[11px] text-slate-400">
+                {sellerDossier.portfolio.salesTrendReason ?? 'Giro consistente na amostra'}
+              </p>
+            </div>
+          </div>
+
+          {/* Cabeçalho de Identidade e Reputação do Lojista */}
+          <div className="glass-panel rounded-3xl p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-0.5 text-[11px] font-bold text-emerald-300">
+                    <Award size={11} className="mr-1 inline" />
+                    {sellerDossier.seller.medal}
+                  </span>
+                  {sellerDossier.seller.officialStoreId && (
+                    <span className="rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-0.5 text-[11px] font-bold text-sky-300">
+                      Loja Oficial #{sellerDossier.seller.officialStoreId}
+                    </span>
                   )}
+                  <span className="rounded-full border border-white/10 bg-slate-950 px-2.5 py-0.5 font-mono text-[11px] text-slate-300">
+                    ID: {sellerDossier.seller.id ?? '—'}
+                  </span>
                 </div>
+
+                <h2 className="mt-2 text-xl font-black text-white sm:text-2xl">
+                  {sellerDossier.seller.nickname ?? `Lojista #${sellerDossier.seller.id}`}
+                </h2>
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <span className="inline-flex items-center gap-1 text-slate-200">
+                    <MapPin size={13} className="text-amber-400" />
+                    {sellerDossier.seller.city && sellerDossier.seller.state
+                      ? `${sellerDossier.seller.city} - ${sellerDossier.seller.state}`
+                      : sellerDossier.seller.state ?? 'Brasil'}
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {sellerDossier.seller.accountYears !== null
+                      ? `${sellerDossier.seller.accountYears} ano(s) de Mercado Livre`
+                      : 'Conta verificada'}
+                  </span>
+                </p>
               </div>
 
-              <ReputationThermometer level={sellerDossier.seller.reputationLevel} />
-
-              <div className="grid grid-cols-2 gap-3 pt-1 sm:grid-cols-4">
-                <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-3">
-                  <p className="text-[10px] font-semibold uppercase text-slate-400">Vendas da Conta</p>
-                  <p className="mt-1 text-base font-black text-emerald-400">
-                    {sellerDossier.seller.completedSales !== null
-                      ? `+${fmtInt(sellerDossier.seller.completedSales)}`
-                      : 'Alta reputação'}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-3">
-                  <p className="text-[10px] font-semibold uppercase text-slate-400">Taxa Reclamações</p>
-                  <p className="mt-1 text-base font-black text-white">
-                    {sellerDossier.seller.claimsRate !== null
-                      ? fmtPct(sellerDossier.seller.claimsRate * 100)
-                      : '< 1,0%'}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-3">
-                  <p className="text-[10px] font-semibold uppercase text-slate-400">Envio c/ Atraso</p>
-                  <p className="mt-1 text-base font-black text-white">
-                    {sellerDossier.seller.delayedHandlingRate !== null
-                      ? fmtPct(sellerDossier.seller.delayedHandlingRate * 100)
-                      : 'No prazo'}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/65 p-3">
-                  <p className="text-[10px] font-semibold uppercase text-slate-400">Aval. Positivas</p>
-                  <p className="mt-1 text-base font-black text-amber-300">
-                    {sellerDossier.seller.positiveRatingPct !== null
-                      ? fmtPct(sellerDossier.seller.positiveRatingPct)
-                      : '98%+'}
-                  </p>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onToggleMonitorSeller(sellerDossier)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-extrabold transition ${
+                    sellerMonitored
+                      ? 'border border-emerald-400/50 bg-emerald-500/20 text-emerald-300'
+                      : 'bg-amber-400 text-slate-950 hover:bg-amber-300'
+                  }`}
+                >
+                  {sellerMonitored ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+                  {sellerMonitored ? 'Vendedor Monitorado' : 'Monitorar Vendedor'}
+                </button>
+                {sellerDossier.seller.storePermalink && (
+                  <a
+                    href={sellerDossier.seller.storePermalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                  >
+                    <ExternalLink size={14} /> Abrir no ML
+                  </a>
+                )}
               </div>
             </div>
 
-            {/* Métricas Financeiras e Logísticas do Portfólio + Tendência de Vendas */}
-            <div className="glass-panel flex flex-col justify-between space-y-4 rounded-3xl p-6 lg:col-span-5">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-base font-bold text-white">
-                    Desempenho Estimado do Portfólio Ativo
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Consolidado sobre os {sellerDossier.portfolio.portfolioSampleCount} principais anúncios ativos da loja
-                  </p>
-                </div>
-
-                {sellerDossier.portfolio.salesTrend && (
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-extrabold ${
-                      sellerDossier.portfolio.salesTrend === 'Em Alta'
-                        ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                        : sellerDossier.portfolio.salesTrend === 'Em Queda'
-                          ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
-                          : 'border-sky-400/40 bg-sky-500/15 text-sky-300'
-                    }`}
-                  >
-                    <TrendingUp size={13} /> Tendência: {sellerDossier.portfolio.salesTrend}
-                  </span>
-                )}
-              </div>
-
-              {sellerDossier.portfolio.salesTrendReason && (
-                <p className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-[11px] text-slate-300">
-                  {sellerDossier.portfolio.salesTrendReason}
-                </p>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
-                  <p className="text-[11px] font-bold uppercase text-emerald-300">Faturamento Mensal Est.</p>
-                  <p className="mt-1 text-2xl font-black text-white">
-                    {fmtBRL(sellerDossier.portfolio.estimatedMonthlyRevenue)}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-slate-300">
-                    ~{fmtInt(sellerDossier.portfolio.estimatedMonthlySales)} vendas/mês
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4">
-                  <p className="text-[11px] font-bold uppercase text-amber-300">Ticket Médio da Loja</p>
-                  <p className="mt-1 text-2xl font-black text-white">
-                    {fmtBRL(sellerDossier.portfolio.averageTicket)}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-slate-300">
-                    Catálogo: {fmtPct(sellerDossier.portfolio.catalogPct)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2.5 text-center text-xs">
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2.5">
-                  <p className="text-[10px] text-slate-400">Envio Full</p>
-                  <p className="mt-0.5 font-extrabold text-emerald-400">
-                    {fmtPct(sellerDossier.portfolio.fullPct)}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2.5">
-                  <p className="text-[10px] text-slate-400">Frete Grátis</p>
-                  <p className="mt-0.5 font-extrabold text-sky-300">
-                    {fmtPct(sellerDossier.portfolio.freeShippingPct)}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2.5">
-                  <p className="text-[10px] text-slate-400">Premium</p>
-                  <p className="mt-0.5 font-extrabold text-amber-300">
-                    {fmtPct(sellerDossier.portfolio.premiumPct)}
-                  </p>
-                </div>
-              </div>
+            <div className="mt-4">
+              <ReputationThermometer level={sellerDossier.seller.reputationLevel} />
             </div>
           </div>
 
@@ -511,17 +434,17 @@ export function SellersAndCompetitorsModule({
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-white">
                   <Tag size={15} className="text-amber-400" />
-                  Principais Marcas Trabalhadas por {sellerDossier.seller.nickname ?? 'esta Loja'}
+                  Principais Marcas Trabalhadas
                 </h3>
                 <span className="text-[11px] text-slate-400">
-                  Participação por marca no faturamento estimado do portfólio
+                  Participação por marca na receita do portfólio
                 </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {sellerDossier.portfolio.topBrands.slice(0, 8).map((brand, idx) => (
                   <div
                     key={`${brand.name}-${idx}`}
-                    className="rounded-2xl border border-white/10 bg-slate-950/65 p-3 text-xs"
+                    className="rounded-2xl border border-white/10 bg-slate-950/65 p-3 text-xs tabular-nums"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate font-bold text-white">
@@ -542,18 +465,18 @@ export function SellersAndCompetitorsModule({
           )}
 
           {/* Portfólio em Curva ABC (A = 80% receita, B = 15%, C = 5%) */}
-          <div className="glass-panel space-y-4 rounded-3xl p-6">
+          <div className="glass-panel space-y-4 rounded-3xl p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-white">
-                  Portfólio de Anúncios em Curva ABC (Pareto de Receita)
+                  Portfólio de Anúncios em Curva ABC (Pareto 80/15/5)
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Identifique imediatamente os carros-chefe que sustentam o faturamento deste concorrente
+                  Carros-chefe ordenados por faturamento estimado nos últimos 30 dias
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {(
                   [
                     {
@@ -578,7 +501,7 @@ export function SellersAndCompetitorsModule({
                     key={tab.id}
                     type="button"
                     onClick={() => setAbcFilter(tab.id)}
-                    className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
+                    className={`rounded-xl px-3 py-1.5 text-xs font-bold tabular-nums transition ${
                       abcFilter === tab.id
                         ? 'bg-amber-400 text-slate-950'
                         : 'border border-white/10 bg-slate-950 text-slate-300 hover:text-white'
@@ -590,21 +513,21 @@ export function SellersAndCompetitorsModule({
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-white/10">
+            <div className="max-h-[600px] overflow-auto rounded-2xl border border-white/10">
               <table className="min-w-full text-left text-xs">
-                <thead className="bg-slate-950/90 text-[11px] uppercase tracking-wider text-slate-400">
+                <thead className="sticky top-0 z-10 border-b border-white/10 bg-slate-950/95 text-[11px] uppercase tracking-wider text-slate-400 backdrop-blur-md">
                   <tr>
-                    <th className="px-3.5 py-3 font-semibold"># / Curva</th>
-                    <th className="px-3.5 py-3 font-semibold">Anúncio da Loja</th>
-                    <th className="px-3.5 py-3 font-semibold">Preço</th>
-                    <th className="px-3.5 py-3 font-semibold">Vendas 30d</th>
-                    <th className="px-3.5 py-3 font-semibold">Faturamento 30d</th>
-                    <th className="px-3.5 py-3 font-semibold">% Share Loja</th>
-                    <th className="px-3.5 py-3 font-semibold">Logística</th>
-                    <th className="px-3.5 py-3 text-right font-semibold">Ação</th>
+                    <th className="px-3.5 py-3.5 font-semibold"># / Curva</th>
+                    <th className="px-3.5 py-3.5 font-semibold">Anúncio da Loja</th>
+                    <th className="px-3.5 py-3.5 font-semibold">Preço</th>
+                    <th className="px-3.5 py-3.5 font-semibold">Vendas 30d</th>
+                    <th className="px-3.5 py-3.5 font-semibold">Faturamento 30d</th>
+                    <th className="px-3.5 py-3.5 font-semibold">% Share Loja</th>
+                    <th className="px-3.5 py-3.5 font-semibold">Logística</th>
+                    <th className="px-3.5 py-3.5 text-right font-semibold">Ação</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-white/[0.06]">
                   {portfolioItems.map((it) => {
                     const abcStyle =
                       it.abcClass === 'A'
@@ -616,13 +539,13 @@ export function SellersAndCompetitorsModule({
 
                     return (
                       <tr key={`${it.id}-${it.rank}`} className="transition hover:bg-white/[0.03]">
-                        <td className="whitespace-nowrap px-3.5 py-3">
+                        <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                           <span className="mr-2 font-bold text-slate-300">#{it.rank}</span>
                           <span className={`rounded-md border px-2 py-0.5 text-[10px] font-black ${abcStyle}`}>
                             Curva {it.abcClass}
                           </span>
                         </td>
-                        <td className="px-3.5 py-3">
+                        <td className="px-3.5 py-3.5">
                           <div className="flex min-w-[230px] max-w-[340px] items-center gap-3">
                             <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1">
                               <SafeThumb src={it.image} alt={it.title} />
@@ -633,20 +556,20 @@ export function SellersAndCompetitorsModule({
                             </div>
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-3.5 py-3 font-extrabold text-amber-300">
+                        <td className="whitespace-nowrap px-3.5 py-3.5 font-extrabold tabular-nums text-amber-300">
                           {fmtBRL(it.price)}
                         </td>
-                        <td className="whitespace-nowrap px-3.5 py-3 font-bold text-white">
+                        <td className="whitespace-nowrap px-3.5 py-3.5 font-bold tabular-nums text-white">
                           {fmtInt(it.monthlySales)} un.
                         </td>
-                        <td className="whitespace-nowrap px-3.5 py-3 font-extrabold text-emerald-400">
+                        <td className="whitespace-nowrap px-3.5 py-3.5 font-extrabold tabular-nums text-emerald-400">
                           {fmtBRL(it.monthlyRevenue)}
                         </td>
-                        <td className="whitespace-nowrap px-3.5 py-3">
+                        <td className="whitespace-nowrap px-3.5 py-3.5 tabular-nums">
                           <p className="font-bold text-sky-300">{fmtPct(it.revenueSharePct)}</p>
                           <p className="text-[10px] text-slate-400">Acum.: {fmtPct(it.cumulativeSharePct)}</p>
                         </td>
-                        <td className="px-3.5 py-3">
+                        <td className="px-3.5 py-3.5">
                           <div className="flex flex-wrap gap-1">
                             {it.fulfillment && (
                               <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
@@ -658,13 +581,13 @@ export function SellersAndCompetitorsModule({
                             </span>
                           </div>
                         </td>
-                        <td className="px-3.5 py-3 text-right">
+                        <td className="px-3.5 py-3.5 text-right">
                           <button
                             type="button"
                             onClick={() => targetCode && onOpenProductCode(targetCode)}
-                            className="rounded-lg bg-sky-500 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-sky-400"
+                            className="rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 transition hover:bg-amber-300"
                           >
-                            Abrir Raio-X
+                            Raio-X
                           </button>
                         </td>
                       </tr>
@@ -830,73 +753,62 @@ export function MonitorModuleView({
 
   return (
     <section className="space-y-6">
-      <div className="glass-panel rounded-3xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
-              <BookmarkCheck size={12} /> Radar Contínuo de Preço, Estoque &amp; Giro
-            </span>
-            <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-              Monitoramento de Produtos &amp; Vendedores
-            </h1>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Acompanhe snapshots históricos salvos no seu navegador e meça variações reais de preço, estoque, vendas acumuladas e giro diário.
-            </p>
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex rounded-xl border border-white/10 bg-slate-950 p-1">
+              <button
+                type="button"
+                onClick={() => setTab('produtos')}
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-bold tabular-nums transition ${
+                  tab === 'produtos' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Produtos Monitorados ({products.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('vendedores')}
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-bold tabular-nums transition ${
+                  tab === 'vendedores' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Vendedores Monitorados ({sellers.length})
+              </button>
+            </div>
           </div>
 
-          <button
-            type="button"
-            disabled={refreshing || (products.length === 0 && sellers.length === 0)}
-            onClick={onRefreshAll}
-            className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-3 text-xs font-extrabold text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Atualizando Snapshots...' : 'Atualizar Métricas Agora'}
-          </button>
-        </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <form onSubmit={handleQuickAdd} className="flex items-center gap-1.5">
+              <input
+                value={quickInput}
+                onChange={(e) => setQuickInput(e.target.value)}
+                placeholder={
+                  tab === 'produtos'
+                    ? 'Código MLB / MLBU ou link...'
+                    : 'Nickname ou Seller ID...'
+                }
+                className="w-48 rounded-xl border border-white/10 bg-slate-950/90 px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:w-60 focus:border-amber-400 sm:w-56"
+              />
+              <button
+                type="submit"
+                disabled={refreshing}
+                className="shrink-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300 disabled:opacity-50"
+              >
+                + Monitorar
+              </button>
+            </form>
 
-        {/* Abas Produtos Monitorados vs Vendedores Monitorados + Adição Direta */}
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
-          <div className="flex rounded-2xl border border-white/10 bg-slate-950 p-1">
             <button
               type="button"
-              onClick={() => setTab('produtos')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
-                tab === 'produtos' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
-              }`}
+              disabled={refreshing || (products.length === 0 && sellers.length === 0)}
+              onClick={onRefreshAll}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-1.5 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
             >
-              Produtos Monitorados ({products.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('vendedores')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
-                tab === 'vendedores' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Vendedores Monitorados ({sellers.length})
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Atualizando...' : 'Atualizar Métricas'}
             </button>
           </div>
-
-          <form onSubmit={handleQuickAdd} className="flex flex-1 gap-2 sm:max-w-md">
-            <input
-              value={quickInput}
-              onChange={(e) => setQuickInput(e.target.value)}
-              placeholder={
-                tab === 'produtos'
-                  ? 'Adicionar anúncio por código MLB / MLBU ou link...'
-                  : 'Adicionar loja por Nickname ou Seller ID...'
-              }
-              className="w-full rounded-xl border border-white/10 bg-[#050914] px-3.5 py-2 text-xs text-white placeholder-slate-400 outline-none focus:border-amber-400"
-            />
-            <button
-              type="submit"
-              disabled={refreshing}
-              className="shrink-0 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
-            >
-              + Monitorar
-            </button>
-          </form>
         </div>
       </div>
 
@@ -904,10 +816,10 @@ export function MonitorModuleView({
       {tab === 'produtos' ? (
         products.length === 0 ? (
           <div className="glass-panel rounded-3xl p-10 text-center">
-            <Bookmark size={34} className="mx-auto text-amber-400" />
+            <Bookmark size={30} className="mx-auto text-amber-400" />
             <h3 className="mt-3 text-base font-bold text-white">Nenhum produto em monitoramento ainda</h3>
-            <p className="mx-auto mt-1 max-w-xl text-xs text-slate-400">
-              Clique no botão de salvar (Monitorar) em qualquer busca, ranking ou Raio-X de produto — ou cole o código/link acima para gravar o primeiro snapshot!
+            <p className="mx-auto mt-1 max-w-lg text-xs text-slate-400">
+              Salve produtos em qualquer busca ou cole o código MLB/MLBU acima para acompanhar preço, estoque e giro diário.
             </p>
           </div>
         ) : (
@@ -938,7 +850,7 @@ export function MonitorModuleView({
                 <div key={item.code} className="glass-panel rounded-2xl p-5">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex min-w-0 flex-1 items-center gap-3.5">
-                      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5">
                         <SafeThumb src={item.image} alt={item.title} />
                       </div>
                       <div className="min-w-0">
@@ -960,28 +872,28 @@ export function MonitorModuleView({
                         >
                           {item.title}
                         </button>
-                        <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
-                          <Clock size={11} /> {snaps.length} snapshot(s) · Última coleta:{' '}
+                        <p className="mt-0.5 flex items-center gap-1.5 text-[11px] tabular-nums text-slate-400">
+                          <Clock size={11} /> {snaps.length} snapshot(s) ·{' '}
                           {new Date(item.lastUpdatedAt).toLocaleString('pt-BR')}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenProductCode(item.code)}
+                        className="rounded-xl bg-amber-400 px-3.5 py-1.5 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300"
+                      >
+                        Raio-X
+                      </button>
                       <button
                         type="button"
                         disabled={refreshing}
                         onClick={() => onRefreshSingleProduct(item.code)}
-                        className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-emerald-300 disabled:opacity-50"
                       >
                         <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Atualizar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onOpenProductCode(item.code)}
-                        className="rounded-xl bg-sky-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-400"
-                      >
-                        Abrir Raio-X
                       </button>
                       <button
                         type="button"
@@ -994,7 +906,7 @@ export function MonitorModuleView({
                         type="button"
                         onClick={() => onRemoveProduct(item.code)}
                         title="Remover do monitoramento"
-                        className="rounded-xl border border-red-500/30 bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20"
+                        className="rounded-xl border border-white/10 bg-slate-900 p-1.5 text-slate-400 transition hover:border-red-500/40 hover:text-red-300"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -1003,24 +915,24 @@ export function MonitorModuleView({
 
                   {/* Grade de Métricas Atuais + Variações Δ */}
                   <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-slate-400">Preço Atual (Δ Preço)</p>
-                      <p className="mt-1 text-base font-black text-amber-300">{fmtBRL(latest?.price)}</p>
+                    <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
+                      <p className="text-[10px] font-semibold uppercase text-slate-400">Preço Atual (Δ)</p>
+                      <p className="mt-1 text-lg font-black text-amber-300">{fmtBRL(latest?.price)}</p>
                       <DeltaBadge value={deltaPrice} formatter={(n) => fmtBRL(n)} invertGood />
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-slate-400">Estoque Disp. (Δ Estoque)</p>
-                      <p className="mt-1 text-base font-black text-white">{fmtInt(latest?.stock)} un.</p>
+                    <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
+                      <p className="text-[10px] font-semibold uppercase text-slate-400">Estoque Disp. (Δ)</p>
+                      <p className="mt-1 text-lg font-black text-white">{fmtInt(latest?.stock)} un.</p>
                       <DeltaBadge value={deltaStock} formatter={(n) => fmtInt(n)} suffix=" un." />
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-slate-400">Vendas Totais (Δ Vendas)</p>
-                      <p className="mt-1 text-base font-black text-emerald-400">{fmtInt(latest?.soldTotal)} un.</p>
+                    <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
+                      <p className="text-[10px] font-semibold uppercase text-slate-400">Vendas Totais (Δ)</p>
+                      <p className="mt-1 text-lg font-black text-emerald-400">{fmtInt(latest?.soldTotal)} un.</p>
                       <DeltaBadge value={deltaSold} formatter={(n) => fmtInt(n)} suffix=" vendas" />
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-slate-400">Giro Diário (Δ Giro)</p>
-                      <p className="mt-1 text-base font-black text-sky-300">
+                    <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
+                      <p className="text-[10px] font-semibold uppercase text-slate-400">Giro Diário (Δ)</p>
+                      <p className="mt-1 text-lg font-black text-sky-300">
                         {fmtDec(latest?.dailySales, 1)} / dia
                       </p>
                       <DeltaBadge value={deltaDaily} formatter={(n) => fmtDec(n, 1)} suffix="/dia" />
@@ -1033,7 +945,7 @@ export function MonitorModuleView({
                       <p className="mb-2 text-xs font-bold text-slate-300">
                         Histórico de Snapshots Capturados ({snaps.length})
                       </p>
-                      <table className="min-w-full text-left text-xs">
+                      <table className="min-w-full text-left text-xs tabular-nums">
                         <thead className="text-[10px] uppercase text-slate-400">
                           <tr>
                             <th className="px-2.5 py-1.5">Data / Hora</th>
@@ -1071,10 +983,10 @@ export function MonitorModuleView({
       ) : sellers.length === 0 ? (
         /* VAZIO VENDEDORES */
         <div className="glass-panel rounded-3xl p-10 text-center">
-          <Store size={34} className="mx-auto text-purple-400" />
+          <Store size={30} className="mx-auto text-purple-400" />
           <h3 className="mt-3 text-base font-bold text-white">Nenhum vendedor monitorado ainda</h3>
-          <p className="mx-auto mt-1 max-w-xl text-xs text-slate-400">
-            Adicione um vendedor pelo campo acima ou clique em &ldquo;Monitorar Vendedor&rdquo; dentro do módulo Concorrência &amp; Vendedores!
+          <p className="mx-auto mt-1 max-w-lg text-xs text-slate-400">
+            Adicione um vendedor pelo campo acima ou clique em &ldquo;Monitorar Vendedor&rdquo; no módulo de Concorrência.
           </p>
         </div>
       ) : (
@@ -1108,31 +1020,31 @@ export function MonitorModuleView({
                       <span className="text-xs text-slate-400">{sel.cityState}</span>
                     </div>
                     <h3 className="mt-1 text-lg font-extrabold text-white">{sel.nickname}</h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] tabular-nums text-slate-400">
                       {snaps.length} snapshot(s) · Atualizado em {new Date(sel.lastUpdatedAt).toLocaleString('pt-BR')}
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onInspectSeller(sel.sellerId ? String(sel.sellerId) : sel.nickname)}
+                      className="rounded-xl bg-amber-400 px-3.5 py-1.5 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300"
+                    >
+                      Raio-X da Loja
+                    </button>
                     <button
                       type="button"
                       disabled={refreshing}
                       onClick={() => onRefreshSingleSeller(sel.sellerId ? String(sel.sellerId) : sel.nickname)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-300"
+                      className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-emerald-300"
                     >
                       <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Atualizar
                     </button>
                     <button
                       type="button"
-                      onClick={() => onInspectSeller(sel.sellerId ? String(sel.sellerId) : sel.nickname)}
-                      className="rounded-xl bg-purple-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-purple-500"
-                    >
-                      Abrir Raio-X da Loja
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => onRemoveSeller(sel.id)}
-                      className="rounded-xl border border-red-500/30 bg-red-500/10 p-1.5 text-red-300"
+                      className="rounded-xl border border-white/10 bg-slate-900 p-1.5 text-slate-400 transition hover:border-red-500/40 hover:text-red-300"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -1140,23 +1052,23 @@ export function MonitorModuleView({
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
+                  <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
                     <p className="text-[10px] font-semibold uppercase text-slate-400">Vendas Concluídas da Conta</p>
-                    <p className="mt-1 text-base font-black text-emerald-400">
+                    <p className="mt-1 text-lg font-black text-emerald-400">
                       {fmtInt(latest?.completedSales)}
                     </p>
                     <DeltaBadge value={dSales} formatter={(n) => fmtInt(n)} suffix=" vendas" />
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
+                  <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
                     <p className="text-[10px] font-semibold uppercase text-slate-400">Faturamento Mensal Amostra</p>
-                    <p className="mt-1 text-base font-black text-amber-300">
+                    <p className="mt-1 text-lg font-black text-amber-300">
                       {fmtBRL(latest?.monthlyRevenue)}
                     </p>
                     <DeltaBadge value={dRev} formatter={(n) => fmtBRL(n)} />
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-slate-950/65 p-3">
+                  <div className="overflow-visible rounded-xl border border-white/10 bg-slate-950/65 p-3.5 tabular-nums">
                     <p className="text-[10px] font-semibold uppercase text-slate-400">Ticket Médio da Loja</p>
-                    <p className="mt-1 text-base font-black text-white">{fmtBRL(latest?.avgTicket)}</p>
+                    <p className="mt-1 text-lg font-black text-white">{fmtBRL(latest?.avgTicket)}</p>
                     <DeltaBadge value={dTicket} formatter={(n) => fmtBRL(n)} />
                   </div>
                 </div>
@@ -1251,45 +1163,38 @@ export function ListingAuditorModule({
 
   return (
     <section className="space-y-6">
-      {/* Barra de Auditoria de Anúncio */}
-      <div className="glass-panel rounded-3xl p-6">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-400/35 bg-teal-500/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-teal-300">
-          <ClipboardCheck size={12} /> Auditor Técnico de SEO, Mídia &amp; Conversão
-        </span>
-        <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-          Análise de Qualidade da Listagem (Score 0 a 100)
-        </h1>
-        <p className="mt-0.5 text-xs text-slate-400">
-          Cole o link ou código de qualquer anúncio (seu ou de concorrentes) para receber o diagnóstico completo nos 6 pilares de ranqueamento do Mercado Livre.
-        </p>
+      {/* Barra Compacta de Auditoria de Anúncio */}
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <ClipboardCheck size={18} className="text-teal-400" />
+            <h1 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
+              Auditor de Qualidade da Listagem (Score 0–100)
+            </h1>
+          </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <ClipboardCheck
-              size={18}
-              className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-teal-400"
-            />
+          <form onSubmit={handleSubmit} className="flex flex-1 items-center justify-end gap-2 sm:max-w-md">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Cole o link do anúncio ou digite um código MLB / MLBU para auditar..."
-              className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3 pl-11 pr-4 text-sm text-white placeholder-slate-400 outline-none focus:border-teal-400"
+              placeholder="Link ou código MLB / MLBU para auditar..."
+              className="w-full rounded-xl border border-white/10 bg-slate-950/90 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-teal-400"
             />
-          </div>
-          <button
-            type="submit"
-            disabled={loading !== null}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-lg disabled:opacity-60"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <ClipboardCheck size={16} />}
-            Auditar Anúncio
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading !== null}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
+            >
+              {loading ? <Loader2 size={13} className="animate-spin" /> : <ClipboardCheck size={13} />}
+              Auditar
+            </button>
+          </form>
+        </div>
 
         {monitoredProducts.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-400">Auditar do seu Monitor:</span>
-            {monitoredProducts.slice(0, 5).map((mp) => (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/[0.07] pt-2.5 text-xs">
+            <span className="text-[11px] font-semibold text-slate-500">Do seu Monitor:</span>
+            {monitoredProducts.slice(0, 6).map((mp) => (
               <button
                 key={mp.code}
                 type="button"
@@ -1297,7 +1202,7 @@ export function ListingAuditorModule({
                   setInput(mp.code);
                   onAuditQuery(mp.code);
                 }}
-                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1 text-[11px] text-slate-300 hover:border-teal-400/40 hover:text-teal-300"
+                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-0.5 text-[11px] text-slate-300 transition hover:border-teal-400/40 hover:text-teal-300"
               >
                 {mp.code}
               </button>
@@ -1309,81 +1214,89 @@ export function ListingAuditorModule({
       {/* Resultado Completo da Auditoria 0-100 */}
       {dossier && report ? (
         <div className="space-y-6">
-          {/* Resumo do Anúncio Auditado + Score Circular */}
-          <div className="glass-panel rounded-3xl p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
-              <div className="flex items-center gap-4">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2">
-                  <SafeThumb src={dossier.images[0]} alt={dossier.title} />
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-mono font-bold text-sky-300">
-                      {dossier.mlbuId ?? dossier.itemId ?? dossier.productId}
-                    </span>
-                    <span className="font-extrabold text-amber-300">{fmtBRL(dossier.price)}</span>
-                    <span className="text-slate-400">
-                      Vendedor: <strong className="text-white">{dossier.seller?.nickname ?? 'ML'}</strong>
-                    </span>
-                  </div>
-                  <h2 className="mt-1 text-lg font-extrabold text-white">{dossier.title}</h2>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={onOpenFullRaioX}
-                      className="rounded-xl bg-sky-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-sky-400"
-                    >
-                      Ver Raio-X Completo &amp; Avaliações
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onSimulateMargin(dossier)}
-                      className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-3.5 py-1.5 text-xs font-bold text-amber-300"
-                    >
-                      Simular Margem
-                    </button>
-                  </div>
-                </div>
+          {/* F-PATTERN: Score 0-100 + 3 KPIs de Diagnóstico no Topo */}
+          <div className="grid gap-4 lg:grid-cols-12">
+            <div className="glass-panel flex items-center justify-between gap-4 rounded-3xl p-5 lg:col-span-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Score de Qualidade
+                </p>
+                <p
+                  className={`mt-1 text-4xl font-black tabular-nums ${
+                    report.score >= 85
+                      ? 'text-emerald-400'
+                      : report.score >= 70
+                        ? 'text-sky-300'
+                        : report.score >= 50
+                          ? 'text-amber-300'
+                          : 'text-red-400'
+                  }`}
+                >
+                  {report.score}
+                  <span className="text-base font-semibold text-slate-500">/100</span>
+                </p>
+                <p className="mt-0.5 text-xs font-bold text-white">{report.levelLabel}</p>
               </div>
-
-              {/* Score Destacado */}
-              <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-slate-950/75 px-5 py-4">
-                <div className="text-center">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Score Geral</p>
-                  <p
-                    className={`text-4xl font-black ${
-                      report.score >= 85
-                        ? 'text-emerald-400'
-                        : report.score >= 70
-                          ? 'text-sky-300'
-                          : report.score >= 50
-                            ? 'text-amber-300'
-                            : 'text-red-400'
-                    }`}
-                  >
-                    {report.score}
-                    <span className="text-base font-semibold text-slate-400">/100</span>
-                  </p>
-                  <p className="text-xs font-bold text-white">{report.levelLabel}</p>
-                </div>
-                <div className="space-y-1 border-l border-white/10 pl-4 text-xs">
-                  <p className="flex items-center gap-1.5 text-emerald-300">
-                    <CheckCircle2 size={13} /> <strong>{report.passedCount}</strong> pilares ideais
-                  </p>
-                  <p className="flex items-center gap-1.5 text-amber-300">
-                    <AlertTriangle size={13} /> <strong>{report.warningCount}</strong> em atenção
-                  </p>
-                  <p className="flex items-center gap-1.5 text-rose-300">
-                    <AlertCircle size={13} /> <strong>{report.criticalCount}</strong> críticos
-                  </p>
-                </div>
+              <div className="space-y-1 border-l border-white/10 pl-4 text-xs tabular-nums">
+                <p className="flex items-center gap-1.5 text-emerald-300">
+                  <CheckCircle2 size={13} /> <strong>{report.passedCount}</strong> ideais
+                </p>
+                <p className="flex items-center gap-1.5 text-amber-300">
+                  <AlertTriangle size={13} /> <strong>{report.warningCount}</strong> atenção
+                </p>
+                <p className="flex items-center gap-1.5 text-rose-300">
+                  <AlertCircle size={13} /> <strong>{report.criticalCount}</strong> críticos
+                </p>
               </div>
             </div>
 
+            <div className="glass-panel flex flex-col justify-between rounded-3xl p-5 lg:col-span-8">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex min-w-0 flex-1 items-center gap-3.5">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1.5">
+                    <SafeThumb src={dossier.images[0]} alt={dossier.title} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-xs tabular-nums">
+                      <span className="font-mono font-bold text-sky-300">
+                        {dossier.mlbuId ?? dossier.itemId ?? dossier.productId}
+                      </span>
+                      <span className="font-extrabold text-amber-300">{fmtBRL(dossier.price)}</span>
+                      <span className="text-slate-400">
+                        Loja: <strong className="text-white">{dossier.seller?.nickname ?? 'ML'}</strong>
+                      </span>
+                    </div>
+                    <h2 className="mt-1 line-clamp-1 text-base font-extrabold text-white">{dossier.title}</h2>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onOpenFullRaioX}
+                    className="rounded-xl bg-amber-400 px-3.5 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300"
+                  >
+                    Raio-X Completo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSimulateMargin(dossier)}
+                    className="rounded-xl border border-white/10 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-amber-400/40 hover:text-amber-300"
+                  >
+                    Simular Margem
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-panel rounded-3xl p-5 sm:p-6">
             {/* Sinais de Conversão, Reputação e Régua SEO do Título */}
-            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-xs">
-                <p className="font-bold uppercase tracking-wide text-amber-300">Régua SEO do Título ({titleLen}/60)</p>
+                <p className="font-bold uppercase tracking-wide tabular-nums text-amber-300">
+                  Régua SEO do Título ({titleLen}/60)
+                </p>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-800">
                   <div
                     className={`h-full rounded-full ${
@@ -1431,7 +1344,7 @@ export function ListingAuditorModule({
                       <span className="inline-flex items-center gap-2 text-xs font-bold text-white">
                         {criterionIcon(c.id)} {c.label}
                       </span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${badgeCls}`}>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tabular-nums ${badgeCls}`}>
                         {c.score}/{c.maxScore} pts
                       </span>
                     </div>
@@ -1488,12 +1401,12 @@ export function ListingAuditorModule({
       ) : (
         !loading && (
           <div className="glass-panel rounded-3xl p-10 text-center">
-            <ShieldCheck size={36} className="mx-auto text-teal-400" />
+            <ShieldCheck size={32} className="mx-auto text-teal-400" />
             <h3 className="mt-3 text-base font-bold text-white">
               Pronto para auditar qualquer anúncio do Mercado Livre
             </h3>
-            <p className="mx-auto mt-1 max-w-xl text-xs text-slate-400">
-              Descubra por que um concorrente ranqueia na primeira página ou quais ajustes exatos faltam para o seu anúncio atingir 100/100 pontos.
+            <p className="mx-auto mt-1 max-w-lg text-xs text-slate-400">
+              Use a barra superior ou o campo acima para diagnosticar título SEO, fotos HD, vídeo, ficha técnica e conversão.
             </p>
           </div>
         )
@@ -1556,42 +1469,35 @@ export function ClipsAndImagesModule({
 
   return (
     <section className="space-y-6">
-      <div className="glass-panel rounded-3xl p-6">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-pink-400/35 bg-pink-500/10 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-pink-300">
-          <Film size={12} /> Central de Criativos, Vídeos &amp; Fotos 1200px
-        </span>
-        <h1 className="mt-2 text-xl font-extrabold text-white sm:text-2xl">
-          Buscador e Extrator de Clipes &amp; Imagens HD
-        </h1>
-        <p className="mt-0.5 text-xs text-slate-400">
-          Extraia galerias oficiais em resolução máxima (-O.webp), fotos reais enviadas por compradores e vídeos/clipes por anúncio ou palavra-chave.
-        </p>
+      <div className="glass-panel rounded-3xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Film size={18} className="text-pink-400" />
+            <h1 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
+              Extrator de Clipes &amp; Imagens HD (1200px)
+            </h1>
+          </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <ImageIcon
-              size={18}
-              className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-pink-400"
-            />
+          <form onSubmit={handleSubmit} className="flex flex-1 items-center justify-end gap-2 sm:max-w-md">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Cole o link/código MLB / MLBU de um anúncio OU digite um nicho (ex: drone camera 4k)..."
-              className="w-full rounded-2xl border border-white/10 bg-[#050914]/90 py-3 pl-11 pr-4 text-sm text-white placeholder-slate-400 outline-none focus:border-pink-400"
+              placeholder="Link/código MLB / MLBU ou nicho..."
+              className="w-full rounded-xl border border-white/10 bg-slate-950/90 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-pink-400"
             />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 px-6 py-3 text-sm font-bold text-white shadow-lg disabled:opacity-60"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Film size={16} />}
-            Extrair Mídias HD
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
+            >
+              {loading ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}
+              Extrair Mídias
+            </button>
+          </form>
+        </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400">Testar extração por nicho:</span>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/[0.07] pt-2.5 text-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Extração Rápida:</span>
           {['smartwatch amoled', 'aspirador robo laser', 'ring light profissional', 'caixa de som bluetooth'].map(
             (kw) => (
               <button
@@ -1601,7 +1507,7 @@ export function ClipsAndImagesModule({
                   setInput(kw);
                   onExtractMedia(kw);
                 }}
-                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1 text-[11px] text-slate-300 hover:border-pink-400/40 hover:text-pink-300"
+                className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-0.5 text-[11px] text-slate-300 transition hover:border-pink-400/40 hover:text-pink-300"
               >
                 {kw}
               </button>
